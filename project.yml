@@ -1,0 +1,65 @@
+name: Kami
+options:
+  bundleIdPrefix: app.kami
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+packages:
+  MihonCompatKit:
+    path: Packages/MihonCompatKit
+  KamiCore:
+    path: Packages/KamiCore
+
+targets:
+  Kami:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/Sources
+    dependencies:
+      - package: MihonCompatKit
+      - package: KamiCore
+    info:
+      path: App/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Kami
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIRequiresFullScreen: false
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.kami.reader
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: false
+
+  KamiTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: []
+    dependencies:
+      - target: Kami
+    settings:
+      base:
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Kami.app/Kami"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  Kami:
+    build:
+      targets:
+        Kami: all
+        KamiTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - KamiTests
