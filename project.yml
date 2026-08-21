@@ -2,7 +2,7 @@ name: Kami
 options:
   bundleIdPrefix: app.kami
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
   createIntermediateGroups: true
 
 packages:
@@ -40,26 +40,13 @@ targets:
         SWIFT_VERSION: "5.9"
         GENERATE_INFOPLIST_FILE: false
 
-  KamiTests:
-    type: bundle.unit-test
-    platform: iOS
-    sources: []
-    dependencies:
-      - target: Kami
-    settings:
-      base:
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Kami.app/Kami"
-        BUNDLE_LOADER: "$(TEST_HOST)"
 
 schemes:
   Kami:
     build:
       targets:
         Kami: all
-        KamiTests: [test]
     run:
       config: Debug
     test:
       config: Debug
-      targets:
-        - KamiTests

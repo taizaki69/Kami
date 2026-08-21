@@ -1,0 +1,38 @@
+name: Swift CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Portable Swift build & tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Print toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: MihonCompatKit tests
+        run: swift test --package-path Packages/MihonCompatKit
+
+      - name: Build compat-audit (release)
+        run: swift build --package-path Packages/MihonCompatKit -c release --product compat-audit
+
+      - name: KamiCore tests
+        run: swift test --package-path Packages/KamiCore
+
+      - name: Upload compat-audit binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: compat-audit-macos
+          path: Packages/MihonCompatKit/.build/release/compat-audit
+          if-no-files-found: error

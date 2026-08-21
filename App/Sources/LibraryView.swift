@@ -77,7 +77,7 @@ struct CoverImage: View {
     var cornerRadius: CGFloat = 0
 
     var body: some View {
-        AsyncImage(url: url.map(URL.init(string:))) { phase in
+        AsyncImage(url: url.flatMap(URL.init(string:))) { phase in
             switch phase {
             case let .success(image):
                 image.resizable().scaledToFill()

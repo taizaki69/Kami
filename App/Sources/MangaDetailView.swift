@@ -120,12 +120,13 @@ struct MangaDetailView: View {
             return
         }
         do {
-            let stored = try await model.store.upsert(
-                manga,
-                inLibrary: false
-            )
-            storedId = stored
-            inLibrary = (try await model.store.manga(id: stored))?.inLibrary ?? false
+            try await model.store.upsert(manga, inLibrary: false)
+            // INSERT OR IGNORE returns no rowid on conflict; resolve the real
+            // stored id (and true library state) by identity.
+            if let existing = try await model.store.manga(sourceId: manga.sourceId, url: manga.url) {
+                storedId = existing.id
+                inLibrary = existing.inLibrary
+            }
 
             var compat = prefetched ?? SMangaCompat(url: manga.url, title: manga.title)
             if !compat.initialized {
@@ -135,10 +136,10 @@ struct MangaDetailView: View {
 
             let chapterList = try await source.getChapterList(manga: compat)
             let domain = chapterList.enumerated().map { order, c in
-                Chapter(mangaId: stored, sourceOrder: order, from: c)
+                Chapter(mangaId: mangaRowId, sourceOrder: order, from: c)
             }
-            try await model.store.replaceChapters(mangaId: stored, with: domain)
-            chapters = try await model.store.chapters(mangaId: stored)
+            try await model.store.replaceChapters(mangaId: mangaRowId, with: domain)
+            chapters = try await model.store.chapters(mangaId: mangaRowId)
         } catch {
             errorText = "Could not load this manga: \(error.localizedDescription)"
         }

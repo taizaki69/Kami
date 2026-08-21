@@ -1,0 +1,60 @@
+name: iOS Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    name: iOS Simulator build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Print toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Resolve packages
+        run: xcodebuild -project Kami.xcodeproj -scheme Kami -resolvePackageDependencies
+
+      - name: Build for iOS Simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project Kami.xcodeproj -scheme Kami \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            build 2>&1 | xcbeautify --prefix "##[error]"
+
+  device:
+    name: Generic iOS device build (unsigned)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build for generic iOS device
+        run: |
+          set -o pipefail
+          xcodebuild -project Kami.xcodeproj -scheme Kami \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | xcbeautify --prefix "##[error]"
