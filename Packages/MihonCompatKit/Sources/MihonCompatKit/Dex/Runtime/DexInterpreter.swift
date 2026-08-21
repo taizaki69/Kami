@@ -1,0 +1,848 @@
+import Foundation
+
+/// Non-error control flow: `return` unwinds exactly one frame.
+struct FrameReturn: Error {
+    let value: RVal
+}
+
+/// Register-based Dalvik interpreter (M1).
+///
+/// Executes `code_item` instruction streams from a parsed `DexFile`,
+/// resolving calls to either interpreted DEX methods or the `HostBridge`.
+/// Hard instruction budget + cancellation keep untrusted code from freezing
+/// the host; unresolved surface reports precisely (mission §21/§34).
+public final class DexInterpreter {
+    public let dex: DexFile
+    public let bridge: HostBridge
+    public var maxInstructions: Int
+    public var cancelled: () -> Bool
+    /// Trace sink for the runtime trace mode (§33); nil = off.
+    public var trace: ((String) -> Void)?
+
+    /// methodIndex → (defining class def, encoded method).
+    private var dexMethodTable: [Int: (DexFile.ClassDef, DexFile.EncodedMethod)] = [:]
+    /// Static field storage for DEX-defined classes: "class->name".
+    private var dexStatics: [String: RVal] = [:]
+    private var lastResult: RVal = .null
+    /// Current interpreted-frame depth (recursion guard).
+    private var depth = 0
+    /// Conservative default: interpreted frames are large in debug builds and
+    /// unbounded recursion (obfuscated/mis-resolved super calls) must not
+    /// overflow the host stack. The production runtime raises this by
+    /// executing on a dedicated big-stack thread (see docs/EXTENSION_RUNTIME).
+    public var maxCallDepth = 48
+
+    public init(dex: DexFile,
+                bridge: HostBridge = HostBridge.minimal(),
+                maxInstructions: Int = 2_000_000,
+                cancelled: @escaping () -> Bool = { false }) {
+        self.dex = dex
+        self.bridge = bridge
+        self.maxInstructions = maxInstructions
+        self.cancelled = cancelled
+        for def in dex.classDefs {
+            for m in def.directMethods + def.virtualMethods {
+                dexMethodTable[m.methodIndex] = (def, m)
+            }
+        }
+    }
+
+    // MARK: - Public entry points
+
+    @discardableResult
+    public func call(classDescriptor: String, method: String, args: [RVal] = []) throws -> RVal {
+        guard let defIndex = dex.classIndexByDescriptor[classDescriptor] else {
+            throw VMError.unresolvedClass(classDescriptor)
+        }
+        let def = dex.classDefs[defIndex]
+        let all = def.directMethods + def.virtualMethods
+        guard let m = all.first(where: { dex.methodIds[$0.methodIndex].name == method }) else {
+            throw VMError.unresolvedMethod(class: classDescriptor, signature: method)
+        }
+        return try execute(def: def, method: m, args: args)
+    }
+
+    /// Allocates a DEX class instance and runs `<init>` (constructor).
+    @discardableResult
+    public func instantiate(classDescriptor: String) throws -> RVal {
+        guard let defIndex = dex.classIndexByDescriptor[classDescriptor] else {
+            throw VMError.unresolvedClass(classDescriptor)
+        }
+        let def = dex.classDefs[defIndex]
+        let obj = ObjInstance(dexType: classDescriptor)
+        for f in def.instanceFields {
+            guard let field = try? fieldAt(f.fieldIndex) else { continue }
+            obj.fields[field.name] = defaultValue(for: field.type)
+        }
+        if let ctor = def.directMethods.first(where: { dex.methodIds[$0.methodIndex].name == "<init>" }) {
+            _ = try execute(def: def, method: ctor, args: [.obj(obj)])
+        }
+        return .obj(obj)
+    }
+
+    func defaultValue(for descriptor: String) -> RVal {
+        switch descriptor {
+        case "J": return .long(0)
+        case "F": return .float(0)
+        case "D": return .double(0)
+        case "Z", "B", "C", "S", "I": return .int(0)
+        default: return .null // L...; and [...
+        }
+    }
+
+    // MARK: - Execution
+
+    struct TryBlock {
+        let startAddr: Int
+        let endAddr: Int
+        let handlers: [(type: String?, addr: Int)]
+    }
+
+    @discardableResult
+    func execute(def: DexFile.ClassDef, method: DexFile.EncodedMethod, args: [RVal]) throws -> RVal {
+        guard let code = dex.codeItem(for: method) else {
+            let ref = dex.methodIds[method.methodIndex]
+            if let host = bridge.resolve(class: ref.declaringClass, ref.name) {
+                return try host(self, args)
+            }
+            throw VMError.unresolvedMethod(class: ref.declaringClass, signature: ref.name)
+        }
+        guard depth < maxCallDepth else {
+            throw VMError.verify("call depth exceeded \(maxCallDepth) (runaway recursion)")
+        }
+        depth += 1
+        defer { depth -= 1 }
+
+        var regs = [RVal](repeating: .int(0), count: Int(code.registersSize))
+        var cursor = 0
+        for value in args {
+            guard cursor + (value.isWide ? 2 : 1) <= regs.count else {
+                throw VMError.verify("register file too small for arguments of \(dex.methodIds[method.methodIndex].name)")
+            }
+            regs[cursor] = value
+            if value.isWide { regs[cursor + 1] = value }
+            cursor += value.isWide ? 2 : 1
+        }
+
+        let tries = Self.parseTries(code, dex: dex)
+        var pc = 0
+        var budget = maxInstructions
+
+        while pc < code.insnsCount {
+            budget -= 1
+            if budget <= 0 { throw VMError.budgetExceeded(limit: maxInstructions) }
+            if budget & 0x3FF == 0, cancelled() { throw VMError.cancelled }
+
+            do {
+                pc = try step(pc, &regs, def, method, code)
+            } catch let ret as FrameReturn {
+                return ret.value
+            } catch let thrown as DEXThrowable {
+                guard let handler = Self.handler(for: thrown.value, at: pc, in: tries) else { throw thrown }
+                regs = [RVal](repeating: .int(0), count: Int(code.registersSize))
+                regs[0] = thrown.value
+                pc = handler
+            }
+        }
+        return .null
+    }
+
+    static func handler(for value: RVal, at pc: Int, in tries: [TryBlock]) -> Int? {
+        for t in tries where pc >= t.startAddr && pc < t.endAddr {
+            for h in t.handlers {
+                if h.type == nil || thrownValue(value, isCaughtBy: h.type!) {
+                    return h.addr
+                }
+            }
+        }
+        return nil
+    }
+
+    static func thrownValue(_ value: RVal, isCaughtBy descriptor: String) -> Bool {
+        switch descriptor {
+        case "Ljava/lang/Throwable;", "Ljava/lang/Exception;", "Ljava/lang/RuntimeException;",
+             "Ljava/lang/Error;", "Ljava/lang/Object;":
+            return true // approximation until the class hierarchy exists
+        default:
+            if case let .obj(o) = value { return o.dexType == descriptor }
+            return false
+        }
+    }
+
+    // MARK: - Safe table access
+
+    private func stringAt(_ idx: Int) throws -> String {
+        guard idx >= 0, idx < dex.strings.count else { throw VMError.verify("string index \(idx)") }
+        return dex.strings[idx]
+    }
+    private func typeAt(_ idx: Int) throws -> String {
+        guard idx >= 0, idx < dex.typeDescriptors.count else { throw VMError.verify("type index \(idx)") }
+        return dex.typeDescriptors[idx]
+    }
+    private func fieldAt(_ idx: Int) throws -> DexFile.FieldRef {
+        guard idx >= 0, idx < dex.fieldIds.count else { throw VMError.verify("field index \(idx)") }
+        return dex.fieldIds[idx]
+    }
+
+    // MARK: - One instruction
+
+    /// Reads up to `count` instruction code units at `pc` (speculative reads
+    /// past the instruction are safe: bounded by the code item).
+    private func readUnits(_ pc: Int, _ code: DexFile.CodeItem, count: Int) -> [UInt16] {
+        var out: [UInt16] = []
+        out.reserveCapacity(count)
+        for i in 0..<count where pc + i < code.insnsCount {
+            let off = code.insnsOffset + (pc + i) * 2
+            out.append(UInt16(dex.source[off]) | UInt16(dex.source[off + 1]) << 8)
+        }
+        while out.count < count { out.append(0) }
+        return out
+    }
+
+    private func step(_ pc0: Int, _ regs: inout [RVal], _ def: DexFile.ClassDef,
+                      _ method: DexFile.EncodedMethod, _ code: DexFile.CodeItem) throws -> Int {
+        let pc = pc0
+        let u = readUnits(pc, code, count: 5)
+        let op = UInt8(u[0] & 0xFF)
+        trace?("pc=\(pc) op=0x\(String(op, radix: 16)) u=\(u.prefix(3).map { String($0, radix: 16) }) regs=\(regs.map { short($0) })")
+
+        // Bounds-safe register access: malformed streams or unsupported
+        // instruction sequences must degrade to nulls, never crash the host.
+        func reg(_ i: Int) -> RVal {
+            i >= 0 && i < regs.count ? regs[i] : .null
+        }
+        func setReg(_ i: Int, _ v: RVal) {
+            guard i >= 0, i < regs.count else { return }
+            regs[i] = v
+            if v.isWide, i + 1 < regs.count { regs[i + 1] = v }
+        }
+        func i32(_ i: Int) -> Int32 { if case let .int(v) = regs[i] { return v }; return 0 }
+        func i64(_ i: Int) -> Int64 { if case let .long(v) = regs[i] { return v }; return 0 }
+        func f32(_ i: Int) -> Float { if case let .float(v) = regs[i] { return v }; return 0 }
+        func f64(_ i: Int) -> Double { if case let .double(v) = regs[i] { return v }; return 0 }
+        func obj(_ i: Int) throws -> ObjInstance {
+            guard case let .obj(o) = regs[i] else { throw DEXThrowable(HostBridge.string("NullPointerException")) }
+            return o
+        }
+        func arr(_ i: Int) throws -> ArrInstance {
+            guard case let .arr(a) = regs[i] else { throw DEXThrowable(HostBridge.string("NullPointerException")) }
+            return a
+        }
+
+        switch op {
+        // ---- nop / moves (0x00–0x0d) ----
+        case 0x00: return pc + 1
+        case 0x01, 0x04, 0x07: // move[-wide|-object] vA, vB (12x)
+            setReg(Int(u[0] >> 8 & 0xFF), reg(Int(u[1] & 0xFF))); return pc + 2
+        case 0x02, 0x05, 0x08: // .../from16 vAA, vBBBB (22x)
+            setReg(Int(u[0] >> 8), reg(Int(u[1]))); return pc + 2
+        case 0x03, 0x06, 0x09: // .../16 (32x)
+            setReg(Int(u[1]), reg(Int(u[2]))); return pc + 3
+        case 0x0a, 0x0b, 0x0c: // move-result[-wide|-object] vAA (11x)
+            setReg(Int(u[0] >> 8), lastResult); return pc + 1
+        case 0x0d: // move-exception vAA (handler placed the value in v0)
+            setReg(Int(u[0] >> 8), regs[0]); return pc + 1
+
+        // ---- returns (0x0e–0x11) ----
+        case 0x0e: throw FrameReturn(value: .null)
+        case 0x0f, 0x10, 0x11: throw FrameReturn(value: reg(Int(u[0] >> 8)))
+
+        // ---- constants (0x12–0x1c) ----
+        case 0x12: return try { // const/4 vA, #+B — B is SIGNED 4-bit in high nibble
+            let b = Int8(bitPattern: UInt8(truncatingIfNeeded: u[0] >> 12))
+            setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(b)))
+            return pc + 1
+        }()
+        case 0x13: // const/16 vAA, #+BBBB
+            setReg(Int(u[0] >> 8), .int(Int32(Int16(bitPattern: u[1])))); return pc + 2
+        case 0x14: return try { // const vAA, #+BBBBBBBB
+            let v = UInt32(u[1]) | UInt32(u[2]) << 16
+            setReg(Int(u[0] >> 8), .int(Int32(bitPattern: v))); return pc + 3
+        }()
+        case 0x15: // const/high16
+            setReg(Int(u[0] >> 8), .int(Int32(bitPattern: UInt32(u[1]) << 16))); return pc + 2
+        case 0x16: // const-wide/16
+            setReg(Int(u[0] >> 8), .long(Int64(Int32(bitPattern: UInt32(u[1]))))); return pc + 2
+        case 0x17: // const-wide/32
+            setReg(Int(u[0] >> 8), .long(Int64(Int32(bitPattern: UInt32(u[1]))))); return pc + 2
+        case 0x18: return try { // const-wide vAA, #+BBBBBBBBBBBBBBBB
+            let lo = UInt32(u[1]) | UInt32(u[2]) << 16
+            let hi = UInt32(u[3]) | UInt32(u[4]) << 16
+            setReg(Int(u[0] >> 8), .long(Int64(bitPattern: UInt64(hi) << 32 | UInt64(lo))))
+            return pc + 5
+        }()
+        case 0x19: // const-wide/high16
+            setReg(Int(u[0] >> 8), .long(Int64(bitPattern: UInt64(u[1]) << 48))); return pc + 2
+        case 0x1a: // const-string vAA, string@BBBB
+            setReg(Int(u[0] >> 8), Self.javaString(try stringAt(Int(u[1])))); return pc + 2
+        case 0x1b: return try { // const-string/jumbo
+            let idx = Int(UInt32(u[1]) | UInt32(u[2]) << 16)
+            setReg(Int(u[0] >> 8), Self.javaString(try stringAt(idx))); return pc + 3
+        }()
+        case 0x1c: // const-class
+            let desc = try typeAt(Int(u[1]))
+            setReg(Int(u[0] >> 8), .obj(ObjInstance(dexType: "Ljava/lang/Class;", payload: desc, isHost: true)))
+            return pc + 2
+
+        case 0x1d, 0x1e: return pc + 1 // monitor-enter/exit (single-threaded M1)
+
+        case 0x1f: return pc + 2 // check-cast (no verifier in M1)
+        case 0x20: return try { // instance-of vA, vB, type@CCCC
+            let target = try typeAt(Int(u[1]))
+            let result = Self.typeCheck(reg(Int(u[0] >> 12)), ofType: target)
+            setReg(Int(u[0] >> 8 & 0x0F), .int(result ? 1 : 0)); return pc + 2
+        }()
+        case 0x21: return try { // array-length vA, vB
+            let a = try arr(Int(u[0] >> 12))
+            setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(a.elements.count))); return pc + 2
+        }()
+        case 0x22: return try { // new-instance vAA, type@BBBB
+            let desc = try typeAt(Int(u[1]))
+            setReg(Int(u[0] >> 8), try allocate(desc)); return pc + 2
+        }()
+        case 0x23: return try { // new-array vA, vB, type@CCCC
+            let count = i32(Int(u[0] >> 12))
+            let elem = String(try typeAt(Int(u[1])).dropFirst())
+            guard count >= 0 else { throw DEXThrowable(HostBridge.string("NegativeArraySizeException")) }
+            let fill = defaultValue(for: elem)
+            setReg(Int(u[0] >> 8 & 0x0F), .arr(ArrInstance(elemDescriptor: elem, elements: [RVal](repeating: fill, count: Int(count)))))
+            return pc + 2
+        }()
+        case 0x24: return try { // filled-new-array {vC..vG}, type@CCCC
+            let count = Int(u[0] >> 12)
+            let g = Int(u[0] >> 8 & 0x0F)
+            var indices = [Int(u[1] & 0x0F), Int(u[1] >> 4 & 0x0F), Int(u[1] >> 8 & 0x0F), Int(u[1] >> 12)]
+            if count == 5 { indices.append(g) } else { indices = Array(indices.prefix(count)) }
+            let elem = String(try typeAt(Int(u[2])).dropFirst())
+            lastResult = .arr(ArrInstance(elemDescriptor: elem, elements: indices.map(reg)))
+            return pc + 3
+        }()
+        case 0x25: return try { // filled-new-array/range {vCCCC .. vNNNN}
+            let count = Int(u[0] >> 8)
+            let start = Int(u[1])
+            let elem = String(try typeAt(Int(u[2])).dropFirst())
+            lastResult = .arr(ArrInstance(elemDescriptor: elem, elements: (0..<count).map { reg(start + $0) }))
+            return pc + 3
+        }()
+        case 0x26: return try { // fill-array-data vAA, +BBBBBBBB
+            let off = Int(Int32(bitPattern: UInt32(u[1]) | UInt32(u[2]) << 16))
+            var a = try arr(Int(u[0] >> 8))
+            try fillArrayData(into: &a, payloadAddr: pc + off, code: code)
+            setReg(Int(u[0] >> 8), .arr(a)); return pc + 3
+        }()
+        case 0x27: // throw vAA
+            throw DEXThrowable(reg(Int(u[0] >> 8)))
+
+        // ---- goto / switch (0x28–0x2c) ----
+        case 0x28: return pc + Int(Int8(bitPattern: UInt8(u[0] >> 8)))
+        case 0x29: return pc + Int(Int16(bitPattern: u[1]))
+        case 0x2a: return pc + Int(Int32(bitPattern: UInt32(u[1]) | UInt32(u[2]) << 16))
+        case 0x2b: return try { // packed-switch vAA, +payload
+            let off = Int(Int32(bitPattern: UInt32(u[1]) | UInt32(u[2]) << 16))
+            let target = try packedSwitchTarget(test: i32(Int(u[0] >> 8)), payloadAddr: pc + off, code: code)
+            return target.map { pc + $0 } ?? pc + 3
+        }()
+        case 0x2c: return try { // sparse-switch
+            let off = Int(Int32(bitPattern: UInt32(u[1]) | UInt32(u[2]) << 16))
+            let target = try sparseSwitchTarget(test: i32(Int(u[0] >> 8)), payloadAddr: pc + off, code: code)
+            return target.map { pc + $0 } ?? pc + 3
+        }()
+
+        // ---- cmp (0x2d–0x31): vAA ← cmp(vBB, vCC) ----
+        case 0x2d: setReg(Int(u[0] >> 8), .int(javaCmpF(Double(f32(Int(u[1] & 0xFF))), Double(f32(Int(u[1] >> 8))), nanIsLess: true))); return pc + 2
+        case 0x2e: setReg(Int(u[0] >> 8), .int(javaCmpF(Double(f32(Int(u[1] & 0xFF))), Double(f32(Int(u[1] >> 8))), nanIsLess: false))); return pc + 2
+        case 0x2f: setReg(Int(u[0] >> 8), .int(javaCmpF(f64(Int(u[1] & 0xFF)), f64(Int(u[1] >> 8)), nanIsLess: true))); return pc + 2
+        case 0x30: setReg(Int(u[0] >> 8), .int(javaCmpF(f64(Int(u[1] & 0xFF)), f64(Int(u[1] >> 8)), nanIsLess: false))); return pc + 2
+        case 0x31: setReg(Int(u[0] >> 8), .int(javaCmp(i64(Int(u[1] & 0xFF)), i64(Int(u[1] >> 8))))); return pc + 2
+
+        // ---- if-test (0x32–0x37): vA, vB, +CCCC ----
+        case 0x32...0x37: // if-test vA, vB, +CCCC (22t: offset in unit 2)
+            let a = Int(u[0] >> 8 & 0x0F), b = Int(u[0] >> 12)
+            let off = Int(Int16(bitPattern: u[1]))
+            let taken: Bool
+            switch op {
+            case 0x32: taken = javaEquals(reg(a), reg(b))          // if-eq
+            case 0x33: taken = !javaEquals(reg(a), reg(b))         // if-ne
+            case 0x34: taken = i32(a) < i32(b)                    // if-lt
+            case 0x35: taken = i32(a) >= i32(b)                   // if-ge
+            case 0x36: taken = i32(a) > i32(b)                    // if-gt
+            default:   taken = i32(a) <= i32(b)                   // if-le
+            }
+            return taken ? pc + off : pc + 2
+
+        // ---- if-*z (0x38–0x3d) ----
+        case 0x38...0x3d:
+            let a = Int(u[0] >> 8)
+            let off = Int(Int16(bitPattern: u[1]))
+            let v = reg(a)
+            let taken: Bool
+            switch op {
+            case 0x38: taken = isZero(v)                          // if-eqz
+            case 0x39: taken = !isZero(v)                         // if-nez
+            case 0x3a: taken = intLessThanZero(v)                 // if-ltz
+            case 0x3b: taken = !intLessThanZero(v)                // if-gez
+            case 0x3c: taken = intGreaterThanZero(v)              // if-gtz
+            default:   taken = !intGreaterThanZero(v)             // if-lez
+            }
+            return taken ? pc + off : pc + 2
+
+        // ---- aget (0x44–0x4a) ----
+        case 0x44...0x4a:
+            let a = try arr(Int(u[1] & 0xFF))
+            let idx = i32(Int(u[1] >> 8))
+            let value = try element(a, at: idx)
+            setReg(Int(u[0] >> 8), value); return pc + 2
+
+        // ---- aput (0x4b–0x51) ----
+        case 0x4b...0x51:
+            let value = reg(Int(u[0] >> 8))
+            var a = try arr(Int(u[1] & 0xFF))
+            let idx = i32(Int(u[1] >> 8))
+            guard idx >= 0, Int(idx) < a.elements.count else {
+                throw DEXThrowable(HostBridge.string("ArrayIndexOutOfBoundsException: \(idx)"))
+            }
+            a.elements[Int(idx)] = value; return pc + 2
+
+        // ---- iget/iput (0x52–0x5f) ----
+        case 0x52...0x5f: // 22c: field index in unit 2 (u[1])
+            let a = Int(u[0] >> 8 & 0x0F), b = Int(u[0] >> 12)
+            let field = try fieldAt(Int(u[1]))
+            let target = try obj(b)
+            if op <= 0x58 {
+                setReg(a, target.fields[field.name] ?? defaultValue(for: field.type))
+            } else {
+                target.fields[field.name] = reg(a)
+            }
+            return pc + 2
+
+        // ---- sget/sput (0x60–0x6d) ----
+        case 0x60...0x6d:
+            let a = Int(u[0] >> 8)
+            let field = try fieldAt(Int(u[1]))
+            let key = "\(field.declaringClass)->\(field.name)"
+            if op <= 0x66 {
+                setReg(a, dexStatics[key] ?? bridge.staticFields[key] ?? defaultValue(for: field.type))
+            } else if dex.classIndexByDescriptor[field.declaringClass] != nil {
+                dexStatics[key] = reg(a)
+            } else {
+                bridge.staticFields[key] = reg(a)
+            }
+            return pc + 2
+
+        // ---- invoke (0x6e–0x72) ----
+        case 0x6e...0x72: return try {
+            let count = Int(u[0] >> 12)
+            let g = Int(u[0] >> 8 & 0x0F)
+            var indices = [Int(u[1] & 0x0F), Int(u[1] >> 4 & 0x0F), Int(u[1] >> 8 & 0x0F), Int(u[1] >> 12)]
+            if count == 5 { indices.append(g) } else { indices = Array(indices.prefix(count)) }
+            try invokeRegs(methodIndex: Int(u[2]), regs: regs, indices: indices)
+            return pc + 3
+        }()
+
+        // ---- invoke/range (0x74–0x78) ----
+        case 0x74...0x78: return try {
+            // 3rc unit order: AA|op, method index, first register.
+            let count = Int(u[0] >> 8)
+            let start = Int(u[2])
+            let indices = Array(start..<(start + count))
+            try invokeRegs(methodIndex: Int(u[1]), regs: regs, indices: indices)
+            return pc + 3
+        }()
+
+        // ---- unary (0x7b–0x8f), format 12x: vA ← op vB ----
+        case 0x7b: setReg(Int(u[0] >> 8 & 0x0F), .int(-i32(Int(u[1] & 0xFF)))); return pc + 2
+        case 0x7c: setReg(Int(u[0] >> 8 & 0x0F), .int(~i32(Int(u[1] & 0xFF)))); return pc + 2
+        case 0x7d: setReg(Int(u[0] >> 8 & 0x0F), .long(-i64(Int(u[1] & 0xFF)))); return pc + 2
+        case 0x7e: setReg(Int(u[0] >> 8 & 0x0F), .long(~i64(Int(u[1] & 0xFF)))); return pc + 2
+        case 0x7f: setReg(Int(u[0] >> 8 & 0x0F), .float(-f32(Int(u[1] & 0xFF)))); return pc + 2
+        case 0x80: setReg(Int(u[0] >> 8 & 0x0F), .double(-f64(Int(u[1] & 0xFF)))); return pc + 2
+        case 0x81: setReg(Int(u[0] >> 8 & 0x0F), .long(Int64(i32(Int(u[1] & 0xFF))))); return pc + 2
+        case 0x82: setReg(Int(u[0] >> 8 & 0x0F), .float(Float(i32(Int(u[1] & 0xFF))))); return pc + 2
+        case 0x83: setReg(Int(u[0] >> 8 & 0x0F), .double(Double(i32(Int(u[1] & 0xFF))))); return pc + 2
+        case 0x84: setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(truncatingIfNeeded: i64(Int(u[1] & 0xFF))))); return pc + 2
+        case 0x85: setReg(Int(u[0] >> 8 & 0x0F), .float(Float(i64(Int(u[1] & 0xFF))))); return pc + 2
+        case 0x86: setReg(Int(u[0] >> 8 & 0x0F), .double(Double(i64(Int(u[1] & 0xFF))))); return pc + 2
+        case 0x87: setReg(Int(u[0] >> 8 & 0x0F), .int(javaNarrowToInt(Double(f32(Int(u[1] & 0xFF)))))); return pc + 2
+        case 0x88: setReg(Int(u[0] >> 8 & 0x0F), .long(javaNarrowToLong(Double(f32(Int(u[1] & 0xFF)))))); return pc + 2
+        case 0x89: setReg(Int(u[0] >> 8 & 0x0F), .double(Double(f32(Int(u[1] & 0xFF))))); return pc + 2
+        case 0x8a: setReg(Int(u[0] >> 8 & 0x0F), .int(javaNarrowToInt(f64(Int(u[1] & 0xFF))))); return pc + 2
+        case 0x8b: setReg(Int(u[0] >> 8 & 0x0F), .long(javaNarrowToLong(f64(Int(u[1] & 0xFF))))); return pc + 2
+        case 0x8c: setReg(Int(u[0] >> 8 & 0x0F), .float(Float(f64(Int(u[1] & 0xFF))))); return pc + 2
+        case 0x8d: setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(Int8(truncatingIfNeeded: i32(Int(u[1] & 0xFF)))))); return pc + 2
+        case 0x8e: setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(UInt16(truncatingIfNeeded: i32(Int(u[1] & 0xFF)))))); return pc + 2
+        case 0x8f: setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(Int16(truncatingIfNeeded: i32(Int(u[1] & 0xFF)))))); return pc + 2
+
+        // ---- binop 23x (0x90–0xaf): vAA ← vBB op vCC ----
+        case 0x90...0xaf: // 23x: two units (AA|op, BB|CC)
+            setReg(Int(u[0] >> 8), try binop(op, reg(Int(u[1] & 0xFF)), reg(Int(u[1] >> 8))))
+            return pc + 2
+
+        // ---- binop/2addr 12x (0xb0–0xcf): vA ← vA op vB ----
+        case 0xb0...0xcf:
+            let dst = Int(u[0] >> 8 & 0x0F)
+            setReg(dst, try binop(UInt8(op - 0x20), reg(dst), reg(Int(u[1] & 0xFF))))
+            return pc + 2
+
+        // ---- binop/lit16 22s (0xd0–0xd7): vA ← vB op #+CCCC ----
+        case 0xd0...0xd7:
+            let dst = Int(u[0] >> 8 & 0x0F), src = Int(u[0] >> 12)
+            setReg(dst, try binopLiteral(op, reg(src), Int32(Int16(bitPattern: u[2])), lit8: false))
+            return pc + 2
+
+        // ---- binop/lit8 22b (0xd8–0xe2): vAA ← vBB op #+CC ----
+        case 0xd8...0xe2:
+            let dst = Int(u[0] >> 8), src = Int(u[1] & 0xFF)
+            setReg(dst, try binopLiteral(op, reg(src), Int32(Int8(bitPattern: UInt8(u[1] >> 8))), lit8: true))
+            return pc + 2
+
+        default:
+            throw VMError.verify("unsupported opcode 0x\(String(op, radix: 16)) at pc \(pc) in \(dex.methodIds[method.methodIndex].name)")
+        }
+    }
+
+    private func short(_ v: RVal) -> String {
+        switch v {
+        case .null: return "null"
+        case let .int(i): return "i:\(i)"
+        case let .long(l): return "l:\(l)"
+        case let .float(f): return "f:\(f)"
+        case let .double(d): return "d:\(d)"
+        case .obj: return "obj"
+        case .arr(let a): return "arr[\(a.elements.count)]"
+        case .host: return "host"
+        }
+    }
+
+    // MARK: - if-*z predicates
+
+    private func isZero(_ v: RVal) -> Bool {
+        switch v {
+        case .null: return true
+        case let .int(i): return i == 0
+        case let .obj(o): if let s = o.payload as? String { return s.isEmpty }; return false
+        default: return false
+        }
+    }
+    private func intLessThanZero(_ v: RVal) -> Bool {
+        if case let .int(i) = v { return i < 0 }
+        return false
+    }
+    private func intGreaterThanZero(_ v: RVal) -> Bool {
+        if case let .int(i) = v { return i > 0 }
+        return !isZero(v) // objects: non-null ⇒ > 0
+    }
+
+    private func javaEquals(_ a: RVal, _ b: RVal) -> Bool {
+        switch (a, b) {
+        case let (.int(x), .int(y)): return x == y
+        case let (.long(x), .long(y)): return x == y
+        case let (.obj(x), .obj(y)):
+            if let xs = x.payload as? String, let ys = y.payload as? String { return xs == ys }
+            return x === y
+        case (.null, .null): return true
+        default: return false
+        }
+    }
+
+    // MARK: - allocation & element access
+
+    private func allocate(_ descriptor: String) throws -> RVal {
+        if let defIndex = dex.classIndexByDescriptor[descriptor] {
+            let d = dex.classDefs[defIndex]
+            let obj = ObjInstance(dexType: descriptor)
+            for f in d.instanceFields {
+                let field = dex.fieldIds[f.fieldIndex]
+                obj.fields[field.name] = defaultValue(for: field.type)
+            }
+            return .obj(obj)
+        }
+        if let factory = bridge.objectFactories[descriptor] {
+            return try factory(self)
+        }
+        // Unknown host class: object with no surface; first method call on it
+        // produces a precise UNRESOLVED HOST METHOD report.
+        return .obj(ObjInstance(dexType: descriptor, isHost: true))
+    }
+
+    private func element(_ a: ArrInstance, at idx: Int32) throws -> RVal {
+        guard idx >= 0, Int(idx) < a.elements.count else {
+            throw DEXThrowable(HostBridge.string("ArrayIndexOutOfBoundsException: \(idx)"))
+        }
+        return a.elements[Int(idx)]
+    }
+
+    static func javaString(_ s: String) -> RVal {
+        .obj(ObjInstance(dexType: "Ljava/lang/String;", payload: s, isHost: true))
+    }
+
+    // MARK: - invocation
+
+    /// Invoke with explicit argument register indices (pair-aware).
+    private func invokeRegs(methodIndex: Int, regs: [RVal], indices: [Int]) throws {
+        guard methodIndex < dex.methodIds.count else { throw VMError.verify("method index \(methodIndex)") }
+        let ref = dex.methodIds[methodIndex]
+
+        var args: [RVal] = []
+        var k = 0
+        while k < indices.count {
+            let idx = indices[k]
+            let value = idx >= 0 && idx < regs.count ? regs[idx] : .null
+            args.append(value)
+            k += value.isWide ? 2 : 1
+        }
+
+        // Interpret only when the method's declaring class is actually
+        // defined in this DEX; misparsed class_data indices must never
+        // shadow host implementations (e.g. java.lang.Object.<init>).
+        if dex.classIndexByDescriptor[ref.declaringClass] != nil,
+           let (def, encoded) = dexMethodTable[methodIndex] {
+            lastResult = try execute(def: def, method: encoded, args: args)
+            return
+        }
+        if let host = bridge.resolve(class: ref.declaringClass, ref.name) {
+            lastResult = try host(self, args)
+            return
+        }
+        throw VMError.unresolvedMethod(class: ref.declaringClass, signature: "\(ref.name) shorty=\(ref.prototype.shorty)")
+    }
+
+    // MARK: - arithmetic
+
+    private func binop(_ op: UInt8, _ l: RVal, _ r: RVal) throws -> RVal {
+        func i32(_ v: RVal) -> Int32 { if case let .int(x) = v { return x }; return 0 }
+        func i64(_ v: RVal) -> Int64 { if case let .long(x) = v { return x }; return 0 }
+        func f32(_ v: RVal) -> Float { if case let .float(x) = v { return x }; return 0 }
+        func f64(_ v: RVal) -> Double { if case let .double(x) = v { return x }; return 0 }
+        func arith(_ a: Int32, _ b: Int32) throws -> Int32 {
+            switch op {
+            case 0x90: return a &+ b
+            case 0x94: return a &- b
+            case 0x98: return a &* b
+            case 0x9c: if b == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }; return a / b
+            case 0xa0: if b == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }; return a % b
+            case 0xa4: return a & b
+            case 0xa6: return a | b
+            case 0xa8: return a ^ b
+            case 0xaa: return a << (b & 31)
+            case 0xac: return a >> (b & 31)
+            case 0xae: return Int32(bitPattern: UInt32(bitPattern: a) >> (b & 31))
+            default: throw VMError.verify("bad int binop")
+            }
+        }
+        switch op {
+        case 0x90, 0x94, 0x98, 0x9c, 0xa0, 0xa4, 0xa6, 0xa8, 0xaa, 0xac, 0xae:
+            return .int(try arith(i32(l), i32(r)))
+        case 0x91, 0x95, 0x99, 0x9d, 0xa1, 0xa5, 0xa7, 0xa9, 0xab, 0xad, 0xaf:
+            let a = i64(l), b = i64(r)
+            switch op {
+            case 0x91: return .long(a &+ b)
+            case 0x95: return .long(a &- b)
+            case 0x99: return .long(a &* b)
+            case 0x9d: if b == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }; return .long(a / b)
+            case 0xa1: if b == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }; return .long(a % b)
+            case 0xa5: return .long(a & b)
+            case 0xa7: return .long(a | b)
+            case 0xa9: return .long(a ^ b)
+            case 0xab: return .long(a << (b & 63))
+            case 0xad: return .long(a >> (b & 63))
+            default:   return .long(Int64(bitPattern: UInt64(bitPattern: a) >> (b & 63)))
+            }
+        case 0x92, 0x96, 0x9a, 0x9e, 0xa2:
+            let a = f32(l), b = f32(r)
+            switch op {
+            case 0x92: return .float(a + b)
+            case 0x96: return .float(a - b)
+            case 0x98: return .float(a * b)
+            case 0x9e: return .float(a / b)
+            default:   return .float(a.truncatingRemainder(dividingBy: b))
+            }
+        case 0x93, 0x97, 0x9b, 0x9f, 0xa3:
+            let a = f64(l), b = f64(r)
+            switch op {
+            case 0x93: return .double(a + b)
+            case 0x97: return .double(a - b)
+            case 0x9b: return .double(a * b)
+            case 0x9f: return .double(a / b)
+            default:   return .double(a.truncatingRemainder(dividingBy: b))
+            }
+        default:
+            throw VMError.verify("bad binop 0x\(String(op, radix: 16))")
+        }
+    }
+
+    /// Literal ops: lit16 family 0xd0–0xd7, lit8 family 0xd8–0xe2.
+    /// rsub is REVERSE subtract: result = lit - value.
+    private func binopLiteral(_ op: UInt8, _ l: RVal, _ lit: Int32, lit8: Bool) throws -> RVal {
+        guard case let .int(a) = l else { throw VMError.verify("binop-lit on non-int") }
+        let base = lit8 ? op - 0x48 : op - 0x40 // → 0x90-family base op
+        switch base {
+        case 0x90: return .int(a &+ lit)                    // add
+        case 0x91: return .int(lit &- a)                    // rsub
+        case 0x98: return .int(a &* lit)                    // mul
+        case 0x9c:
+            if lit == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }
+            return .int(a / lit)                            // div
+        case 0xa0:
+            if lit == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }
+            return .int(a % lit)                            // rem
+        case 0xa4: return .int(a & lit)                     // and
+        case 0xa6: return .int(a | lit)                     // or
+        case 0xa8: return .int(a ^ lit)                     // xor
+        case 0xaa: return .int(a << (lit & 31))             // shl
+        case 0xac: return .int(a >> (lit & 31))             // shr
+        case 0xae: return .int(Int32(bitPattern: UInt32(bitPattern: a) >> (lit & 31))) // ushr
+        default: throw VMError.verify("bad lit-op 0x\(String(op, radix: 16))")
+        }
+    }
+
+    // MARK: - switches / array data payloads
+
+    private func u16(_ addr: Int, _ code: DexFile.CodeItem) -> UInt16 {
+        let off = code.insnsOffset + addr * 2
+        return UInt16(dex.source[off]) | UInt16(dex.source[off + 1]) << 8
+    }
+    private func i32payload(_ addr: Int, _ code: DexFile.CodeItem) -> Int32 {
+        Int32(bitPattern: UInt32(u16(addr, code)) | UInt32(u16(addr + 1, code)) << 16)
+    }
+
+    private func packedSwitchTarget(test: Int32, payloadAddr: Int, code: DexFile.CodeItem) throws -> Int? {
+        guard u16(payloadAddr, code) == 0x0100 else { throw VMError.verify("bad packed-switch payload") }
+        let size = Int(u16(payloadAddr + 1, code))
+        guard size > 0 else { return nil }
+        let firstKey = i32payload(payloadAddr + 2, code)
+        let delta = test - firstKey
+        guard delta >= 0, Int(delta) < size else { return nil }
+        return Int(i32payload(payloadAddr + 4 + Int(delta) * 2, code))
+    }
+
+    private func sparseSwitchTarget(test: Int32, payloadAddr: Int, code: DexFile.CodeItem) throws -> Int? {
+        guard u16(payloadAddr, code) == 0x0200 else { throw VMError.verify("bad sparse-switch payload") }
+        let size = Int(u16(payloadAddr + 1, code))
+        for i in 0..<size where i32payload(payloadAddr + 2 + i * 2, code) == test {
+            return Int(i32payload(payloadAddr + 2 + size * 2 + i * 2, code))
+        }
+        return nil
+    }
+
+    private func fillArrayData(into arr: inout ArrInstance, payloadAddr: Int, code: DexFile.CodeItem) throws {
+        guard u16(payloadAddr, code) == 0x0300 else { throw VMError.verify("bad array-data payload") }
+        let width = Int(u16(payloadAddr + 1, code))
+        let count = Int(UInt32(u16(payloadAddr + 2, code)) | UInt32(u16(payloadAddr + 3, code)) << 16)
+        guard count == arr.elements.count else { throw VMError.verify("fill-array-data size mismatch") }
+        let dataStart = payloadAddr + 4
+        for i in 0..<count {
+            let addr = dataStart + (i * width + 1) / 2
+            let raw: RVal
+            switch width {
+            case 1:
+                let byteIndex = i
+                let unit = u16(addr + byteIndex / 2, code)
+                raw = .int(Int32(UInt8(truncatingIfNeeded: unit >> (8 * (byteIndex % 2)))))
+            case 2: raw = .int(Int32(bitPattern: UInt32(u16(addr, code))))
+            case 4: raw = .int(i32payload(addr, code))
+            case 8:
+                let lo = UInt64(UInt32(u16(addr, code)) | UInt32(u16(addr + 1, code)) << 16)
+                let hi = UInt64(UInt32(u16(addr + 2, code)) | UInt32(u16(addr + 3, code)) << 16)
+                raw = .long(Int64(bitPattern: hi << 32 | lo))
+            default: throw VMError.verify("array-data width \(width)")
+            }
+            arr.elements[i] = raw
+        }
+    }
+
+    // MARK: - try blocks
+
+    static func parseTries(_ code: DexFile.CodeItem, dex: DexFile) -> [TryBlock] {
+        guard code.triesCount > 0 else { return [] }
+        var reader = ByteReader(dex.source)
+        var triesOffset = code.insnsOffset + code.insnsCount * 2
+        if code.insnsCount % 2 == 1 { triesOffset += 2 } // u32 alignment padding
+        guard (try? reader.seek(triesOffset)) != nil else { return [] }
+
+        var items: [TryBlock] = []
+        var handlerOffsets: [Int: [(type: String?, addr: Int)]] = [:]
+        // First pass: raw try items {u4 start, u2 count, u2 handler_off}.
+        var raw: [(start: Int, count: Int, handlerOff: Int)] = []
+        for _ in 0..<code.triesCount {
+            guard let start = try? reader.u32(),
+                  let count = try? reader.u16(),
+                  let handlerOff = try? reader.u16() else { return [] }
+            raw.append((Int(start), Int(count), Int(handlerOff)))
+        }
+        let handlersBase = reader.offset
+        // Parse the encoded_catch_handler_list once: size sleb, then handlers.
+        guard let listSize = try? reader.sleb128() else { return [] }
+        var baseToIndex: [Int: Int] = [:]
+        for i in 0..<max(Int(listSize), 0) {
+            let handlerStart = reader.offset - handlersBase
+            baseToIndex[handlerStart] = i
+            guard let sizeRaw = try? reader.sleb128() else { return [] }
+            let hasCatchAll = sizeRaw <= 0
+            let typedCount = abs(Int(sizeRaw))
+            var handlers: [(String?, Int)] = []
+            for _ in 0..<typedCount {
+                guard let typeIdx = try? reader.uleb128(),
+                      let addr = try? reader.uleb128() else { return [] }
+                let typeIdxInt = Int(typeIdx)
+                handlers.append((typeIdxInt < dex.typeDescriptors.count ? dex.typeDescriptors[typeIdxInt] : nil, Int(addr)))
+            }
+            if hasCatchAll {
+                guard let addr = try? reader.uleb128() else { return [] }
+                handlers.append((nil, Int(addr)))
+            }
+            handlerOffsets[handlerStart] = handlers
+        }
+        for item in raw {
+            if let handlers = handlerOffsets[item.handlerOff] {
+                items.append(TryBlock(startAddr: item.start, endAddr: item.start + item.count, handlers: handlers))
+            }
+        }
+        return items
+    }
+
+    // MARK: - type checks / narrowing
+
+    static func typeCheck(_ value: RVal, ofType target: String) -> Bool {
+        if value.isNull { return false }
+        switch value {
+        case let .obj(o):
+            if o.dexType == target { return true }
+            // Approximation until the host class hierarchy lands (M2).
+            switch target {
+            case "Ljava/lang/Object;", "Ljava/lang/Throwable;", "Ljava/lang/Exception;",
+                 "Ljava/lang/RuntimeException;", "Ljava/lang/Error;", "Ljava/lang/CharSequence;":
+                return true
+            default: return false
+            }
+        case .arr: return target.hasPrefix("[")
+        default: return false
+        }
+    }
+
+    private func javaCmp(_ a: Int64, _ b: Int64) -> Int32 { a < b ? -1 : (a == b ? 0 : 1) }
+    private func javaCmpF(_ a: Double, _ b: Double, nanIsLess: Bool) -> Int32 {
+        if a.isNaN || b.isNaN { return nanIsLess ? -1 : 1 }
+        return a < b ? -1 : (a == b ? 0 : 1)
+    }
+    private func javaNarrowToInt(_ f: Double) -> Int32 {
+        if f.isNaN { return 0 }
+        if f >= Double(Int32.max) { return Int32.max }
+        if f <= Double(Int32.min) { return Int32.min }
+        return Int32(f)
+    }
+    private func javaNarrowToLong(_ f: Double) -> Int64 {
+        if f.isNaN { return 0 }
+        if f >= Double(Int64.max) { return Int64.max }
+        if f <= Double(Int64.min) { return Int64.min }
+        return Int64(f)
+    }
+}
+
+extension RVal {
+    var isWide: Bool {
+        switch self {
+        case .long, .double: return true
+        default: return false
+        }
+    }
+}

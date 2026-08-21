@@ -23,6 +23,7 @@ struct CompatAudit {
               compat-audit inspect <path.apk>
               compat-audit missing <path.apk> [count]
               compat-audit index <url-or-path>
+              compat-audit disasm <path.apk> [class-filter]
             """)
             exit(64)
         }
@@ -51,6 +52,14 @@ struct CompatAudit {
         case "index":
             await dumpIndex(args[2])
 
+        case "disasm":
+            guard let data = FileManager.default.contents(atPath: args[2]) else {
+                print("error: cannot read \(args[2])")
+                exit(66)
+            }
+            let filter = args.count > 3 ? args[3] : ""
+            disasm([UInt8](data), filter: filter)
+
         default:
             print("unknown subcommand \(args[1])")
             exit(64)
@@ -70,6 +79,44 @@ struct CompatAudit {
                 continuation.resume(returning: ([UInt8](data ?? Data()), code))
             }
             task.resume()
+        }
+    }
+
+    /// Lists classes/methods of the first dex; for each method prints a short
+    /// disassembly (opcode names for common families) to locate methods with
+    /// shallow dependency graphs for runtime execution tests.
+    static func disasm(_ bytes: [UInt8], filter: String) {
+        do {
+            let zip = try ZipArchive(bytes)
+            let dexBytes = try zip.data(named: "classes.dex")
+            let dex = try DexFile(dexBytes)
+            let vm = DexInterpreter(dex: dex)
+            _ = vm
+            for (ci, def) in dex.classDefs.enumerated() {
+                let cls = DexFile.readableClassName(def.descriptor)
+                if !filter.isEmpty && !cls.lowercased().contains(filter.lowercased()) { continue }
+                print("== [\(ci)] \(cls)")
+                for m in def.directMethods + def.virtualMethods {
+                    let ref = m.methodIndex < dex.methodIds.count ? dex.methodIds[m.methodIndex] : nil
+                    let name = ref?.name ?? "?"
+                    let proto = ref.map { r in "\(r.prototype.returnType) (\(r.prototype.parameters.joined(separator: ",")))" } ?? "?"
+                    guard let code = dex.codeItem(for: m) else {
+                        print("    \(name)\(proto) [abstract/native]")
+                        continue
+                    }
+                    var insnsText: [String] = []
+                    for i in 0..<min(code.insnsCount, 12) {
+                        let off = code.insnsOffset + i * 2
+                        let unit = UInt16(dex.source[off]) | UInt16(dex.source[off + 1]) << 8
+                        insnsText.append(String(format: "%04x", unit))
+                    }
+                    let more = code.insnsCount > 12 ? " … (\(code.insnsCount)u)" : ""
+                    print("    \(name): \(proto) [regs=\(code.registersSize)] \(insnsText.joined(separator: " "))\(more)")
+                }
+            }
+        } catch {
+            print("error: \(error)")
+            exit(70)
         }
     }
 

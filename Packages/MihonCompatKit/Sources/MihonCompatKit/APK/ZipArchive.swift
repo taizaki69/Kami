@@ -5,13 +5,14 @@ import Foundation
 /// by trusting the central directory sizes. ZIP64 is detected and reported
 /// explicitly rather than misparsed.
 public struct ZipArchive {
-    struct Entry {
-        let name: String
-        let compressionMethod: UInt16
-        let compressedSize: UInt64
-        let uncompressedSize: UInt64
-        let localHeaderOffset: UInt64
-        let crc32: UInt32
+
+    public struct Entry {
+        public let name: String
+        public let compressionMethod: UInt16
+        public let compressedSize: UInt64
+        public let uncompressedSize: UInt64
+        public let localHeaderOffset: UInt64
+        public let crc32: UInt32
     }
 
     enum Error: Swift.Error, CustomStringConvertible {
@@ -37,7 +38,7 @@ public struct ZipArchive {
         try self.init([UInt8](data))
     }
 
-    init(_ bytes: [UInt8]) throws {
+    public init(_ bytes: [UInt8]) throws {
         self.bytes = bytes
         guard let eocd = ZipArchive.locateEOCD(bytes) else { throw Error.notAZip }
         var r = ByteReader(bytes)
@@ -155,7 +156,7 @@ public struct ZipArchive {
     }
 
     /// Decompresses an entry to raw bytes.
-    func data(for entry: Entry) throws -> [UInt8] {
+    public func data(for entry: Entry) throws -> [UInt8] {
         var r = ByteReader(bytes)
         try r.seek(Int(entry.localHeaderOffset))
         let sig = try r.u32()
@@ -182,7 +183,7 @@ public struct ZipArchive {
         }
     }
 
-    func data(named name: String) throws -> [UInt8] {
+    public func data(named name: String) throws -> [UInt8] {
         guard let e = entry(named: name) else { throw Error.entryMissing(name) }
         return try data(for: e)
     }

@@ -8,56 +8,57 @@ import Foundation
 /// all versions emitted by current Android toolchains; minSdk-specific
 /// instructions inside `insns` are not validated here.
 public struct DexFile {
-    struct MethodRef {
-        let declaringClass: String   // type descriptor, e.g. "Lokhttp3/Request;"
-        let name: String
-        let prototype: Prototype
+    public struct MethodRef {
+        public let declaringClass: String   // type descriptor, e.g. "Lokhttp3/Request;"
+        public let name: String
+        public let prototype: Prototype
     }
 
-    struct FieldRef {
-        let declaringClass: String
-        let type: String
-        let name: String
+    public struct FieldRef {
+        public let declaringClass: String
+        public let type: String
+        public let name: String
     }
 
-    struct Prototype {
-        let shorty: String
-        let returnType: String
-        let parameters: [String]
+    public struct Prototype {
+        public let shorty: String
+        public let returnType: String
+        public let parameters: [String]
     }
 
-    struct EncodedMethod {
-        let methodIndex: Int
-        let accessFlags: UInt32
-        let codeOffset: Int
-        let definingClassIndex: Int
+    public struct EncodedMethod {
+        public let methodIndex: Int
+        public let accessFlags: UInt32
+        public let codeOffset: Int
+        public let definingClassIndex: Int
     }
 
-    struct EncodedField {
-        let fieldIndex: Int
-        let accessFlags: UInt32
+    public struct EncodedField {
+        public let fieldIndex: Int
+        public let accessFlags: UInt32
     }
 
-    struct CodeItem {
-        let registersSize: UInt16
-        let insSize: UInt16
-        let outsSize: UInt16
-        let insnsOffset: Int
-        let insnsCount: Int
+    public struct CodeItem {
+        public let registersSize: UInt16
+        public let insSize: UInt16
+        public let outsSize: UInt16
+        public let triesCount: UInt16
+        public let insnsOffset: Int
+        public let insnsCount: Int
     }
 
-    struct ClassDef {
-        let typeIndex: Int
-        let descriptor: String
-        let accessFlags: UInt32
-        let superclassIndex: Int   // -1 when absent
-        let interfaceIndices: [Int]
-        let sourceFileIndex: Int
-        let staticFields: [EncodedField]
-        let instanceFields: [EncodedField]
-        let directMethods: [EncodedMethod]
-        let virtualMethods: [EncodedMethod]
-        let classDataOffset: Int
+    public struct ClassDef {
+        public let typeIndex: Int
+        public let descriptor: String
+        public let accessFlags: UInt32
+        public let superclassIndex: Int   // -1 when absent
+        public let interfaceIndices: [Int]
+        public let sourceFileIndex: Int
+        public let staticFields: [EncodedField]
+        public let instanceFields: [EncodedField]
+        public let directMethods: [EncodedMethod]
+        public let virtualMethods: [EncodedMethod]
+        public let classDataOffset: Int
     }
 
     enum Error: Swift.Error, CustomStringConvertible {
@@ -74,20 +75,20 @@ public struct DexFile {
         }
     }
 
-    let strings: [String]
-    let typeDescriptors: [String]
-    let prototypes: [Prototype]
-    let fieldIds: [FieldRef]
-    let methodIds: [MethodRef]
-    let classDefs: [ClassDef]
+    public let strings: [String]
+    public let typeDescriptors: [String]
+    public let prototypes: [Prototype]
+    public let fieldIds: [FieldRef]
+    public let methodIds: [MethodRef]
+    public let classDefs: [ClassDef]
 
     /// descriptor ("La/b/C;") → class def index.
-    let classIndexByDescriptor: [String: Int]
+    public let classIndexByDescriptor: [String: Int]
 
     /// Raw backing bytes, kept for code item parsing and the future interpreter.
-    let source: [UInt8]
+    public let source: [UInt8]
 
-    init(_ bytes: [UInt8]) throws {
+    public init(_ bytes: [UInt8]) throws {
         self.source = bytes
         var r = ByteReader(bytes)
 
@@ -286,20 +287,21 @@ public struct DexFile {
     }
 
     /// Parses the code item for a method; nil when abstract/native.
-    func codeItem(for method: EncodedMethod) -> CodeItem? {
+    public func codeItem(for method: EncodedMethod) -> CodeItem? {
         guard method.codeOffset != 0 else { return nil }
         var r = ByteReader(source)
         guard (try? r.seek(method.codeOffset)) != nil,
               let registers = try? r.u16(),
               let ins = try? r.u16(),
               let outs = try? r.u16(),
-              let _ = try? r.u16() else { return nil }
+              let tries = try? r.u16() else { return nil }
         _ = try? r.u32() // debug info off
         guard let insnsCount = try? r.u32() else { return nil }
         return CodeItem(
             registersSize: registers,
             insSize: ins,
             outsSize: outs,
+            triesCount: tries,
             insnsOffset: r.offset,
             insnsCount: Int(insnsCount)
         )
