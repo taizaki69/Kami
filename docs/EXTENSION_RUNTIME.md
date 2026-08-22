@@ -17,11 +17,12 @@ Measured real-APK behavior today:
 - BatCave 1.6.9 returns its real base URL, language, name, and 64-bit source ID.
 - BatCave's real `getPopularManga` path executes class initialization, Kotlin
   pairs and collections, Mihon filters and iteration, and synchronous coroutine
-  setup before stopping at the exact unimplemented OkHttp form-body builder:
-  `FormBody.Builder.<init>(Charset, int, DefaultConstructorMarker)`.
-- No test claims a completed popular/search request, details, chapters, pages,
-  HTTP transport, HTML parsing, JSON serialization, preferences, or Cloudflare
-  behavior yet.
+  setup, builds its exact bounded POST form request, and creates an inert
+  OkHttp call before stopping at the unimplemented transport method
+  `OkHttpExtensionsKt.awaitSuccess(Call, Continuation)`.
+- No test claims a completed popular/search response, details, chapters,
+  pages, HTTP transport, HTML parsing, JSON serialization, preferences, or
+  Cloudflare behavior yet.
 
 ## Architecture
 
@@ -90,12 +91,15 @@ synthetic and pinned-corpus tests:
 - Mihon filter/filter-list construction and state access, plus construction
   shims for `HttpSource` and `ParsedHttpSource` superclasses.
 - The date-pattern object needed by the pinned BatCave constructor.
+- Transport-neutral, bounded OkHttp URL/header/form/text-body/cache/request,
+  client-builder, interceptor-list, and call values. `newCall` records an
+  inert `CompatHTTPRequest`; it never performs I/O.
+- Kotlin duration encoding/conversion reached by OkHttp cache-control setup.
 
-The measured next layer is the OkHttp request surface, beginning with the exact
-`FormBody.Builder` constructor above, followed by transport isolation and
-response limits. The longer tail remains string/collection overloads, Kotlin
-duration and full coroutine resumption, serialization, Jsoup, preferences, and
-Android context/UI shims. A class appearing in the analyzer's
+The measured next layer begins at the exact `awaitSuccess` seam: a per-source
+URLSession transport with policy, cancellation, byte limits, response models,
+and coroutine resumption. The longer tail remains string/collection overloads,
+serialization, Jsoup, preferences, and Android context/UI shims. A class appearing in the analyzer's
 `implementedClasses` set is only a coarse prioritization signal; it does not
 mean every method on that class is callable.
 
@@ -129,10 +133,11 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 61 passing tests: 28 interpreter tests, 10 parser
+`MihonCompatKit` currently has 63 passing tests: 28 interpreter tests, 10 parser
 hardening tests (including every truncated prefix of generated DEX and ZIP
-fixtures), 8 pinned real-extension executions, and 15 reader/inflate/repository
-tests. GitHub Swift CI fetches the SHA-256-locked APK corpus before running them.
+fixtures), 8 pinned real-extension executions, 2 bounded request-model tests,
+and 15 reader/inflate/repository tests. GitHub Swift CI fetches the
+SHA-256-locked APK corpus before running them.
 
 The compatibility matrix records the exact versions, hashes, and methods. New
 runtime behavior is complete only when it has a focused regression test and,

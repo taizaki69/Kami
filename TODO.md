@@ -39,10 +39,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       [#1](https://github.com/taizaki69/Kami/issues/1)
 - [~] Kotlin/Java class library M2 — Object/String/StringBuilder, core Kotlin
       ABI, bounded collections, atomics, reflection, and Mihon filters cover
-      the pinned BatCave pre-request path; measured long tail remains
+      the pinned BatCave request path; bounded form/header/URL/cache/request/
+      call models and Kotlin duration shims now reach the transport seam;
+      measured long tail remains
 - [ ] tachiyomix API bridge M3 (`HttpSource` → `KamiSource`)
 - [ ] First real extension executing popular→search→details→chapters→pages —
-      BatCave currently stops exactly at `OkHttp FormBody.Builder`;
+      BatCave now constructs its exact popular POST request and stops exactly
+      at `OkHttpExtensionsKt.awaitSuccess` before transport;
       [#2](https://github.com/taizaki69/Kami/issues/2)
 - [ ] Verify store/APK signing identity before enabling downloaded extension
       execution — [#3](https://github.com/taizaki69/Kami/issues/3)

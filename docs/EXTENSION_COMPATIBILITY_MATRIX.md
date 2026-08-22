@@ -21,7 +21,7 @@ is no compatibility claim.
 | DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
 | DEX execution | Partial M1/M2 working | 28 interpreter tests plus eight exact assertions against pinned APK paths; overload identity and invoke shape are checked |
-| End-to-end source operations | Not implemented | BatCave popular reaches the exact OkHttp form-builder boundary; no interpreted operation or network request completes yet |
+| End-to-end source operations | Not implemented | BatCave popular constructs an exact inert POST request and reaches `awaitSuccess`; no interpreted response or network operation completes yet |
 
 ## Per-extension execution
 
@@ -33,11 +33,11 @@ is no compatibility claim.
 
 All three constructors execute their real no-argument DEX paths and return
 objects of the declared entry type. BatCave's popular path additionally proves
-class initialization, filter construction and iteration, and its pre-request
-Kotlin ABI before asserting the exact unresolved
-`okhttp3.FormBody$Builder.<init>(Charset, int, DefaultConstructorMarker)` call.
-That assertion is a precise implementation frontier, not a successful popular
-operation.
+class initialization, filter construction and iteration, its Kotlin ABI, and
+bounded OkHttp request construction. It asserts the exact POST URL and ordered
+form fields, then asserts the unresolved
+`OkHttpExtensionsKt.awaitSuccess(Call, Continuation)` call. That is a precise
+transport frontier, not a successful popular operation.
 
 ## Current measured API workload
 
@@ -69,11 +69,13 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 ## Test evidence
 
-- 61/61 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 and in macOS
+- 63/63 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 and in macOS
   GitHub Actions with the corpus present.
 - Seven real-extension constructor/getter tests require successful return
-  values. The eighth requires the exact current OkHttp frontier; arbitrary VM
-  failures are not accepted as progress.
+  values. The eighth requires the exact request value and `awaitSuccess`
+  frontier; arbitrary VM failures are not accepted as progress.
+- Two focused host-bridge tests verify the pure request model, Kotlin duration
+  conversion, size bounds, scheme rejection, and CRLF-header rejection.
 - Parser hardening covers checksum/size/count limits and every truncated prefix
   of generated valid DEX and ZIP fixtures.
 - `compat-audit` builds in release mode and is uploaded by Swift CI.
@@ -81,7 +83,7 @@ tests, not the heuristic percentage, are the acceptance signal.
 ## Honest frontier
 
 Kami can download, validate structurally, inspect, classify, and execute a
-controlled real-extension path through the pre-request boundary. It cannot yet
+controlled real-extension path through pure request construction. It cannot yet
 use an unmodified extension as a reader source. Full DEX verification/opcode
 work is tracked in [#1](https://github.com/taizaki69/Kami/issues/1), the first
 complete source in [#2](https://github.com/taizaki69/Kami/issues/2), APK signer trust in

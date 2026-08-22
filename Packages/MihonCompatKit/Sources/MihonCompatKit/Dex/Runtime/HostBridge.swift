@@ -104,9 +104,98 @@ public final class HostBridge {
         let state: RVal
     }
 
+    private final class FormBodyBuilderBox {
+        var fields: [CompatHTTPFormField] = []
+        var utf8Bytes = 0
+    }
+
+    private struct CompressionInterceptorBox {
+        let algorithms: [RVal]
+    }
+
+    private final class HeadersBuilderBox {
+        var headers: [CompatHTTPHeader]
+
+        init(headers: [CompatHTTPHeader] = []) {
+            self.headers = headers
+        }
+    }
+
+    private struct HeadersBox {
+        let headers: [CompatHTTPHeader]
+    }
+
+    private struct HttpUrlBox {
+        let value: String
+        let host: String
+        let pathSegments: [String]
+    }
+
+    private struct MediaTypeBox {
+        let value: String
+    }
+
+    private final class CacheControlBuilderBox {
+        var maxAgeSeconds: Int?
+    }
+
+    private struct CacheControlBox {
+        let policy: CompatHTTPCachePolicy
+    }
+
+    private final class RequestBuilderBox {
+        var url: String?
+        var method = "GET"
+        var headers: [CompatHTTPHeader] = []
+        var body: CompatHTTPRequestBody?
+        var cachePolicy: CompatHTTPCachePolicy?
+    }
+
+    private final class CallBox {
+        let request: CompatHTTPRequest
+        let client: OkHttpClientBox
+        var isCancelled = false
+
+        init(request: CompatHTTPRequest, client: OkHttpClientBox) {
+            self.request = request
+            self.client = client
+        }
+    }
+
+    private final class OkHttpClientBox {
+        let interceptors: [RVal]
+        let networkInterceptors: [RVal]
+
+        init(interceptors: [RVal] = [], networkInterceptors: [RVal] = []) {
+            self.interceptors = interceptors
+            self.networkInterceptors = networkInterceptors
+        }
+    }
+
+    private final class OkHttpClientBuilderBox {
+        let interceptors: HostListBox
+        let networkInterceptors: HostListBox
+
+        init(interceptors: [RVal], networkInterceptors: [RVal]) {
+            self.interceptors = HostListBox(interceptors, isMutable: true)
+            self.networkInterceptors = HostListBox(networkInterceptors, isMutable: true)
+        }
+    }
+
+    private struct NetworkHelperBox {
+        let client: RVal
+    }
+
     /// Exact `(declaring class, name, prototype)` registrations. Ignoring the
     /// prototype would let an untrusted overload reach the wrong native body.
     private var methods: [MethodKey: Registration] = [:]
+    /// Per-source network identities. They hold only pure request-building
+    /// state until an explicit transport adapter is added.
+    private var sourceNetworks: [ObjectIdentifier: RVal] = [:]
+
+    /// Most recent request handed to OkHttpClient.newCall. This is an inert,
+    /// transport-neutral value: reaching it never performs network I/O.
+    public private(set) var lastPreparedRequest: CompatHTTPRequest?
 
     /// Static field storage for host classes (sget/sput on host classes).
     public var staticFields: [String: RVal] = [:]
@@ -205,6 +294,22 @@ public final class HostBridge {
                 throw DEXThrowable(string("UninitializedPropertyAccessException: \(property)"))
             }
         }
+        bridge.register(
+            class: intrinsics,
+            "areEqual",
+            prototype: "(Ljava/lang/Object;Ljava/lang/Object;)Z",
+            isStatic: true
+        ) { _, args in
+            let lhs = try argument(args, 0, "Intrinsics.areEqual")
+            let rhs = try argument(args, 1, "Intrinsics.areEqual")
+            return .int(javaValueEquals(lhs, rhs) ? 1 : 0)
+        }
+        bridge.register(
+            class: "Lkotlin/coroutines/jvm/internal/SpillingKt;",
+            "nullOutSpilledVariable",
+            prototype: "(Ljava/lang/Object;)Ljava/lang/Object;",
+            isStatic: true
+        ) { _, _ in .null }
 
         // Object identity basics.
         bridge.register(class: "Ljava/lang/Object;", "<init>", prototype: "()V") { _, _ in .null }
@@ -620,6 +725,8 @@ public final class HostBridge {
         Self.registerPrimitiveBoxes(bridge)
         Self.registerCollectionSurface(bridge)
         Self.registerFilterSurface(bridge)
+        Self.registerKotlinDurationSurface(bridge)
+        Self.registerOkHttpRequestSurface(bridge)
         bridge.register(
             class: "Ljava/time/format/DateTimeFormatter;",
             "ofPattern",
@@ -783,6 +890,77 @@ public final class HostBridge {
         guard case let .obj(object) = value,
               object.dexType == "Ljava/lang/String;" else { return nil }
         return object.payload as? String
+    }
+
+    private static func requiredString(_ args: [RVal], _ index: Int,
+                                       _ method: String) throws -> String {
+        let value = try argument(args, index, method)
+        guard let result = stringPayload(value) else {
+            if value.isNull {
+                throw DEXThrowable(string("NullPointerException: \(method) argument \(index)"))
+            }
+            throw VMError.verify("\(method) argument \(index) is not java.lang.String")
+        }
+        return result
+    }
+
+    private static func validateHTTPHeader(name: String, value: String,
+                                           method: String) throws {
+        let validName = !name.isEmpty && name.utf8.count <= 8_192 && name.unicodeScalars.allSatisfy {
+            $0.value >= 0x21 && $0.value <= 0x7e && $0.value != 0x3a
+        }
+        guard validName else {
+            throw DEXThrowable(string("IllegalArgumentException: invalid header name in \(method)"))
+        }
+        guard value.utf8.count <= 65_536,
+              !value.unicodeScalars.contains(where: { $0.value == 0 || $0.value == 0x0a || $0.value == 0x0d }) else {
+            throw DEXThrowable(string("IllegalArgumentException: invalid header value in \(method)"))
+        }
+    }
+
+    private static func parsedHTTPURL(_ value: String) -> HttpUrlBox? {
+        guard !value.isEmpty,
+              value.utf8.count <= 8_192,
+              !value.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0) || CharacterSet.whitespacesAndNewlines.contains($0)
+              }),
+              let components = URLComponents(string: value),
+              let rawScheme = components.scheme,
+              ["http", "https"].contains(rawScheme.lowercased()),
+              let host = components.host,
+              !host.isEmpty,
+              components.url != nil else { return nil }
+
+        let path = components.path
+        let pathSegments: [String]
+        if path.isEmpty || path == "/" {
+            pathSegments = [""]
+        } else {
+            let body = path.hasPrefix("/") ? String(path.dropFirst()) : path
+            pathSegments = body.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        }
+        return HttpUrlBox(value: value, host: host, pathSegments: pathSegments)
+    }
+
+    private static func kotlinDurationSeconds(_ rawValue: Int64,
+                                              method: String) throws -> Int {
+        if rawValue == Int64.max { return Int(Int32.max) }
+        let magnitude = rawValue >> 1
+        guard magnitude >= 0 else {
+            throw DEXThrowable(string("IllegalArgumentException: negative duration in \(method)"))
+        }
+        let seconds = rawValue & 1 == 0 ? magnitude / 1_000_000_000 : magnitude / 1_000
+        return Int(min(seconds, Int64(Int32.max)))
+    }
+
+    private static func validMediaType(_ value: String) -> Bool {
+        guard !value.isEmpty, value.utf8.count <= 1_024,
+              !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+            return false
+        }
+        let essence = value.split(separator: ";", maxSplits: 1).first ?? ""
+        let parts = essence.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count == 2 && !parts[0].isEmpty && !parts[1].isEmpty
     }
 
     static func registerStringSurface(_ bridge: HostBridge) {
@@ -962,6 +1140,86 @@ public final class HostBridge {
     private static func requireCollectionCapacity(_ count: Int, _ method: String) throws {
         guard count <= 1_000_000 else {
             throw VMError.verify("\(method) exceeds 1000000 collection elements")
+        }
+    }
+
+    private static func registerKotlinDurationSurface(_ bridge: HostBridge) {
+        let durationUnit = "Lkotlin/time/DurationUnit;"
+        let units: [(name: String, nanoseconds: Int64, milliseconds: Int64?)] = [
+            ("NANOSECONDS", 1, nil),
+            ("MICROSECONDS", 1_000, nil),
+            ("MILLISECONDS", 1_000_000, 1),
+            ("SECONDS", 1_000_000_000, 1_000),
+            ("MINUTES", 60_000_000_000, 60_000),
+            ("HOURS", 3_600_000_000_000, 3_600_000),
+            ("DAYS", 86_400_000_000_000, 86_400_000),
+        ]
+        for unit in units {
+            bridge.staticFields["\(durationUnit)->\(unit.name)"] = .obj(ObjInstance(
+                dexType: durationUnit,
+                payload: unit.name,
+                isHost: true
+            ))
+        }
+
+        func encode(_ value: Int64, unitName: String) throws -> Int64 {
+            guard let unit = units.first(where: { $0.name == unitName }) else {
+                throw VMError.verify("DurationKt.toDuration unit")
+            }
+            let maximumNanoseconds: Int64 = 4_611_686_018_426_999_999
+            let nanos = value.multipliedReportingOverflow(by: unit.nanoseconds)
+            if !nanos.overflow,
+               nanos.partialValue >= -maximumNanoseconds,
+               nanos.partialValue <= maximumNanoseconds {
+                return nanos.partialValue << 1
+            }
+
+            let milliseconds: Int64
+            if let multiplier = unit.milliseconds {
+                let product = value.multipliedReportingOverflow(by: multiplier)
+                milliseconds = product.overflow
+                    ? (value < 0 ? -(Int64.max >> 1) : Int64.max >> 1)
+                    : product.partialValue
+            } else {
+                milliseconds = value / (unit.nanoseconds == 1 ? 1_000_000 : 1_000)
+            }
+            let clamped = min(max(milliseconds, -(Int64.max >> 1)), Int64.max >> 1)
+            return (clamped << 1) | 1
+        }
+
+        for prototype in [
+            "(ILkotlin/time/DurationUnit;)J",
+            "(JLkotlin/time/DurationUnit;)J",
+        ] {
+            bridge.register(
+                class: "Lkotlin/time/DurationKt;",
+                "toDuration",
+                prototype: prototype,
+                isStatic: true
+            ) { _, args in
+                let value: Int64
+                switch try argument(args, 0, "DurationKt.toDuration") {
+                case let .int(number): value = Int64(number)
+                case let .long(number): value = number
+                default: throw VMError.verify("DurationKt.toDuration value")
+                }
+                guard case let .obj(unitObject) = try argument(args, 1, "DurationKt.toDuration"),
+                      let unitName = unitObject.payload as? String else {
+                    throw VMError.verify("DurationKt.toDuration unit")
+                }
+                return .long(try encode(value, unitName: unitName))
+            }
+        }
+        bridge.register(
+            class: "Lkotlin/time/Duration;",
+            "getInWholeMilliseconds-impl",
+            prototype: "(J)J",
+            isStatic: true
+        ) { _, args in
+            guard case let .long(rawValue) = try argument(args, 0, "Duration.getInWholeMilliseconds") else {
+                throw VMError.verify("Duration.getInWholeMilliseconds value")
+            }
+            return .long(rawValue & 1 == 0 ? (rawValue >> 1) / 1_000_000 : rawValue >> 1)
         }
     }
 
@@ -1401,6 +1659,620 @@ public final class HostBridge {
             throw VMError.verify("\(method) receiver")
         }
         return filter.state
+    }
+
+    private static func registerOkHttpRequestSurface(_ bridge: HostBridge) {
+        let httpSource = "Leu/kanade/tachiyomi/source/online/HttpSource;"
+        bridge.register(
+            class: httpSource,
+            "getNetwork",
+            prototype: "()Leu/kanade/tachiyomi/network/NetworkHelper;"
+        ) { [weak bridge] _, args in
+            guard let bridge,
+                  case let .obj(source) = try argument(args, 0, "HttpSource.getNetwork") else {
+                throw VMError.verify("HttpSource.getNetwork receiver")
+            }
+            return bridge.networkHelper(for: source)
+        }
+        bridge.register(
+            class: httpSource,
+            "getHeaders",
+            prototype: "()Lokhttp3/Headers;"
+        ) { _, _ in
+            .obj(ObjInstance(
+                dexType: "Lokhttp3/Headers;",
+                payload: HeadersBox(headers: []),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: httpSource,
+            "headersBuilder",
+            prototype: "()Lokhttp3/Headers$Builder;"
+        ) { _, _ in
+            .obj(ObjInstance(
+                dexType: "Lokhttp3/Headers$Builder;",
+                payload: HeadersBuilderBox(),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: "Leu/kanade/tachiyomi/network/NetworkHelper;",
+            "getClient",
+            prototype: "()Lokhttp3/OkHttpClient;"
+        ) { _, args in
+            guard case let .obj(helper) = try argument(args, 0, "NetworkHelper.getClient"),
+                  let network = helper.payload as? NetworkHelperBox else {
+                throw VMError.verify("NetworkHelper.getClient receiver")
+            }
+            return network.client
+        }
+
+        let okHttpClient = "Lokhttp3/OkHttpClient;"
+        let okHttpClientBuilder = "Lokhttp3/OkHttpClient$Builder;"
+        bridge.register(
+            class: okHttpClient,
+            "newBuilder",
+            prototype: "()Lokhttp3/OkHttpClient$Builder;"
+        ) { _, args in
+            guard case let .obj(clientObject) = try argument(args, 0, "OkHttpClient.newBuilder"),
+                  let client = clientObject.payload as? OkHttpClientBox else {
+                throw VMError.verify("OkHttpClient.newBuilder receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: okHttpClientBuilder,
+                payload: OkHttpClientBuilderBox(
+                    interceptors: client.interceptors,
+                    networkInterceptors: client.networkInterceptors
+                ),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: okHttpClient,
+            "newCall",
+            prototype: "(Lokhttp3/Request;)Lokhttp3/Call;"
+        ) { [weak bridge] _, args in
+            guard case let .obj(clientObject) = try argument(args, 0, "OkHttpClient.newCall"),
+                  let client = clientObject.payload as? OkHttpClientBox,
+                  case let .obj(requestObject) = try argument(args, 1, "OkHttpClient.newCall"),
+                  let request = requestObject.payload as? CompatHTTPRequest else {
+                throw VMError.verify("OkHttpClient.newCall arguments")
+            }
+            bridge?.lastPreparedRequest = request
+            return .obj(ObjInstance(
+                dexType: "Lokhttp3/Call;",
+                payload: CallBox(request: request, client: client),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: "Lokhttp3/Call;",
+            "isCanceled",
+            prototype: "()Z"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Call.isCanceled"),
+                  let call = object.payload as? CallBox else {
+                throw VMError.verify("Call.isCanceled receiver")
+            }
+            return .int(call.isCancelled ? 1 : 0)
+        }
+        bridge.register(
+            class: okHttpClientBuilder,
+            "interceptors",
+            prototype: "()Ljava/util/List;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "OkHttpClient.Builder.interceptors"),
+                  let builder = object.payload as? OkHttpClientBuilderBox else {
+                throw VMError.verify("OkHttpClient.Builder.interceptors receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: "Ljava/util/List;",
+                payload: builder.interceptors,
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: okHttpClientBuilder,
+            "networkInterceptors",
+            prototype: "()Ljava/util/List;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "OkHttpClient.Builder.networkInterceptors"),
+                  let builder = object.payload as? OkHttpClientBuilderBox else {
+                throw VMError.verify("OkHttpClient.Builder.networkInterceptors receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: "Ljava/util/List;",
+                payload: builder.networkInterceptors,
+                isHost: true
+            ))
+        }
+        let interceptorAdds: [(String, KeyPath<OkHttpClientBuilderBox, HostListBox>)] = [
+            ("addInterceptor", \.interceptors),
+            ("addNetworkInterceptor", \.networkInterceptors),
+        ]
+        for (name, keyPath) in interceptorAdds {
+            bridge.register(
+                class: okHttpClientBuilder,
+                name,
+                prototype: "(Lokhttp3/Interceptor;)Lokhttp3/OkHttpClient$Builder;"
+            ) { _, args in
+                guard case let .obj(object) = try argument(args, 0, "OkHttpClient.Builder.\(name)"),
+                      let builder = object.payload as? OkHttpClientBuilderBox else {
+                    throw VMError.verify("OkHttpClient.Builder.\(name) receiver")
+                }
+                let list = builder[keyPath: keyPath]
+                try requireCollectionCapacity(list.elements.count + 1, "OkHttpClient.Builder.\(name)")
+                list.elements.append(try argument(args, 1, "OkHttpClient.Builder.\(name)"))
+                return .obj(object)
+            }
+        }
+        bridge.register(
+            class: okHttpClientBuilder,
+            "build",
+            prototype: "()Lokhttp3/OkHttpClient;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "OkHttpClient.Builder.build"),
+                  let builder = object.payload as? OkHttpClientBuilderBox else {
+                throw VMError.verify("OkHttpClient.Builder.build receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: okHttpClient,
+                payload: OkHttpClientBox(
+                    interceptors: builder.interceptors.elements,
+                    networkInterceptors: builder.networkInterceptors.elements
+                ),
+                isHost: true
+            ))
+        }
+
+        let compressionInterceptor = "Lokhttp3/CompressionInterceptor;"
+        bridge.register(
+            class: compressionInterceptor,
+            "<init>",
+            prototype: "([Lokhttp3/CompressionInterceptor$DecompressionAlgorithm;)V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "CompressionInterceptor.<init>"),
+                  case let .arr(algorithms) = try argument(args, 1, "CompressionInterceptor.<init>"),
+                  algorithms.elements.count <= 16 else {
+                throw VMError.verify("CompressionInterceptor constructor arguments")
+            }
+            object.payload = CompressionInterceptorBox(algorithms: algorithms.elements)
+            return .null
+        }
+
+        let headers = "Lokhttp3/Headers;"
+        let headersBuilder = "Lokhttp3/Headers$Builder;"
+        bridge.register(
+            class: headersBuilder,
+            "set",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Lokhttp3/Headers$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Headers.Builder.set"),
+                  let builder = object.payload as? HeadersBuilderBox else {
+                throw VMError.verify("Headers.Builder.set receiver")
+            }
+            let name = try requiredString(args, 1, "Headers.Builder.set")
+            let value = try requiredString(args, 2, "Headers.Builder.set")
+            try validateHTTPHeader(name: name, value: value, method: "Headers.Builder.set")
+            var next = builder.headers.filter { $0.name.caseInsensitiveCompare(name) != .orderedSame }
+            guard next.count < 10_000 else {
+                throw VMError.verify("Headers.Builder.set exceeds 10000 headers")
+            }
+            next.append(CompatHTTPHeader(name: name, value: value))
+            let byteCount = next.reduce(0) { $0 + $1.name.utf8.count + $1.value.utf8.count }
+            guard byteCount <= 1_048_576 else {
+                throw VMError.verify("Headers.Builder.set exceeds 1048576 UTF-8 bytes")
+            }
+            builder.headers = next
+            return .obj(object)
+        }
+        bridge.register(
+            class: headersBuilder,
+            "build",
+            prototype: "()Lokhttp3/Headers;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Headers.Builder.build"),
+                  let builder = object.payload as? HeadersBuilderBox else {
+                throw VMError.verify("Headers.Builder.build receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: headers,
+                payload: HeadersBox(headers: builder.headers),
+                isHost: true
+            ))
+        }
+
+        let cacheControl = "Lokhttp3/CacheControl;"
+        let cacheControlBuilder = "Lokhttp3/CacheControl$Builder;"
+        bridge.objectFactories[cacheControlBuilder] = { _ in
+            .obj(ObjInstance(
+                dexType: cacheControlBuilder,
+                payload: CacheControlBuilderBox(),
+                isHost: true
+            ))
+        }
+        bridge.register(class: cacheControlBuilder, "<init>", prototype: "()V") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "CacheControl.Builder.<init>") else {
+                throw VMError.verify("CacheControl.Builder constructor receiver")
+            }
+            object.payload = CacheControlBuilderBox()
+            return .null
+        }
+        bridge.register(
+            class: cacheControlBuilder,
+            "maxAge-LRDsOJo",
+            prototype: "(J)Lokhttp3/CacheControl$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "CacheControl.Builder.maxAge"),
+                  let builder = object.payload as? CacheControlBuilderBox,
+                  case let .long(rawDuration) = try argument(args, 1, "CacheControl.Builder.maxAge") else {
+                throw VMError.verify("CacheControl.Builder.maxAge arguments")
+            }
+            builder.maxAgeSeconds = try kotlinDurationSeconds(
+                rawDuration,
+                method: "CacheControl.Builder.maxAge"
+            )
+            return .obj(object)
+        }
+        bridge.register(
+            class: cacheControlBuilder,
+            "build",
+            prototype: "()Lokhttp3/CacheControl;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "CacheControl.Builder.build"),
+                  let builder = object.payload as? CacheControlBuilderBox else {
+                throw VMError.verify("CacheControl.Builder.build receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: cacheControl,
+                payload: CacheControlBox(
+                    policy: CompatHTTPCachePolicy(maxAgeSeconds: builder.maxAgeSeconds)
+                ),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: cacheControl,
+            "maxAgeSeconds",
+            prototype: "()I"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "CacheControl.maxAgeSeconds"),
+                  let box = object.payload as? CacheControlBox else {
+                throw VMError.verify("CacheControl.maxAgeSeconds receiver")
+            }
+            return .int(Int32(clamping: box.policy.maxAgeSeconds ?? -1))
+        }
+
+        let httpUrl = "Lokhttp3/HttpUrl;"
+        let httpUrlCompanion = "Lokhttp3/HttpUrl$Companion;"
+        bridge.staticFields["\(httpUrl)->Companion"] = .obj(ObjInstance(
+            dexType: httpUrlCompanion,
+            isHost: true
+        ))
+        bridge.register(
+            class: httpUrlCompanion,
+            "get",
+            prototype: "(Ljava/lang/String;)Lokhttp3/HttpUrl;"
+        ) { _, args in
+            let value = try requiredString(args, 1, "HttpUrl.Companion.get")
+            guard let parsed = parsedHTTPURL(value) else {
+                throw DEXThrowable(string("IllegalArgumentException: invalid HTTP URL"))
+            }
+            return .obj(ObjInstance(dexType: httpUrl, payload: parsed, isHost: true))
+        }
+        bridge.register(
+            class: httpUrlCompanion,
+            "parse",
+            prototype: "(Ljava/lang/String;)Lokhttp3/HttpUrl;"
+        ) { _, args in
+            let value = try requiredString(args, 1, "HttpUrl.Companion.parse")
+            guard let parsed = parsedHTTPURL(value) else { return .null }
+            return .obj(ObjInstance(dexType: httpUrl, payload: parsed, isHost: true))
+        }
+        bridge.register(class: httpUrl, "host", prototype: "()Ljava/lang/String;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "HttpUrl.host"),
+                  let url = object.payload as? HttpUrlBox else {
+                throw VMError.verify("HttpUrl.host receiver")
+            }
+            return string(url.host)
+        }
+        bridge.register(class: httpUrl, "pathSegments", prototype: "()Ljava/util/List;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "HttpUrl.pathSegments"),
+                  let url = object.payload as? HttpUrlBox else {
+                throw VMError.verify("HttpUrl.pathSegments receiver")
+            }
+            return hostList(url.pathSegments.map(string), isMutable: false)
+        }
+        bridge.register(class: httpUrl, "toString", prototype: "()Ljava/lang/String;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "HttpUrl.toString"),
+                  let url = object.payload as? HttpUrlBox else {
+                throw VMError.verify("HttpUrl.toString receiver")
+            }
+            return string(url.value)
+        }
+
+        let mediaType = "Lokhttp3/MediaType;"
+        let mediaTypeCompanion = "Lokhttp3/MediaType$Companion;"
+        bridge.staticFields["\(mediaType)->Companion"] = .obj(ObjInstance(
+            dexType: mediaTypeCompanion,
+            isHost: true
+        ))
+        bridge.register(
+            class: mediaTypeCompanion,
+            "get",
+            prototype: "(Ljava/lang/String;)Lokhttp3/MediaType;"
+        ) { _, args in
+            let value = try requiredString(args, 1, "MediaType.Companion.get")
+            guard validMediaType(value) else {
+                throw DEXThrowable(string("IllegalArgumentException: invalid media type"))
+            }
+            return .obj(ObjInstance(
+                dexType: mediaType,
+                payload: MediaTypeBox(value: value),
+                isHost: true
+            ))
+        }
+
+        let requestBody = "Lokhttp3/RequestBody;"
+        let requestBodyCompanion = "Lokhttp3/RequestBody$Companion;"
+        bridge.staticFields["\(requestBody)->Companion"] = .obj(ObjInstance(
+            dexType: requestBodyCompanion,
+            isHost: true
+        ))
+        bridge.register(
+            class: requestBodyCompanion,
+            "create",
+            prototype: "(Ljava/lang/String;Lokhttp3/MediaType;)Lokhttp3/RequestBody;"
+        ) { _, args in
+            let value = try requiredString(args, 1, "RequestBody.Companion.create")
+            guard value.utf8.count <= 1_048_576 else {
+                throw VMError.verify("RequestBody.Companion.create exceeds 1048576 UTF-8 bytes")
+            }
+            let mediaTypeValue: String?
+            switch try argument(args, 2, "RequestBody.Companion.create") {
+            case .null:
+                mediaTypeValue = nil
+            case let .obj(object):
+                guard let box = object.payload as? MediaTypeBox else {
+                    throw VMError.verify("RequestBody.Companion.create media type")
+                }
+                mediaTypeValue = box.value
+            default:
+                throw VMError.verify("RequestBody.Companion.create media type")
+            }
+            return .obj(ObjInstance(
+                dexType: requestBody,
+                payload: CompatHTTPRequestBody.text(value: value, mediaType: mediaTypeValue),
+                isHost: true
+            ))
+        }
+
+        let request = "Lokhttp3/Request;"
+        let requestBuilder = "Lokhttp3/Request$Builder;"
+        bridge.objectFactories[requestBuilder] = { _ in
+            .obj(ObjInstance(
+                dexType: requestBuilder,
+                payload: RequestBuilderBox(),
+                isHost: true
+            ))
+        }
+        bridge.register(class: requestBuilder, "<init>", prototype: "()V") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.Builder.<init>") else {
+                throw VMError.verify("Request.Builder constructor receiver")
+            }
+            object.payload = RequestBuilderBox()
+            return .null
+        }
+        bridge.register(
+            class: requestBuilder,
+            "url",
+            prototype: "(Lokhttp3/HttpUrl;)Lokhttp3/Request$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.Builder.url"),
+                  let builder = object.payload as? RequestBuilderBox,
+                  case let .obj(urlObject) = try argument(args, 1, "Request.Builder.url"),
+                  let url = urlObject.payload as? HttpUrlBox else {
+                throw VMError.verify("Request.Builder.url arguments")
+            }
+            builder.url = url.value
+            return .obj(object)
+        }
+        bridge.register(
+            class: requestBuilder,
+            "headers",
+            prototype: "(Lokhttp3/Headers;)Lokhttp3/Request$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.Builder.headers"),
+                  let builder = object.payload as? RequestBuilderBox,
+                  case let .obj(headersObject) = try argument(args, 1, "Request.Builder.headers"),
+                  let value = headersObject.payload as? HeadersBox else {
+                throw VMError.verify("Request.Builder.headers arguments")
+            }
+            builder.headers = value.headers
+            return .obj(object)
+        }
+        bridge.register(
+            class: requestBuilder,
+            "cacheControl",
+            prototype: "(Lokhttp3/CacheControl;)Lokhttp3/Request$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.Builder.cacheControl"),
+                  let builder = object.payload as? RequestBuilderBox,
+                  case let .obj(cacheObject) = try argument(args, 1, "Request.Builder.cacheControl"),
+                  let value = cacheObject.payload as? CacheControlBox else {
+                throw VMError.verify("Request.Builder.cacheControl arguments")
+            }
+            builder.cachePolicy = value.policy
+            return .obj(object)
+        }
+        bridge.register(
+            class: requestBuilder,
+            "post",
+            prototype: "(Lokhttp3/RequestBody;)Lokhttp3/Request$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.Builder.post"),
+                  let builder = object.payload as? RequestBuilderBox,
+                  case let .obj(bodyObject) = try argument(args, 1, "Request.Builder.post"),
+                  let body = bodyObject.payload as? CompatHTTPRequestBody else {
+                throw VMError.verify("Request.Builder.post arguments")
+            }
+            builder.method = "POST"
+            builder.body = body
+            return .obj(object)
+        }
+        bridge.register(
+            class: requestBuilder,
+            "build",
+            prototype: "()Lokhttp3/Request;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.Builder.build"),
+                  let builder = object.payload as? RequestBuilderBox,
+                  let url = builder.url else {
+                throw DEXThrowable(string("IllegalStateException: Request.url is required"))
+            }
+            return .obj(ObjInstance(
+                dexType: request,
+                payload: CompatHTTPRequest(
+                    url: url,
+                    method: builder.method,
+                    headers: builder.headers,
+                    body: builder.body,
+                    cachePolicy: builder.cachePolicy
+                ),
+                isHost: true
+            ))
+        }
+        bridge.register(class: request, "cacheControl", prototype: "()Lokhttp3/CacheControl;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.cacheControl"),
+                  let value = object.payload as? CompatHTTPRequest else {
+                throw VMError.verify("Request.cacheControl receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: cacheControl,
+                payload: CacheControlBox(policy: value.cachePolicy ?? CompatHTTPCachePolicy()),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: request,
+            "header",
+            prototype: "(Ljava/lang/String;)Ljava/lang/String;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.header"),
+                  let value = object.payload as? CompatHTTPRequest else {
+                throw VMError.verify("Request.header receiver")
+            }
+            let name = try requiredString(args, 1, "Request.header")
+            guard let header = value.headers.reversed().first(where: {
+                $0.name.caseInsensitiveCompare(name) == .orderedSame
+            }) else { return .null }
+            return string(header.value)
+        }
+        bridge.register(class: request, "method", prototype: "()Ljava/lang/String;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.method"),
+                  let value = object.payload as? CompatHTTPRequest else {
+                throw VMError.verify("Request.method receiver")
+            }
+            return string(value.method)
+        }
+        bridge.register(class: request, "url", prototype: "()Lokhttp3/HttpUrl;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.url"),
+                  let value = object.payload as? CompatHTTPRequest,
+                  let parsed = parsedHTTPURL(value.url) else {
+                throw VMError.verify("Request.url receiver")
+            }
+            return .obj(ObjInstance(dexType: httpUrl, payload: parsed, isHost: true))
+        }
+
+        let formBuilder = "Lokhttp3/FormBody$Builder;"
+        bridge.objectFactories[formBuilder] = { _ in
+            .obj(ObjInstance(
+                dexType: formBuilder,
+                payload: FormBodyBuilderBox(),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: formBuilder,
+            "<init>",
+            prototype: "(Ljava/nio/charset/Charset;ILkotlin/jvm/internal/DefaultConstructorMarker;)V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "FormBody.Builder.<init>"),
+                  case let .int(mask) = try argument(args, 2, "FormBody.Builder.<init>") else {
+                throw VMError.verify("FormBody.Builder constructor arguments")
+            }
+            let charset = try argument(args, 1, "FormBody.Builder.<init>")
+            guard mask & 0x1 != 0 || charset.isNull else {
+                throw VMError.verify("FormBody.Builder supports UTF-8/default charset only")
+            }
+            object.payload = FormBodyBuilderBox()
+            return .null
+        }
+        bridge.register(
+            class: formBuilder,
+            "add",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Lokhttp3/FormBody$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "FormBody.Builder.add"),
+                  let builder = object.payload as? FormBodyBuilderBox else {
+                throw VMError.verify("FormBody.Builder.add receiver")
+            }
+            let name = try requiredString(args, 1, "FormBody.Builder.add")
+            let value = try requiredString(args, 2, "FormBody.Builder.add")
+            guard builder.fields.count < 10_000 else {
+                throw VMError.verify("FormBody.Builder exceeds 10000 fields")
+            }
+            let addedBytes = name.utf8.count + value.utf8.count
+            guard addedBytes <= 1_048_576 - builder.utf8Bytes else {
+                throw VMError.verify("FormBody.Builder exceeds 1048576 UTF-8 bytes")
+            }
+            builder.fields.append(CompatHTTPFormField(name: name, value: value))
+            builder.utf8Bytes += addedBytes
+            return .obj(object)
+        }
+        bridge.register(
+            class: formBuilder,
+            "build",
+            prototype: "()Lokhttp3/FormBody;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "FormBody.Builder.build"),
+                  let builder = object.payload as? FormBodyBuilderBox else {
+                throw VMError.verify("FormBody.Builder.build receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: "Lokhttp3/FormBody;",
+                payload: CompatHTTPRequestBody.form(fields: builder.fields),
+                isHost: true
+            ))
+        }
+    }
+
+    private func networkHelper(for source: ObjInstance) -> RVal {
+        let identity = ObjectIdentifier(source)
+        if let existing = sourceNetworks[identity] { return existing }
+        let baseInterceptors = [
+            "UncaughtExceptionInterceptor",
+            "UserAgentInterceptor",
+            "CloudflareInterceptor",
+        ].map {
+            RVal.obj(ObjInstance(
+                dexType: "Leu/kanade/tachiyomi/network/interceptor/\($0);",
+                isHost: true
+            ))
+        }
+        let client = RVal.obj(ObjInstance(
+            dexType: "Lokhttp3/OkHttpClient;",
+            payload: OkHttpClientBox(interceptors: baseInterceptors),
+            isHost: true
+        ))
+        let helper = RVal.obj(ObjInstance(
+            dexType: "Leu/kanade/tachiyomi/network/NetworkHelper;",
+            payload: NetworkHelperBox(client: client),
+            isHost: true
+        ))
+        sourceNetworks[identity] = helper
+        return helper
     }
 
     private static func javaValueEquals(_ lhs: RVal, _ rhs: RVal) -> Bool {

@@ -7,7 +7,13 @@ User-Agent, through a portable continuation wrapper (the async
 `URLSession.data(from:)` conveniences are Darwin-only, and MihonCompatKit
 stays host-testable on Windows/Linux).
 
-## Extension-facing network stack (design, lands with the runtime)
+The extension runtime now models bounded OkHttp URLs, headers, form/text
+bodies, cache policy, requests, isolated client identities, interceptor lists,
+and inert calls. `OkHttpClient.newCall` exposes a transport-neutral
+`CompatHTTPRequest` for policy/transport handoff but performs no network I/O.
+The pinned BatCave path reaches `OkHttpExtensionsKt.awaitSuccess` exactly.
+
+## Extension-facing transport and response stack (next runtime slice)
 
 The OkHttp compatibility client must support what extension DEX measures show
 they use:

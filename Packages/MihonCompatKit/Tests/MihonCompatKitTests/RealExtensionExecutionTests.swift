@@ -95,10 +95,9 @@ final class RealExtensionExecutionTests: XCTestCase {
         XCTAssertEqual(object.dexType, cls)
     }
 
-    /// Characterizes the next honest boundary for a complete popular-manga
-    /// request. This locks all interpreted work before OkHttp form encoding:
-    /// class initialization, filters, collections, iteration, and Kotlin ABI.
-    func testBatCavePopularReachesHTTPBridgeFrontier() throws {
+    /// Characterizes the honest transport boundary for a complete popular-
+    /// manga request. All request construction is pure; no network is touched.
+    func testBatCavePopularBuildsRequestAndStopsBeforeTransport() throws {
         let (vm, _) = try loadVM("batcave")
         let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
         let receiver = try vm.instantiate(classDescriptor: cls)
@@ -111,12 +110,25 @@ final class RealExtensionExecutionTests: XCTestCase {
             guard case let VMError.unresolvedMethod(classDescriptor, signature) = error else {
                 return XCTFail("expected exact OkHttp frontier, got \(error)")
             }
-            XCTAssertEqual(classDescriptor, "Lokhttp3/FormBody$Builder;")
+            XCTAssertEqual(classDescriptor, "Leu/kanade/tachiyomi/network/OkHttpExtensionsKt;")
             XCTAssertEqual(
                 signature,
-                "<init>(Ljava/nio/charset/Charset;ILkotlin/jvm/internal/DefaultConstructorMarker;)V"
+                "awaitSuccess(Lokhttp3/Call;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
             )
         }
+        guard let request = vm.bridge.lastPreparedRequest else {
+            return XCTFail("expected a pure request model before the transport boundary")
+        }
+        XCTAssertEqual(request, CompatHTTPRequest(
+            url: "https://batcave.biz/comix/",
+            method: "POST",
+            body: .form(fields: [
+                CompatHTTPFormField(name: "dlenewssortby", value: "rating"),
+                CompatHTTPFormField(name: "dledirection", value: "desc"),
+                CompatHTTPFormField(name: "set_new_sort", value: "dle_sort_cat_1"),
+                CompatHTTPFormField(name: "set_direction_sort", value: "dle_direction_cat_1"),
+            ])
+        ))
     }
 
     /// MangaDex 1.4.212: the factory entry class's REAL constructor executes
