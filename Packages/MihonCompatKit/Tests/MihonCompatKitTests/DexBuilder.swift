@@ -130,7 +130,6 @@ struct DexBuilder {
 
         // class_data must encode ABSOLUTE code offsets; uleb width depends on
         // the values, so iterate to a fixed point (converges in one pass here).
-        var directMethods: [UInt8] = []
         var fieldEntries: [UInt8] = []
         for i in fields.indices {
             fieldEntries.append(contentsOf: ULEB.encode(UInt64(i == 0 ? 0 : 1)))
@@ -161,8 +160,6 @@ struct DexBuilder {
             guessedCodeBase = newBase
             classData = buildClassData(codeBaseGuess: guessedCodeBase)
         }
-        directMethods = []
-
         let stringIdsOff = 112
         let typeIdsOff = stringIdsOff + stringIdsSize * 4
         let protoIdsOff = typeIdsOff + typeIdsSize * 4
@@ -308,8 +305,8 @@ enum Insn {
         let d = regs.count > 1 ? regs[1] : 0
         let e = regs.count > 2 ? regs[2] : 0
         let f = regs.count > 3 ? regs[3] : 0
-        let unit2 = UInt16(c) | UInt16(d << 4) | UInt16(e << 8) | UInt16(f << 12)
-        return [UInt16(opcode) | UInt16(g << 8) | UInt16(a << 12), unit2, UInt16(methodIdx)]
+        let registerWord = UInt16(c) | UInt16(d << 4) | UInt16(e << 8) | UInt16(f << 12)
+        return [UInt16(opcode) | UInt16(g << 8) | UInt16(a << 12), UInt16(methodIdx), registerWord]
     }
     static func newInstance(_ reg: Int, _ typeIdx: Int) -> [UInt16] {
         [0x22 | UInt16(reg << 8), UInt16(typeIdx)]

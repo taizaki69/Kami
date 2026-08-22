@@ -15,11 +15,13 @@ struct ByteReader {
     enum Error: Swift.Error, CustomStringConvertible {
         case outOfBounds(needed: Int, at: Int)
         case badULEB128(at: Int)
+        case badSLEB128(at: Int)
 
         var description: String {
             switch self {
             case let .outOfBounds(needed, at): return "read of \(needed) bytes at offset \(at) exceeds buffer"
             case let .badULEB128(at): return "malformed ULEB128 at offset \(at)"
+            case let .badSLEB128(at): return "malformed SLEB128 at offset \(at)"
             }
         }
     }
@@ -65,32 +67,38 @@ struct ByteReader {
         var result: UInt64 = 0
         var shift: UInt64 = 0
         let start = offset
-        while true {
+        for byteIndex in 0..<10 {
             guard offset < bytes.count else { throw Error.outOfBounds(needed: 1, at: offset) }
             let b = bytes[offset]
             offset += 1
+            if byteIndex == 9, b & 0x7e != 0 { throw Error.badULEB128(at: start) }
             result |= UInt64(b & 0x7f) << shift
             if b & 0x80 == 0 { return result }
             shift += 7
-            if shift > 63 { throw Error.badULEB128(at: start) }
         }
+        throw Error.badULEB128(at: start)
     }
 
     /// Signed LEB128 (DEX uses it for access flags diffs etc.).
     mutating func sleb128() throws -> Int64 {
-        var result: Int64 = 0
-        var shift: Int64 = 0
-        while true {
+        var result: UInt64 = 0
+        var shift = 0
+        let start = offset
+        for byteIndex in 0..<10 {
             guard offset < bytes.count else { throw Error.outOfBounds(needed: 1, at: offset) }
             let b = bytes[offset]
             offset += 1
-            result |= Int64(b & 0x7f) << shift
+            if byteIndex == 9, b & 0x7e != 0, b & 0x7e != 0x7e {
+                throw Error.badSLEB128(at: start)
+            }
+            result |= UInt64(b & 0x7f) << UInt64(shift)
             shift += 7
             if b & 0x80 == 0 {
-                if shift < 64, b & 0x40 != 0 { result |= -1 << shift }
-                return result
+                if shift < 64, b & 0x40 != 0 { result |= UInt64.max << UInt64(shift) }
+                return Int64(bitPattern: result)
             }
         }
+        throw Error.badSLEB128(at: start)
     }
 
     func bytes(at range: Range<Int>) throws -> ArraySlice<UInt8> {

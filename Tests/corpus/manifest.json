@@ -1,1 +1,24 @@
-{"corpus": ["mangadex", "akuma", "batcave"], "source": "keiyoushi/extensions releases, fetched 2026-08-21"}
+{
+  "source": "keiyoushi/extensions GitHub release assets",
+  "locked": "2026-08-21",
+  "artifacts": [
+    {
+      "name": "akuma",
+      "package": "eu.kanade.tachiyomi.extension.all.akuma",
+      "version": "1.4.10",
+      "sha256": "9f5e744ee3066ccf0c785dc8f427af8b7854933997eee1fe349fea388d4ba39a"
+    },
+    {
+      "name": "mangadex",
+      "package": "eu.kanade.tachiyomi.extension.all.mangadex",
+      "version": "1.4.212",
+      "sha256": "543dcf6a89e5843528a147b658d0b8dc51baa12135682a5ad33c53fc1b306fa3"
+    },
+    {
+      "name": "batcave",
+      "package": "eu.kanade.tachiyomi.extension.en.batcave",
+      "version": "1.6.9",
+      "sha256": "f5338a90f9b9b40c27a2106ceb1e0c94713c38208998fd735bfabda18934fab6"
+    }
+  ]
+}

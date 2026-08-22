@@ -35,37 +35,64 @@ public final class HostBridge {
     public static func minimal() -> HostBridge {
         let bridge = HostBridge()
 
-        // Kotlin null checks — no-op in M1 (real parameter validation later).
+        // Kotlin null checks are common in generated extension bytecode. They
+        // return void for non-null values and surface a DEX exception for null.
         for name in [
             "checkNotNullParameter", "checkNotNull", "checkParameterIsNotNull",
             "checkExpressionValueIsNotNull", "checkNotNullExpressionValue",
-            "throwNpe", "throwUninitializedProperty",
         ] {
-            bridge.register(class: "Lkotlin/jvm/internal/Intrinsics;", name) { _, _ in .null }
+            bridge.register(class: "Lkotlin/jvm/internal/Intrinsics;", name) { _, args in
+                let value = try argument(args, 0, "Intrinsics.\(name)")
+                guard !value.isNull else {
+                    throw DEXThrowable(string("NullPointerException"))
+                }
+                return .null
+            }
+        }
+        bridge.register(class: "Lkotlin/jvm/internal/Intrinsics;", "throwNpe") { _, _ in
+            throw DEXThrowable(string("NullPointerException"))
+        }
+        for name in ["throwUninitializedProperty", "throwUninitializedPropertyAccessException"] {
+            bridge.register(class: "Lkotlin/jvm/internal/Intrinsics;", name) { _, args in
+                let property = args.first.map(vmStringValue) ?? ""
+                throw DEXThrowable(string("UninitializedPropertyAccessException: \(property)"))
+            }
         }
 
         // Object identity basics.
         bridge.register(class: "Ljava/lang/Object;", "<init>") { _, _ in .null }
         bridge.register(class: "Ljava/lang/Object;", "equals") { _, args in
-            .int(args[0] === args[1] ? 1 : 0)
+            let receiver = try argument(args, 0, "Object.equals")
+            let other = try argument(args, 1, "Object.equals")
+            return .int(receiver === other ? 1 : 0)
         }
         bridge.register(class: "Ljava/lang/Object;", "hashCode") { vm, args in
-            if case let .obj(o) = args[0] {
+            if case let .obj(o) = try argument(args, 0, "Object.hashCode") {
                 let h = UInt32(bitPattern: Int32(ObjectIdentifier(o).hashValue & 0x7FFFFFFF))
                 return .int(Int32(bitPattern: h))
             }
             return .int(0)
         }
         bridge.register(class: "Ljava/lang/Object;", "toString") { _, args in
-            Self.string(vmStringValue(args[0]))
+            Self.string(vmStringValue(try argument(args, 0, "Object.toString")))
         }
         bridge.register(class: "Ljava/lang/Object;", "getClass") { vm, args in
-            Self.classObject(for: args[0], vm: vm)
+            Self.classObject(for: try argument(args, 0, "Object.getClass"), vm: vm)
         }
 
         // java.lang.String surface (payload-backed).
         Self.registerStringSurface(bridge)
         Self.registerStringBuilder(bridge)
+
+        // These abstract tachiyomix base classes are supplied by the host app,
+        // not packaged in extension DEX files. Their empty construction surface
+        // is enough for extension subclasses whose own getters are self-contained.
+        for descriptor in [
+            "Leu/kanade/tachiyomi/source/online/HttpSource;",
+            "Leu/kanade/tachiyomi/source/online/ParsedHttpSource;",
+        ] {
+            bridge.register(class: descriptor, "<init>") { _, _ in .null }
+        }
         return bridge
     }
 
@@ -78,43 +105,79 @@ public final class HostBridge {
         func text(_ v: RVal) -> String { vmStringValue(v) }
         bridge.register(class: d, "<init>") { _, _ in .null }
         bridge.register(class: d, "append") { _, args in
-            guard case let .obj(o) = args[0] else { throw VMError.verify("append receiver") }
+            guard case let .obj(o) = try argument(args, 0, "StringBuilder.append") else {
+                throw VMError.verify("append receiver")
+            }
             let current = (o.payload as? String) ?? ""
-            o.payload = current + text(args[1])
+            o.payload = current + text(try argument(args, 1, "StringBuilder.append"))
             return .obj(o)
         }
-        bridge.register(class: d, "toString") { _, args in Self.string(text(args[0])) }
-        bridge.register(class: d, "length") { _, args in .int(Int32(text(args[0]).utf16.count)) }
-        bridge.register(class: d, "isEmpty") { _, args in .int(text(args[0]).isEmpty ? 1 : 0) }
+        bridge.register(class: d, "toString") { _, args in
+            Self.string(text(try argument(args, 0, "StringBuilder.toString")))
+        }
+        bridge.register(class: d, "length") { _, args in
+            .int(Int32(text(try argument(args, 0, "StringBuilder.length")).utf16.count))
+        }
+        bridge.register(class: d, "isEmpty") { _, args in
+            .int(text(try argument(args, 0, "StringBuilder.isEmpty")).isEmpty ? 1 : 0)
+        }
     }
 
     static func string(_ s: String) -> RVal {
         .obj(ObjInstance(dexType: "Ljava/lang/String;", payload: s, isHost: true))
     }
 
+    private static func argument(_ args: [RVal], _ index: Int, _ method: String) throws -> RVal {
+        guard index >= 0, index < args.count else {
+            throw VMError.verify("\(method) expected argument \(index), got \(args.count) values")
+        }
+        return args[index]
+    }
+
+    private static func stringPayload(_ value: RVal) -> String? {
+        guard case let .obj(object) = value,
+              object.dexType == "Ljava/lang/String;" else { return nil }
+        return object.payload as? String
+    }
+
     static func registerStringSurface(_ bridge: HostBridge) {
         let d = "Ljava/lang/String;"
-        bridge.register(class: d, "length") { _, args in .int(Int32(vmStringValue(args[0]).utf16.count)) }
-        bridge.register(class: d, "isEmpty") { _, args in .int(vmStringValue(args[0]).isEmpty ? 1 : 0) }
+        bridge.register(class: d, "length") { _, args in
+            .int(Int32(vmStringValue(try argument(args, 0, "String.length")).utf16.count))
+        }
+        bridge.register(class: d, "isEmpty") { _, args in
+            .int(vmStringValue(try argument(args, 0, "String.isEmpty")).isEmpty ? 1 : 0)
+        }
         bridge.register(class: d, "charAt") { _, args in
-            guard case let .int(i) = args[1] else { throw VMError.verify("charAt non-int index") }
-            let units = Array(vmStringValue(args[0]).utf16)
-            guard Int(i) < units.count else { throw DEXThrowable(Self.string("StringIndexOutOfBoundsException")) }
+            let receiver = try argument(args, 0, "String.charAt")
+            guard case let .int(i) = try argument(args, 1, "String.charAt") else {
+                throw VMError.verify("charAt non-int index")
+            }
+            let units = Array(vmStringValue(receiver).utf16)
+            guard i >= 0, Int(i) < units.count else {
+                throw DEXThrowable(Self.string("StringIndexOutOfBoundsException"))
+            }
             return .int(Int32(units[Int(i)]))
         }
         bridge.register(class: d, "equals") { _, args in
-            .int(vmStringValue(args[0]) == vmStringValue(args[1]) ? 1 : 0)
+            let lhs = try argument(args, 0, "String.equals")
+            let rhs = try argument(args, 1, "String.equals")
+            return .int(stringPayload(lhs) == stringPayload(rhs) && stringPayload(lhs) != nil ? 1 : 0)
         }
         bridge.register(class: d, "hashCode") { _, args in
             // Java string hash: s[0]*31^(n-1) + …
             var h: Int32 = 0
-            for u in vmStringValue(args[0]).utf16 { h = 31 &* h &+ Int32(u) }
+            for u in vmStringValue(try argument(args, 0, "String.hashCode")).utf16 { h = 31 &* h &+ Int32(u) }
             return .int(h)
         }
         bridge.register(class: d, "concat") { _, args in
-            Self.string(vmStringValue(args[0]) + vmStringValue(args[1]))
+            let lhs = try argument(args, 0, "String.concat")
+            let rhs = try argument(args, 1, "String.concat")
+            return Self.string(vmStringValue(lhs) + vmStringValue(rhs))
         }
-        bridge.register(class: d, "toString") { _, args in Self.string(vmStringValue(args[0])) }
+        bridge.register(class: d, "toString") { _, args in
+            Self.string(vmStringValue(try argument(args, 0, "String.toString")))
+        }
     }
 
     static func classObject(for value: RVal, vm: DexInterpreter) -> RVal {

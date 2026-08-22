@@ -1,85 +1,56 @@
 #!/usr/bin/env bash
-# Downloads a small, diverse corpus of REAL current extension APKs for
-# compatibility testing, then runs compat-audit over it.
-#
-# The corpus mixes extension styles: big JSON API source, multisrc generator,
-# lib-1.6 source, etc. Extend `PKGS` as coverage grows.
+# Fetches the pinned real-extension corpus used by execution tests. APKs stay
+# ignored by Git; immutable URLs plus SHA-256 checks keep CI reproducible.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CORPUS="Tests/corpus"
 mkdir -p "$CORPUS"
-INDEX="$CORPUS/index.pb"
 
-echo "==> Fetching keiyoushi store index"
-curl -sL "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.pb" -o "$INDEX"
+download() {
+  local name="$1"
+  local url="$2"
+  local expected="$3"
+  local destination="$CORPUS/$name.apk"
+  local temporary="$destination.tmp.$$"
 
-# Extract apkUrl per package with python (protobuf is length-delimited soup;
-# a 20-line walker is more robust than a full parser here).
-python3 - "$INDEX" "$CORPUS" << 'EOF'
-import gzip, json, sys, urllib.request, os
+  if [[ -f "$destination" ]] &&
+      [[ "$(shasum -a 256 "$destination" | awk '{print $1}')" == "$expected" ]]; then
+    echo "==> $name.apk already matches the corpus lock"
+    return
+  fi
 
-index_path, corpus = sys.argv[1], sys.argv[2]
-data = open(index_path, 'rb').read()
-if data[:2] == b'\x1f\x8b':
-    data = gzip.decompress(data)
+  trap 'rm -f "$temporary"' EXIT
+  echo "==> Fetching $name.apk"
+  curl --fail --location --silent --show-error --retry 3 \
+    --proto '=https' --tlsv1.2 "$url" --output "$temporary"
+  echo "$expected  $temporary" | shasum -a 256 --check --status
+  mv "$temporary" "$destination"
+  trap - EXIT
+}
 
-def rv(b, i):
-    v = 0; s = 0
-    while True:
-        x = b[i]; i += 1
-        v |= (x & 0x7f) << s
-        if not (x & 0x80): return v, i
-        s += 7
+download \
+  akuma \
+  "https://github.com/keiyoushi/extensions/releases/download/a76c957-0/tachiyomi-all.akuma-v1.4.10.apk" \
+  "9f5e744ee3066ccf0c785dc8f427af8b7854933997eee1fe349fea388d4ba39a"
 
-def fields(b):
-    i = 0
-    while i < len(b):
-        t, i = rv(b, i); f, wt = t >> 3, t & 7
-        if wt == 0: v, i = rv(b, i); yield f, v
-        elif wt == 2: l, i = rv(b, i); yield f, b[i:i+l]; i += l
-        elif wt == 5: yield f, b[i:i+4]; i += 4
-        elif wt == 1: yield f, b[i:i+8]; i += 8
-        else: raise SystemExit('bad wire type')
+download \
+  mangadex \
+  "https://github.com/keiyoushi/extensions/releases/download/01cba61/tachiyomi-all.mangadex-v1.4.212.apk" \
+  "543dcf6a89e5843528a147b658d0b8dc51baa12135682a5ad33c53fc1b306fa3"
 
-WANT = [
-    'eu.kanade.tachiyomi.extension.all.mangadex',
-    'eu.kanade.tachiyomi.extension.all.akuma',
-    'eu.kanade.tachiyomi.extension.en.batcave',
-]
-exts = None
-for f, v in fields(data):
-    if f == 101: exts = v
-if exts is None: raise SystemExit('index has no inline extension list')
+download \
+  batcave \
+  "https://github.com/keiyoushi/extensions/releases/download/a18924b/tachiyomi-en.batcave-v1.6.9.apk" \
+  "f5338a90f9b9b40c27a2106ceb1e0c94713c38208998fd735bfabda18934fab6"
 
-manifest = []
-for f, v in fields(exts):
-    if f != 1: continue
-    pkg = apk = None
-    for ff, vv in fields(v):
-        if ff == 2: pkg = vv.decode()
-        if ff == 3:
-            for f3, v3 in fields(vv):
-                if f3 == 1: apk = v3.decode()
-    if pkg in WANT:
-        manifest.append((pkg, apk))
+echo "==> Pinned corpus ready"
 
-for pkg, apk in manifest:
-    name = pkg.split('.')[-1] + '.apk'
-    dest = os.path.join(corpus, name)
-    if os.path.exists(dest):
-        print('have', name); continue
-    print('fetching', name)
-    urllib.request.urlretrieve(apk, dest)
-json.dump([p for p, _ in manifest], open(os.path.join(corpus, 'manifest.json'), 'w'), indent=1)
-print(f'corpus ready: {len(manifest)} APKs in {corpus}')
-EOF
-
-# Audit each APK if the compat-audit tool is built.
-BIN=".build/x86_64-unknown-windows-msvc/release/compat-audit"
-[ -x "$BIN" ] || BIN=".build/release/compat-audit"
-[ -x "$BIN" ] && for apk in "$CORPUS"/*.apk; do
-  echo "==> $(basename "$apk")"
-  "$BIN" inspect "$apk" | sed -n '1,12p'
-done
-exit 0
+# Audit each APK when a release compat-audit binary is already present.
+BIN="Packages/MihonCompatKit/.build/release/compat-audit"
+if [[ -x "$BIN" ]]; then
+  for apk in "$CORPUS"/*.apk; do
+    echo "==> Auditing $(basename "$apk")"
+    "$BIN" inspect "$apk" | sed -n '1,12p'
+  done
+fi

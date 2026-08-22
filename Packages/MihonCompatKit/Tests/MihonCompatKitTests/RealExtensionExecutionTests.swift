@@ -31,9 +31,12 @@ final class RealExtensionExecutionTests: XCTestCase {
     /// the first method from a real extension APK executed by Kami's VM.
     func testBatCaveGetBaseUrl() throws {
         let (vm, _) = try loadVM("batcave")
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = RVal.obj(ObjInstance(dexType: cls))
         let result = try vm.call(
-            classDescriptor: "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;",
-            method: "getBaseUrl"
+            classDescriptor: cls,
+            method: "getBaseUrl",
+            args: [receiver]
         )
         let url = vmStringValue(result)
         XCTAssertTrue(url.hasPrefix("https://"), "expected a URL, got: \(url)")
@@ -42,18 +45,24 @@ final class RealExtensionExecutionTests: XCTestCase {
 
     func testBatCaveGetLang() throws {
         let (vm, _) = try loadVM("batcave")
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = RVal.obj(ObjInstance(dexType: cls))
         let result = try vm.call(
-            classDescriptor: "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;",
-            method: "getLang"
+            classDescriptor: cls,
+            method: "getLang",
+            args: [receiver]
         )
         XCTAssertEqual(vmStringValue(result), "en")
     }
 
     func testBatCaveGetName() throws {
         let (vm, _) = try loadVM("batcave")
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = RVal.obj(ObjInstance(dexType: cls))
         let result = try vm.call(
-            classDescriptor: "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;",
-            method: "getName"
+            classDescriptor: cls,
+            method: "getName",
+            args: [receiver]
         )
         XCTAssertEqual(vmStringValue(result), "BatCave")
     }
@@ -61,9 +70,12 @@ final class RealExtensionExecutionTests: XCTestCase {
     /// getId(): const-wide + return-wide — 64-bit path from a real APK.
     func testBatCaveGetId() throws {
         let (vm, _) = try loadVM("batcave")
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = RVal.obj(ObjInstance(dexType: cls))
         let result = try vm.call(
-            classDescriptor: "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;",
-            method: "getId"
+            classDescriptor: cls,
+            method: "getId",
+            args: [receiver]
         )
         guard case let .long(id) = result else {
             return XCTFail("expected long, got \(result)")
@@ -78,36 +90,20 @@ final class RealExtensionExecutionTests: XCTestCase {
     func testMangaDexConstructorExecutes() throws {
         let (vm, manifest) = try loadVM("mangadex")
         let cls = "L" + (manifest.resolvedSourceClass ?? "").replacingOccurrences(of: ".", with: "/") + ";"
-        do {
-            let obj = try vm.instantiate(classDescriptor: cls)
-            guard case let .obj(o) = obj, o.dexType == cls else {
-                return XCTFail("expected instance of \(cls)")
-            }
-        } catch {
-            // Known limitation (tracked): some class_data method-index decodes
-            // collide across classes in this dex, tripping the depth guard on
-            // the super-call. The guaranteed property is a catchable error —
-            // never a host crash.
-            XCTAssertTrue(error is VMError || error is DEXThrowable,
-                          "unexpected error type: \(error)")
+        let obj = try vm.instantiate(classDescriptor: cls)
+        guard case let .obj(o) = obj, o.dexType == cls else {
+            return XCTFail("expected instance of \(cls)")
         }
     }
 
-    /// Akuma 1.4.10 (27-source multisrc): the constructor's super-call
-    /// currently mis-resolves through a class_data index collision (tracked);
-    /// the important M1 guarantee under test is that runaway recursion is
-    /// stopped by the depth guard and surfaces as a CATCHABLE error — the
-    /// host process never crashes on untrusted bytecode.
-    func testAkumaConstructorCannotCrashHost() throws {
+    /// Akuma 1.4.10 (27-source multisrc): execute the real factory constructor
+    /// and require a real object, rather than treating any VM error as success.
+    func testAkumaConstructorExecutes() throws {
         let (vm, manifest) = try loadVM("akuma")
         let cls = "L" + (manifest.resolvedSourceClass ?? "").replacingOccurrences(of: ".", with: "/") + ";"
-        do {
-            _ = try vm.instantiate(classDescriptor: cls)
-            // Executing cleanly is also acceptable.
-        } catch {
-            // Must be a VM error, not a crash.
-            XCTAssertTrue(error is VMError || error is DEXThrowable,
-                          "unexpected error type: \(error)")
+        let obj = try vm.instantiate(classDescriptor: cls)
+        guard case let .obj(o) = obj, o.dexType == cls else {
+            return XCTFail("expected instance of \(cls)")
         }
     }
 }

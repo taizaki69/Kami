@@ -21,6 +21,9 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Fetch pinned extension corpus
+        run: bash ./scripts/fetch_corpus.sh
+
       - name: MihonCompatKit tests
         run: swift test --package-path Packages/MihonCompatKit
 

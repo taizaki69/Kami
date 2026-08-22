@@ -26,6 +26,8 @@ public final class DexInterpreter {
     private var lastResult: RVal = .null
     /// Current interpreted-frame depth (recursion guard).
     private var depth = 0
+    /// One budget shared by the complete interpreted call tree.
+    private var remainingInstructions = 0
     /// Conservative default: interpreted frames are large in debug builds and
     /// unbounded recursion (obfuscated/mis-resolved super calls) must not
     /// overflow the host stack. The production runtime raises this by
@@ -74,8 +76,14 @@ public final class DexInterpreter {
             guard let field = try? fieldAt(f.fieldIndex) else { continue }
             obj.fields[field.name] = defaultValue(for: field.type)
         }
-        if let ctor = def.directMethods.first(where: { dex.methodIds[$0.methodIndex].name == "<init>" }) {
+        let constructors = def.directMethods.filter { dex.methodIds[$0.methodIndex].name == "<init>" }
+        if let ctor = constructors.first(where: {
+            let reference = dex.methodIds[$0.methodIndex]
+            return reference.prototype.parameters.isEmpty
+        }) {
             _ = try execute(def: def, method: ctor, args: [.obj(obj)])
+        } else if !constructors.isEmpty {
+            throw VMError.unresolvedMethod(class: classDescriptor, signature: "<init>()V")
         }
         return .obj(obj)
     }
@@ -107,14 +115,23 @@ public final class DexInterpreter {
             }
             throw VMError.unresolvedMethod(class: ref.declaringClass, signature: ref.name)
         }
+        let isRootFrame = depth == 0
         guard depth < maxCallDepth else {
             throw VMError.verify("call depth exceeded \(maxCallDepth) (runaway recursion)")
         }
         depth += 1
         defer { depth -= 1 }
 
+        let incomingWords = args.reduce(0) { $0 + ($1.isWide ? 2 : 1) }
+        guard incomingWords == Int(code.insSize), incomingWords <= Int(code.registersSize) else {
+            throw VMError.verify(
+                "argument width \(incomingWords) does not match ins_size \(code.insSize) for \(dex.methodIds[method.methodIndex].name)"
+            )
+        }
+        if isRootFrame { remainingInstructions = maxInstructions }
+
         var regs = [RVal](repeating: .int(0), count: Int(code.registersSize))
-        var cursor = 0
+        var cursor = regs.count - incomingWords
         for value in args {
             guard cursor + (value.isWide ? 2 : 1) <= regs.count else {
                 throw VMError.verify("register file too small for arguments of \(dex.methodIds[method.methodIndex].name)")
@@ -126,25 +143,24 @@ public final class DexInterpreter {
 
         let tries = Self.parseTries(code, dex: dex)
         var pc = 0
-        var budget = maxInstructions
+        var pendingException: RVal?
 
         while pc < code.insnsCount {
-            budget -= 1
-            if budget <= 0 { throw VMError.budgetExceeded(limit: maxInstructions) }
-            if budget & 0x3FF == 0, cancelled() { throw VMError.cancelled }
+            guard remainingInstructions > 0 else { throw VMError.budgetExceeded(limit: maxInstructions) }
+            remainingInstructions -= 1
+            if remainingInstructions & 0x3FF == 0, cancelled() { throw VMError.cancelled }
 
             do {
-                pc = try step(pc, &regs, def, method, code)
+                pc = try step(pc, &regs, &pendingException, def, method, code)
             } catch let ret as FrameReturn {
                 return ret.value
             } catch let thrown as DEXThrowable {
                 guard let handler = Self.handler(for: thrown.value, at: pc, in: tries) else { throw thrown }
-                regs = [RVal](repeating: .int(0), count: Int(code.registersSize))
-                regs[0] = thrown.value
+                pendingException = thrown.value
                 pc = handler
             }
         }
-        return .null
+        throw VMError.verify("method \(dex.methodIds[method.methodIndex].name) fell off the end of its code item")
     }
 
     static func handler(for value: RVal, at pc: Int, in tries: [TryBlock]) -> Int? {
@@ -188,21 +204,27 @@ public final class DexInterpreter {
 
     /// Reads up to `count` instruction code units at `pc` (speculative reads
     /// past the instruction are safe: bounded by the code item).
-    private func readUnits(_ pc: Int, _ code: DexFile.CodeItem, count: Int) -> [UInt16] {
+    private func readUnits(_ pc: Int, _ code: DexFile.CodeItem, count: Int) throws -> [UInt16] {
+        guard pc >= 0, pc < code.insnsCount else {
+            throw VMError.verify("instruction address \(pc) outside code item")
+        }
         var out: [UInt16] = []
         out.reserveCapacity(count)
         for i in 0..<count where pc + i < code.insnsCount {
             let off = code.insnsOffset + (pc + i) * 2
+            guard off >= 0, off + 1 < dex.source.count else {
+                throw VMError.verify("truncated instruction at address \(pc + i)")
+            }
             out.append(UInt16(dex.source[off]) | UInt16(dex.source[off + 1]) << 8)
         }
         while out.count < count { out.append(0) }
         return out
     }
 
-    private func step(_ pc0: Int, _ regs: inout [RVal], _ def: DexFile.ClassDef,
+    private func step(_ pc0: Int, _ regs: inout [RVal], _ pendingException: inout RVal?, _ def: DexFile.ClassDef,
                       _ method: DexFile.EncodedMethod, _ code: DexFile.CodeItem) throws -> Int {
         let pc = pc0
-        let u = readUnits(pc, code, count: 5)
+        let u = try readUnits(pc, code, count: 5)
         let op = UInt8(u[0] & 0xFF)
         trace?("pc=\(pc) op=0x\(String(op, radix: 16)) u=\(u.prefix(3).map { String($0, radix: 16) }) regs=\(regs.map { short($0) })")
 
@@ -216,16 +238,16 @@ public final class DexInterpreter {
             regs[i] = v
             if v.isWide, i + 1 < regs.count { regs[i + 1] = v }
         }
-        func i32(_ i: Int) -> Int32 { if case let .int(v) = regs[i] { return v }; return 0 }
-        func i64(_ i: Int) -> Int64 { if case let .long(v) = regs[i] { return v }; return 0 }
-        func f32(_ i: Int) -> Float { if case let .float(v) = regs[i] { return v }; return 0 }
-        func f64(_ i: Int) -> Double { if case let .double(v) = regs[i] { return v }; return 0 }
+        func i32(_ i: Int) -> Int32 { if case let .int(v) = reg(i) { return v }; return 0 }
+        func i64(_ i: Int) -> Int64 { if case let .long(v) = reg(i) { return v }; return 0 }
+        func f32(_ i: Int) -> Float { if case let .float(v) = reg(i) { return v }; return 0 }
+        func f64(_ i: Int) -> Double { if case let .double(v) = reg(i) { return v }; return 0 }
         func obj(_ i: Int) throws -> ObjInstance {
-            guard case let .obj(o) = regs[i] else { throw DEXThrowable(HostBridge.string("NullPointerException")) }
+            guard case let .obj(o) = reg(i) else { throw DEXThrowable(HostBridge.string("NullPointerException")) }
             return o
         }
         func arr(_ i: Int) throws -> ArrInstance {
-            guard case let .arr(a) = regs[i] else { throw DEXThrowable(HostBridge.string("NullPointerException")) }
+            guard case let .arr(a) = reg(i) else { throw DEXThrowable(HostBridge.string("NullPointerException")) }
             return a
         }
 
@@ -233,39 +255,44 @@ public final class DexInterpreter {
         // ---- nop / moves (0x00–0x0d) ----
         case 0x00: return pc + 1
         case 0x01, 0x04, 0x07: // move[-wide|-object] vA, vB (12x)
-            setReg(Int(u[0] >> 8 & 0xFF), reg(Int(u[1] & 0xFF))); return pc + 2
+            setReg(Int(u[0] >> 8 & 0x0F), reg(Int(u[0] >> 12))); return pc + 1
         case 0x02, 0x05, 0x08: // .../from16 vAA, vBBBB (22x)
             setReg(Int(u[0] >> 8), reg(Int(u[1]))); return pc + 2
         case 0x03, 0x06, 0x09: // .../16 (32x)
             setReg(Int(u[1]), reg(Int(u[2]))); return pc + 3
         case 0x0a, 0x0b, 0x0c: // move-result[-wide|-object] vAA (11x)
             setReg(Int(u[0] >> 8), lastResult); return pc + 1
-        case 0x0d: // move-exception vAA (handler placed the value in v0)
-            setReg(Int(u[0] >> 8), regs[0]); return pc + 1
+        case 0x0d: // move-exception vAA
+            guard let exception = pendingException else {
+                throw VMError.verify("move-exception outside an exception handler")
+            }
+            setReg(Int(u[0] >> 8), exception)
+            pendingException = nil
+            return pc + 1
 
         // ---- returns (0x0e–0x11) ----
         case 0x0e: throw FrameReturn(value: .null)
         case 0x0f, 0x10, 0x11: throw FrameReturn(value: reg(Int(u[0] >> 8)))
 
         // ---- constants (0x12–0x1c) ----
-        case 0x12: return try { // const/4 vA, #+B — B is SIGNED 4-bit in high nibble
-            let b = Int8(bitPattern: UInt8(truncatingIfNeeded: u[0] >> 12))
-            setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(b)))
+        case 0x12: // const/4 vA, #+B — B is a signed nibble
+            let raw = Int32((u[0] >> 12) & 0x0F)
+            setReg(Int(u[0] >> 8 & 0x0F), .int((raw & 0x08) == 0 ? raw : raw - 16))
             return pc + 1
-        }()
         case 0x13: // const/16 vAA, #+BBBB
             setReg(Int(u[0] >> 8), .int(Int32(Int16(bitPattern: u[1])))); return pc + 2
-        case 0x14: return try { // const vAA, #+BBBBBBBB
+        case 0x14: return { // const vAA, #+BBBBBBBB
             let v = UInt32(u[1]) | UInt32(u[2]) << 16
             setReg(Int(u[0] >> 8), .int(Int32(bitPattern: v))); return pc + 3
         }()
         case 0x15: // const/high16
             setReg(Int(u[0] >> 8), .int(Int32(bitPattern: UInt32(u[1]) << 16))); return pc + 2
         case 0x16: // const-wide/16
-            setReg(Int(u[0] >> 8), .long(Int64(Int32(bitPattern: UInt32(u[1]))))); return pc + 2
+            setReg(Int(u[0] >> 8), .long(Int64(Int16(bitPattern: u[1])))); return pc + 2
         case 0x17: // const-wide/32
-            setReg(Int(u[0] >> 8), .long(Int64(Int32(bitPattern: UInt32(u[1]))))); return pc + 2
-        case 0x18: return try { // const-wide vAA, #+BBBBBBBBBBBBBBBB
+            let bits = UInt32(u[1]) | UInt32(u[2]) << 16
+            setReg(Int(u[0] >> 8), .long(Int64(Int32(bitPattern: bits)))); return pc + 3
+        case 0x18: return { // const-wide vAA, #+BBBBBBBBBBBBBBBB
             let lo = UInt32(u[1]) | UInt32(u[2]) << 16
             let hi = UInt32(u[3]) | UInt32(u[4]) << 16
             setReg(Int(u[0] >> 8), .long(Int64(bitPattern: UInt64(hi) << 32 | UInt64(lo))))
@@ -294,7 +321,7 @@ public final class DexInterpreter {
         }()
         case 0x21: return try { // array-length vA, vB
             let a = try arr(Int(u[0] >> 12))
-            setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(a.elements.count))); return pc + 2
+            setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(a.elements.count))); return pc + 1
         }()
         case 0x22: return try { // new-instance vAA, type@BBBB
             let desc = try typeAt(Int(u[1]))
@@ -304,23 +331,25 @@ public final class DexInterpreter {
             let count = i32(Int(u[0] >> 12))
             let elem = String(try typeAt(Int(u[1])).dropFirst())
             guard count >= 0 else { throw DEXThrowable(HostBridge.string("NegativeArraySizeException")) }
+            guard count <= 1_000_000 else { throw VMError.verify("array size \(count) exceeds runtime limit") }
             let fill = defaultValue(for: elem)
             setReg(Int(u[0] >> 8 & 0x0F), .arr(ArrInstance(elemDescriptor: elem, elements: [RVal](repeating: fill, count: Int(count)))))
             return pc + 2
         }()
         case 0x24: return try { // filled-new-array {vC..vG}, type@CCCC
             let count = Int(u[0] >> 12)
+            guard count <= 5 else { throw VMError.verify("filled-new-array register count \(count)") }
             let g = Int(u[0] >> 8 & 0x0F)
-            var indices = [Int(u[1] & 0x0F), Int(u[1] >> 4 & 0x0F), Int(u[1] >> 8 & 0x0F), Int(u[1] >> 12)]
+            var indices = [Int(u[2] & 0x0F), Int(u[2] >> 4 & 0x0F), Int(u[2] >> 8 & 0x0F), Int(u[2] >> 12)]
             if count == 5 { indices.append(g) } else { indices = Array(indices.prefix(count)) }
-            let elem = String(try typeAt(Int(u[2])).dropFirst())
+            let elem = String(try typeAt(Int(u[1])).dropFirst())
             lastResult = .arr(ArrInstance(elemDescriptor: elem, elements: indices.map(reg)))
             return pc + 3
         }()
         case 0x25: return try { // filled-new-array/range {vCCCC .. vNNNN}
             let count = Int(u[0] >> 8)
-            let start = Int(u[1])
-            let elem = String(try typeAt(Int(u[2])).dropFirst())
+            let start = Int(u[2])
+            let elem = String(try typeAt(Int(u[1])).dropFirst())
             lastResult = .arr(ArrInstance(elemDescriptor: elem, elements: (0..<count).map { reg(start + $0) }))
             return pc + 3
         }()
@@ -396,7 +425,7 @@ public final class DexInterpreter {
         // ---- aput (0x4b–0x51) ----
         case 0x4b...0x51:
             let value = reg(Int(u[0] >> 8))
-            var a = try arr(Int(u[1] & 0xFF))
+            let a = try arr(Int(u[1] & 0xFF))
             let idx = i32(Int(u[1] >> 8))
             guard idx >= 0, Int(idx) < a.elements.count else {
                 throw DEXThrowable(HostBridge.string("ArrayIndexOutOfBoundsException: \(idx)"))
@@ -432,10 +461,12 @@ public final class DexInterpreter {
         // ---- invoke (0x6e–0x72) ----
         case 0x6e...0x72: return try {
             let count = Int(u[0] >> 12)
+            guard count <= 5 else { throw VMError.verify("invoke register count \(count)") }
             let g = Int(u[0] >> 8 & 0x0F)
-            var indices = [Int(u[1] & 0x0F), Int(u[1] >> 4 & 0x0F), Int(u[1] >> 8 & 0x0F), Int(u[1] >> 12)]
+            // 35c: A|G|op, BBBB method index, F|E|D|C registers.
+            var indices = [Int(u[2] & 0x0F), Int(u[2] >> 4 & 0x0F), Int(u[2] >> 8 & 0x0F), Int(u[2] >> 12)]
             if count == 5 { indices.append(g) } else { indices = Array(indices.prefix(count)) }
-            try invokeRegs(methodIndex: Int(u[2]), regs: regs, indices: indices)
+            try invokeRegs(methodIndex: Int(u[1]), regs: regs, indices: indices)
             return pc + 3
         }()
 
@@ -450,27 +481,33 @@ public final class DexInterpreter {
         }()
 
         // ---- unary (0x7b–0x8f), format 12x: vA ← op vB ----
-        case 0x7b: setReg(Int(u[0] >> 8 & 0x0F), .int(-i32(Int(u[1] & 0xFF)))); return pc + 2
-        case 0x7c: setReg(Int(u[0] >> 8 & 0x0F), .int(~i32(Int(u[1] & 0xFF)))); return pc + 2
-        case 0x7d: setReg(Int(u[0] >> 8 & 0x0F), .long(-i64(Int(u[1] & 0xFF)))); return pc + 2
-        case 0x7e: setReg(Int(u[0] >> 8 & 0x0F), .long(~i64(Int(u[1] & 0xFF)))); return pc + 2
-        case 0x7f: setReg(Int(u[0] >> 8 & 0x0F), .float(-f32(Int(u[1] & 0xFF)))); return pc + 2
-        case 0x80: setReg(Int(u[0] >> 8 & 0x0F), .double(-f64(Int(u[1] & 0xFF)))); return pc + 2
-        case 0x81: setReg(Int(u[0] >> 8 & 0x0F), .long(Int64(i32(Int(u[1] & 0xFF))))); return pc + 2
-        case 0x82: setReg(Int(u[0] >> 8 & 0x0F), .float(Float(i32(Int(u[1] & 0xFF))))); return pc + 2
-        case 0x83: setReg(Int(u[0] >> 8 & 0x0F), .double(Double(i32(Int(u[1] & 0xFF))))); return pc + 2
-        case 0x84: setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(truncatingIfNeeded: i64(Int(u[1] & 0xFF))))); return pc + 2
-        case 0x85: setReg(Int(u[0] >> 8 & 0x0F), .float(Float(i64(Int(u[1] & 0xFF))))); return pc + 2
-        case 0x86: setReg(Int(u[0] >> 8 & 0x0F), .double(Double(i64(Int(u[1] & 0xFF))))); return pc + 2
-        case 0x87: setReg(Int(u[0] >> 8 & 0x0F), .int(javaNarrowToInt(Double(f32(Int(u[1] & 0xFF)))))); return pc + 2
-        case 0x88: setReg(Int(u[0] >> 8 & 0x0F), .long(javaNarrowToLong(Double(f32(Int(u[1] & 0xFF)))))); return pc + 2
-        case 0x89: setReg(Int(u[0] >> 8 & 0x0F), .double(Double(f32(Int(u[1] & 0xFF))))); return pc + 2
-        case 0x8a: setReg(Int(u[0] >> 8 & 0x0F), .int(javaNarrowToInt(f64(Int(u[1] & 0xFF))))); return pc + 2
-        case 0x8b: setReg(Int(u[0] >> 8 & 0x0F), .long(javaNarrowToLong(f64(Int(u[1] & 0xFF))))); return pc + 2
-        case 0x8c: setReg(Int(u[0] >> 8 & 0x0F), .float(Float(f64(Int(u[1] & 0xFF))))); return pc + 2
-        case 0x8d: setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(Int8(truncatingIfNeeded: i32(Int(u[1] & 0xFF)))))); return pc + 2
-        case 0x8e: setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(UInt16(truncatingIfNeeded: i32(Int(u[1] & 0xFF)))))); return pc + 2
-        case 0x8f: setReg(Int(u[0] >> 8 & 0x0F), .int(Int32(Int16(truncatingIfNeeded: i32(Int(u[1] & 0xFF)))))); return pc + 2
+        case 0x7b...0x8f:
+            let dst = Int(u[0] >> 8 & 0x0F)
+            let src = Int(u[0] >> 12)
+            switch op {
+            case 0x7b: setReg(dst, .int(0 &- i32(src)))
+            case 0x7c: setReg(dst, .int(~i32(src)))
+            case 0x7d: setReg(dst, .long(0 &- i64(src)))
+            case 0x7e: setReg(dst, .long(~i64(src)))
+            case 0x7f: setReg(dst, .float(-f32(src)))
+            case 0x80: setReg(dst, .double(-f64(src)))
+            case 0x81: setReg(dst, .long(Int64(i32(src))))
+            case 0x82: setReg(dst, .float(Float(i32(src))))
+            case 0x83: setReg(dst, .double(Double(i32(src))))
+            case 0x84: setReg(dst, .int(Int32(truncatingIfNeeded: i64(src))))
+            case 0x85: setReg(dst, .float(Float(i64(src))))
+            case 0x86: setReg(dst, .double(Double(i64(src))))
+            case 0x87: setReg(dst, .int(javaNarrowToInt(Double(f32(src)))))
+            case 0x88: setReg(dst, .long(javaNarrowToLong(Double(f32(src)))))
+            case 0x89: setReg(dst, .double(Double(f32(src))))
+            case 0x8a: setReg(dst, .int(javaNarrowToInt(f64(src))))
+            case 0x8b: setReg(dst, .long(javaNarrowToLong(f64(src))))
+            case 0x8c: setReg(dst, .float(Float(f64(src))))
+            case 0x8d: setReg(dst, .int(Int32(Int8(truncatingIfNeeded: i32(src)))))
+            case 0x8e: setReg(dst, .int(Int32(UInt16(truncatingIfNeeded: i32(src)))))
+            default:   setReg(dst, .int(Int32(Int16(truncatingIfNeeded: i32(src)))))
+            }
+            return pc + 1
 
         // ---- binop 23x (0x90–0xaf): vAA ← vBB op vCC ----
         case 0x90...0xaf: // 23x: two units (AA|op, BB|CC)
@@ -480,19 +517,19 @@ public final class DexInterpreter {
         // ---- binop/2addr 12x (0xb0–0xcf): vA ← vA op vB ----
         case 0xb0...0xcf:
             let dst = Int(u[0] >> 8 & 0x0F)
-            setReg(dst, try binop(UInt8(op - 0x20), reg(dst), reg(Int(u[1] & 0xFF))))
-            return pc + 2
+            setReg(dst, try binop(UInt8(op - 0x20), reg(dst), reg(Int(u[0] >> 12))))
+            return pc + 1
 
         // ---- binop/lit16 22s (0xd0–0xd7): vA ← vB op #+CCCC ----
         case 0xd0...0xd7:
             let dst = Int(u[0] >> 8 & 0x0F), src = Int(u[0] >> 12)
-            setReg(dst, try binopLiteral(op, reg(src), Int32(Int16(bitPattern: u[2])), lit8: false))
+            setReg(dst, try binopLiteral(op, reg(src), Int32(Int16(bitPattern: u[1]))))
             return pc + 2
 
         // ---- binop/lit8 22b (0xd8–0xe2): vAA ← vBB op #+CC ----
         case 0xd8...0xe2:
             let dst = Int(u[0] >> 8), src = Int(u[1] & 0xFF)
-            setReg(dst, try binopLiteral(op, reg(src), Int32(Int8(bitPattern: UInt8(u[1] >> 8))), lit8: true))
+            setReg(dst, try binopLiteral(op, reg(src), Int32(Int8(bitPattern: UInt8(u[1] >> 8)))))
             return pc + 2
 
         default:
@@ -519,7 +556,6 @@ public final class DexInterpreter {
         switch v {
         case .null: return true
         case let .int(i): return i == 0
-        case let .obj(o): if let s = o.payload as? String { return s.isEmpty }; return false
         default: return false
         }
     }
@@ -536,9 +572,8 @@ public final class DexInterpreter {
         switch (a, b) {
         case let (.int(x), .int(y)): return x == y
         case let (.long(x), .long(y)): return x == y
-        case let (.obj(x), .obj(y)):
-            if let xs = x.payload as? String, let ys = y.payload as? String { return xs == ys }
-            return x === y
+        case let (.obj(x), .obj(y)): return x === y
+        case let (.arr(x), .arr(y)): return x === y
         case (.null, .null): return true
         default: return false
         }
@@ -579,15 +614,21 @@ public final class DexInterpreter {
 
     /// Invoke with explicit argument register indices (pair-aware).
     private func invokeRegs(methodIndex: Int, regs: [RVal], indices: [Int]) throws {
-        guard methodIndex < dex.methodIds.count else { throw VMError.verify("method index \(methodIndex)") }
+        guard methodIndex >= 0, methodIndex < dex.methodIds.count else { throw VMError.verify("method index \(methodIndex)") }
         let ref = dex.methodIds[methodIndex]
 
         var args: [RVal] = []
         var k = 0
         while k < indices.count {
             let idx = indices[k]
-            let value = idx >= 0 && idx < regs.count ? regs[idx] : .null
+            guard idx >= 0, idx < regs.count else { throw VMError.verify("invoke register v\(idx) outside register file") }
+            let value = regs[idx]
             args.append(value)
+            if value.isWide {
+                guard k + 1 < indices.count, indices[k + 1] == idx + 1 else {
+                    throw VMError.verify("wide invoke argument at v\(idx) is missing its second register word")
+                }
+            }
             k += value.isWide ? 2 : 1
         }
 
@@ -618,8 +659,8 @@ public final class DexInterpreter {
             case 0x90: return a &+ b
             case 0x94: return a &- b
             case 0x98: return a &* b
-            case 0x9c: if b == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }; return a / b
-            case 0xa0: if b == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }; return a % b
+            case 0x9c: return try javaDivide(a, by: b)
+            case 0xa0: return try javaRemainder(a, by: b)
             case 0xa4: return a & b
             case 0xa6: return a | b
             case 0xa8: return a ^ b
@@ -632,27 +673,29 @@ public final class DexInterpreter {
         switch op {
         case 0x90, 0x94, 0x98, 0x9c, 0xa0, 0xa4, 0xa6, 0xa8, 0xaa, 0xac, 0xae:
             return .int(try arith(i32(l), i32(r)))
-        case 0x91, 0x95, 0x99, 0x9d, 0xa1, 0xa5, 0xa7, 0xa9, 0xab, 0xad, 0xaf:
+        case 0x91, 0x95, 0x99, 0x9d, 0xa1, 0xa5, 0xa7, 0xa9:
             let a = i64(l), b = i64(r)
             switch op {
             case 0x91: return .long(a &+ b)
             case 0x95: return .long(a &- b)
             case 0x99: return .long(a &* b)
-            case 0x9d: if b == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }; return .long(a / b)
-            case 0xa1: if b == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }; return .long(a % b)
+            case 0x9d: return .long(try javaDivide(a, by: b))
+            case 0xa1: return .long(try javaRemainder(a, by: b))
             case 0xa5: return .long(a & b)
             case 0xa7: return .long(a | b)
-            case 0xa9: return .long(a ^ b)
-            case 0xab: return .long(a << (b & 63))
-            case 0xad: return .long(a >> (b & 63))
-            default:   return .long(Int64(bitPattern: UInt64(bitPattern: a) >> (b & 63)))
+            default:   return .long(a ^ b)
             }
+        case 0xab, 0xad, 0xaf:
+            let a = i64(l), distance = Int(i32(r) & 63)
+            if op == 0xab { return .long(a << distance) }
+            if op == 0xad { return .long(a >> distance) }
+            return .long(Int64(bitPattern: UInt64(bitPattern: a) >> distance))
         case 0x92, 0x96, 0x9a, 0x9e, 0xa2:
             let a = f32(l), b = f32(r)
             switch op {
             case 0x92: return .float(a + b)
             case 0x96: return .float(a - b)
-            case 0x98: return .float(a * b)
+            case 0x9a: return .float(a * b)
             case 0x9e: return .float(a / b)
             default:   return .float(a.truncatingRemainder(dividingBy: b))
             }
@@ -672,79 +715,110 @@ public final class DexInterpreter {
 
     /// Literal ops: lit16 family 0xd0–0xd7, lit8 family 0xd8–0xe2.
     /// rsub is REVERSE subtract: result = lit - value.
-    private func binopLiteral(_ op: UInt8, _ l: RVal, _ lit: Int32, lit8: Bool) throws -> RVal {
+    private func binopLiteral(_ op: UInt8, _ l: RVal, _ lit: Int32) throws -> RVal {
         guard case let .int(a) = l else { throw VMError.verify("binop-lit on non-int") }
-        let base = lit8 ? op - 0x48 : op - 0x40 // → 0x90-family base op
-        switch base {
-        case 0x90: return .int(a &+ lit)                    // add
-        case 0x91: return .int(lit &- a)                    // rsub
-        case 0x98: return .int(a &* lit)                    // mul
-        case 0x9c:
-            if lit == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }
-            return .int(a / lit)                            // div
-        case 0xa0:
-            if lit == 0 { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }
-            return .int(a % lit)                            // rem
-        case 0xa4: return .int(a & lit)                     // and
-        case 0xa6: return .int(a | lit)                     // or
-        case 0xa8: return .int(a ^ lit)                     // xor
-        case 0xaa: return .int(a << (lit & 31))             // shl
-        case 0xac: return .int(a >> (lit & 31))             // shr
-        case 0xae: return .int(Int32(bitPattern: UInt32(bitPattern: a) >> (lit & 31))) // ushr
+        switch op {
+        case 0xd0, 0xd8: return .int(a &+ lit)
+        case 0xd1, 0xd9: return .int(lit &- a)
+        case 0xd2, 0xda: return .int(a &* lit)
+        case 0xd3, 0xdb: return .int(try javaDivide(a, by: lit))
+        case 0xd4, 0xdc: return .int(try javaRemainder(a, by: lit))
+        case 0xd5, 0xdd: return .int(a & lit)
+        case 0xd6, 0xde: return .int(a | lit)
+        case 0xd7, 0xdf: return .int(a ^ lit)
+        case 0xe0: return .int(a << Int(lit & 31))
+        case 0xe1: return .int(a >> Int(lit & 31))
+        case 0xe2: return .int(Int32(bitPattern: UInt32(bitPattern: a) >> Int(lit & 31)))
         default: throw VMError.verify("bad lit-op 0x\(String(op, radix: 16))")
         }
     }
 
+    private func javaDivide(_ a: Int32, by b: Int32) throws -> Int32 {
+        guard b != 0 else { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }
+        return a == .min && b == -1 ? .min : a / b
+    }
+
+    private func javaRemainder(_ a: Int32, by b: Int32) throws -> Int32 {
+        guard b != 0 else { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }
+        return a == .min && b == -1 ? 0 : a % b
+    }
+
+    private func javaDivide(_ a: Int64, by b: Int64) throws -> Int64 {
+        guard b != 0 else { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }
+        return a == .min && b == -1 ? .min : a / b
+    }
+
+    private func javaRemainder(_ a: Int64, by b: Int64) throws -> Int64 {
+        guard b != 0 else { throw DEXThrowable(HostBridge.string("ArithmeticException: / by zero")) }
+        return a == .min && b == -1 ? 0 : a % b
+    }
+
     // MARK: - switches / array data payloads
 
-    private func u16(_ addr: Int, _ code: DexFile.CodeItem) -> UInt16 {
+    private func u16(_ addr: Int, _ code: DexFile.CodeItem) throws -> UInt16 {
+        guard addr >= 0, addr < code.insnsCount else {
+            throw VMError.verify("payload address \(addr) outside code item")
+        }
         let off = code.insnsOffset + addr * 2
+        guard off >= 0, off + 1 < dex.source.count else {
+            throw VMError.verify("truncated payload at address \(addr)")
+        }
         return UInt16(dex.source[off]) | UInt16(dex.source[off + 1]) << 8
     }
-    private func i32payload(_ addr: Int, _ code: DexFile.CodeItem) -> Int32 {
-        Int32(bitPattern: UInt32(u16(addr, code)) | UInt32(u16(addr + 1, code)) << 16)
+    private func i32payload(_ addr: Int, _ code: DexFile.CodeItem) throws -> Int32 {
+        Int32(bitPattern: UInt32(try u16(addr, code)) | UInt32(try u16(addr + 1, code)) << 16)
     }
 
     private func packedSwitchTarget(test: Int32, payloadAddr: Int, code: DexFile.CodeItem) throws -> Int? {
-        guard u16(payloadAddr, code) == 0x0100 else { throw VMError.verify("bad packed-switch payload") }
-        let size = Int(u16(payloadAddr + 1, code))
+        guard try u16(payloadAddr, code) == 0x0100 else { throw VMError.verify("bad packed-switch payload") }
+        let size = Int(try u16(payloadAddr + 1, code))
         guard size > 0 else { return nil }
-        let firstKey = i32payload(payloadAddr + 2, code)
-        let delta = test - firstKey
-        guard delta >= 0, Int(delta) < size else { return nil }
-        return Int(i32payload(payloadAddr + 4 + Int(delta) * 2, code))
+        guard size <= (code.insnsCount - payloadAddr - 4) / 2 else {
+            throw VMError.verify("truncated packed-switch payload")
+        }
+        let firstKey = try i32payload(payloadAddr + 2, code)
+        let delta = Int64(test) - Int64(firstKey)
+        guard delta >= 0, delta < Int64(size) else { return nil }
+        return Int(try i32payload(payloadAddr + 4 + Int(delta) * 2, code))
     }
 
     private func sparseSwitchTarget(test: Int32, payloadAddr: Int, code: DexFile.CodeItem) throws -> Int? {
-        guard u16(payloadAddr, code) == 0x0200 else { throw VMError.verify("bad sparse-switch payload") }
-        let size = Int(u16(payloadAddr + 1, code))
-        for i in 0..<size where i32payload(payloadAddr + 2 + i * 2, code) == test {
-            return Int(i32payload(payloadAddr + 2 + size * 2 + i * 2, code))
+        guard try u16(payloadAddr, code) == 0x0200 else { throw VMError.verify("bad sparse-switch payload") }
+        let size = Int(try u16(payloadAddr + 1, code))
+        guard size <= (code.insnsCount - payloadAddr - 2) / 4 else {
+            throw VMError.verify("truncated sparse-switch payload")
+        }
+        for i in 0..<size where try i32payload(payloadAddr + 2 + i * 2, code) == test {
+            return Int(try i32payload(payloadAddr + 2 + size * 2 + i * 2, code))
         }
         return nil
     }
 
     private func fillArrayData(into arr: inout ArrInstance, payloadAddr: Int, code: DexFile.CodeItem) throws {
-        guard u16(payloadAddr, code) == 0x0300 else { throw VMError.verify("bad array-data payload") }
-        let width = Int(u16(payloadAddr + 1, code))
-        let count = Int(UInt32(u16(payloadAddr + 2, code)) | UInt32(u16(payloadAddr + 3, code)) << 16)
+        guard try u16(payloadAddr, code) == 0x0300 else { throw VMError.verify("bad array-data payload") }
+        let width = Int(try u16(payloadAddr + 1, code))
+        guard [1, 2, 4, 8].contains(width) else { throw VMError.verify("array-data width \(width)") }
+        let count = Int(UInt32(try u16(payloadAddr + 2, code)) | UInt32(try u16(payloadAddr + 3, code)) << 16)
         guard count == arr.elements.count else { throw VMError.verify("fill-array-data size mismatch") }
         let dataStart = payloadAddr + 4
+        let (byteCount, overflow) = count.multipliedReportingOverflow(by: width)
+        guard !overflow, dataStart >= 0, (byteCount + 1) / 2 <= code.insnsCount - dataStart else {
+            throw VMError.verify("truncated array-data payload")
+        }
         for i in 0..<count {
             let addr = dataStart + (i * width + 1) / 2
             let raw: RVal
             switch width {
             case 1:
-                let byteIndex = i
-                let unit = u16(addr + byteIndex / 2, code)
-                raw = .int(Int32(UInt8(truncatingIfNeeded: unit >> (8 * (byteIndex % 2)))))
-            case 2: raw = .int(Int32(bitPattern: UInt32(u16(addr, code))))
-            case 4: raw = .int(i32payload(addr, code))
+                let unit = try u16(dataStart + i / 2, code)
+                raw = .int(Int32(UInt8(truncatingIfNeeded: unit >> (8 * (i % 2)))))
+            case 2: raw = .int(Int32(bitPattern: UInt32(try u16(addr, code))))
+            case 4: raw = .int(try i32payload(addr, code))
             case 8:
-                let lo = UInt64(UInt32(u16(addr, code)) | UInt32(u16(addr + 1, code)) << 16)
-                let hi = UInt64(UInt32(u16(addr + 2, code)) | UInt32(u16(addr + 3, code)) << 16)
+                let lo = UInt64(UInt32(try u16(addr, code)) | UInt32(try u16(addr + 1, code)) << 16)
+                let hi = UInt64(UInt32(try u16(addr + 2, code)) | UInt32(try u16(addr + 3, code)) << 16)
                 raw = .long(Int64(bitPattern: hi << 32 | lo))
-            default: throw VMError.verify("array-data width \(width)")
+            default: preconditionFailure("validated array-data width")
             }
             arr.elements[i] = raw
         }
@@ -770,13 +844,13 @@ public final class DexInterpreter {
             raw.append((Int(start), Int(count), Int(handlerOff)))
         }
         let handlersBase = reader.offset
-        // Parse the encoded_catch_handler_list once: size sleb, then handlers.
-        guard let listSize = try? reader.sleb128() else { return [] }
-        var baseToIndex: [Int: Int] = [:]
-        for i in 0..<max(Int(listSize), 0) {
+        // encoded_catch_handler_list starts with an unsigned handler count.
+        guard let listSizeRaw = try? reader.uleb128(), listSizeRaw <= UInt64(reader.remaining) else { return [] }
+        let listSize = Int(listSizeRaw)
+        for _ in 0..<listSize {
             let handlerStart = reader.offset - handlersBase
-            baseToIndex[handlerStart] = i
             guard let sizeRaw = try? reader.sleb128() else { return [] }
+            guard sizeRaw != Int64.min else { return [] }
             let hasCatchAll = sizeRaw <= 0
             let typedCount = abs(Int(sizeRaw))
             var handlers: [(String?, Int)] = []
