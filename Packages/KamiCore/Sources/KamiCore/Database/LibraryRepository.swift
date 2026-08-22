@@ -153,7 +153,7 @@ public actor LibraryStore {
             """)
         return rows.compactMap { row -> (Manga, Chapter, Int64)? in
             guard let m = Self.manga(from: row),
-                  let chapterId = row.int("chapter_id"),
+                  let chapterId = row.int64("chapter_id"),
                   let chapterUrl = row.string("chapter_url"),
                   let chapterName = row.string("chapter_name"),
                   let lastRead = row.int64("last_read") else { return nil }

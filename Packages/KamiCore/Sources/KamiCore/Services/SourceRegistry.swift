@@ -48,9 +48,9 @@ public struct LibraryService {
             thumbnailURL: stored.thumbnailURL,
             artist: stored.artist,
             author: stored.author,
+            status: stored.status,
             description: stored.descriptionText,
-            genres: stored.genres,
-            status: stored.status
+            genres: stored.genres
         )
         let details = try await source.getMangaDetails(manga: compat)
         let chapters = try await source.getChapterList(manga: details)
