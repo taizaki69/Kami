@@ -7,17 +7,20 @@ engineering problem. See `docs/EXTENSION_COMPATIBILITY_ANALYSIS.md` for the
 verified ecosystem research and `docs/EXTENSION_COMPATIBILITY_MATRIX.md` for
 measured status.
 
-**Honest status (2026-08-21):** the extension pipeline — store index (both
-formats), APK download, ZIP/DEFLATE, binary manifest, DEX parsing, and the
-compatibility analyzer — is implemented in pure Swift and verified against
-live extensions. **Executing extension source code (the DEX runtime) is the
-next major track** (`docs/EXTENSION_RUNTIME.md`). Until it lands, Kami reads
-through native sources (MangaDex built in).
+**Honest status (2026-08-22):** the pure-Swift extension pipeline now covers
+store indexes, APK download, bounded ZIP/DEFLATE and binary-manifest parsing,
+validated DEX parsing, compatibility analysis, and an initial interpreter.
+Pinned real-APK tests execute the Akuma and MangaDex entry constructors and
+BatCave's `getBaseUrl`, `getLang`, `getName`, and `getId` methods. This is a
+measured M1 runtime slice, **not end-to-end source compatibility**: interpreted
+search, details, chapters, pages, networking, and most Kotlin/Java APIs remain
+open (`docs/EXTENSION_RUNTIME.md`). Kami currently reads through its native
+MangaDex source.
 
 ## Layout
 
 ```
-App/                    SwiftUI app (iOS 16+)
+App/                    SwiftUI app (iOS 17+)
 Packages/
   MihonCompatKit/       Extension compatibility: APK/ZIP, AXML, DEX,
                         store index (index.pb/index.min.json), backup reader,
@@ -30,20 +33,21 @@ docs/                   analysis, matrix, runtime plan, per-area docs
 ## Quick start (macOS)
 
 ```bash
-./scripts/bootstrap.sh        # xcodegen + project + optional corpus
-./scripts/build.sh            # simulator build
-./scripts/test.sh             # package tests + app tests
-./scripts/package_ipa.sh      # dist/Kami.ipa (unsigned; sign at install)
+bash scripts/bootstrap.sh        # xcodegen + project + optional corpus
+bash scripts/build.sh            # simulator build
+bash scripts/test.sh             # package tests + app tests
+bash scripts/package_ipa.sh      # dist/Kami.ipa (unsigned; sign at install)
 ```
 
 Requirements: Xcode 15+, xcodegen. Details: `BUILDING.md`, `docs/IPA_BUILD.md`.
 
 ## Verified on Windows too
 
-The pure-Swift compatibility kit builds and its tests run on Windows with the
-Swift 6.3 toolchain (`scripts/windows_dev_test.bat`); the analyzer CLI
-(`compat-audit`) was used to produce every measurement in the compatibility
-matrix from real APKs on a Windows host.
+The compatibility kit and all 54 tests run on Windows with Swift 6.3
+(`scripts/windows_dev_test.bat`). GitHub Actions independently runs the pinned
+real-APK suite on macOS, compiles both Simulator and unsigned device targets,
+and publishes an unsigned IPA artifact. The `compat-audit` CLI produced the
+measured compatibility matrix from the locked corpus.
 
 ## Non-goals / legality
 

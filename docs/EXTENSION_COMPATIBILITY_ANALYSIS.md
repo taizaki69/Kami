@@ -231,9 +231,10 @@ simplest `ParsedHttpSource` shapes; cannot be the general strategy.
    AndroidManifest XML, DEX parsing, external-reference audit) — the measurement
    instrument that drives which runtime APIs get implemented next, and powers the
    in-app Extension Analyzer + installability diagnostics.
-4. **DEX interpreter track** (`MihonCompatKit/Dex/Runtime`): parse-first, execute-
-   next, growing API coverage driven by the audit tool against a corpus of real
-   extensions. This is the long-running engineering track; see
+4. **DEX interpreter track** (`MihonCompatKit/Dex/Runtime`): the initial M1
+   engine now executes pinned real constructors and metadata getters; growing
+   opcode and host-API coverage remains driven by the audit corpus. This is the
+   long-running engineering track; see
    `EXTENSION_RUNTIME.md` for the staged plan and honest status.
 5. **Backup import** (.tachibk protobuf+zstd) independent of the runtime, so users
    can migrate libraries before extension compat reaches their sources.
@@ -258,8 +259,8 @@ feasibility problem**. The blockers, honestly categorized:
 | DEX parsing/analysis | **Done** (this repo, pure Swift) |
 | APK/manifest parsing | **Done** (pure Swift, incl. binary AXML) |
 | Repo index compatibility | **Done** (JSON + proto) |
-| DEX execution | Interpreter core staged; **not yet executing real extensions** |
-| Kotlin/Java class library | Track driven by audit data; **small subset** |
+| DEX execution | **Initial M1 slice works**: pinned real constructors and BatCave metadata getters execute; no end-to-end source yet |
+| Kotlin/Java class library | **Minimal tested subset**: Object/String/StringBuilder, Intrinsics, source-base constructors; long tail open |
 | Cloudflare/WebView | Native WKWebView bridge design (see NETWORKING.md) |
 | Backup import | Proto decoding done; zstd decompression pending |
 

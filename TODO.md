@@ -8,7 +8,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       formats (proto + legacy JSON), backup protobuf schema —
       `docs/EXTENSION_COMPATIBILITY_ANALYSIS.md`
 - [x] Repository scaffold: SwiftPM packages + xcodegen spec + scripts
-- [x] ZIP reader + DEFLATE/zlib/gzip decompressor (pure Swift), 5/5 tests
+- [x] Bounded ZIP reader + DEFLATE/zlib/gzip decompressor (pure Swift), with
+      size, structure, and checksum validation against real APKs
 - [x] Binary Android XML (AXML) manifest parser — validated on real APK
 - [x] DEX structural parser — validated on real APK (counts match reference)
 - [x] Extension store client: `index.pb` + `index.min.json` + gzip unwrap +
@@ -25,13 +26,24 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 - [x] SwiftUI app: Library / Browse / MangaDetail / Reader (paged) /
       Extensions (repo add via store client) / History / Updates placeholders
 - [x] Reader progress + history persistence wired
+- [x] GitHub Actions: portable tests, Simulator build, unsigned device build,
+      and real unsigned IPA artifact
 
 ## P0 — End-to-end extension execution (the honest frontier)
 
-- [ ] DEX interpreter core M1 (frames, opcodes, object model, budgets)
-- [ ] Kotlin/Java class library M2 — priority list measured in the matrix
+- [~] DEX interpreter core M1 — frames/registers, core opcode families,
+      objects/arrays/fields/invokes/exceptions, shared budgets, cancellation,
+      and shallow real-APK execution work; full verifier/opcode conformance is
+      tracked in [#1](https://github.com/taizaki69/Kami/issues/1)
+- [~] Kotlin/Java class library M2 — minimal Object/String/StringBuilder,
+      Intrinsics, and source-base constructors work; measured long tail remains
 - [ ] tachiyomix API bridge M3 (`HttpSource` → `KamiSource`)
-- [ ] First real extension executing popular→search→details→chapters→pages
+- [ ] First real extension executing popular→search→details→chapters→pages —
+      [#2](https://github.com/taizaki69/Kami/issues/2)
+- [ ] Verify store/APK signing identity before enabling downloaded extension
+      execution — [#3](https://github.com/taizaki69/Kami/issues/3)
+- [ ] Privacy-safe unresolved API/opcode telemetry and exportable compatibility
+      report — [#4](https://github.com/taizaki69/Kami/issues/4)
 - [ ] zstd decompression for current-Mihon backups (schema work done)
 
 ## P1 — Daily driver
@@ -52,8 +64,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 - [ ] iPad dual-page reader
 - [ ] Performance pass vs docs targets (launch, 5k-library, webtoon 500p)
 
-## Blocked / needs macOS
+## External validation remaining
 
-- [!] iOS app compile + simulator run + IPA packaging (scripts ready;
-      requires Xcode — this repo was authored on Windows where the compat
-      kit was fully built and tested instead)
+- [ ] Install and smoke-test a signed build on a physical iPhone/iPad using
+      user-owned Apple credentials (CI intentionally produces an unsigned IPA)

@@ -4,22 +4,24 @@
 
 | Component | Verified how |
 |---|---|
-| MihonCompatKit (all parsers, repo client, backup reader) | `swift test` on Windows, Swift 6.3.3 — **9/9 tests pass**; `swift build -c release` succeeds |
-| compat-audit CLI | built + run on Windows against 3 real extension APKs and the live store index |
-| KamiCore (models, MangaDex source) | `swiftc -typecheck` clean on Windows (DB files are `#if canImport(SQLite3)`, compiled on Apple/Linux) |
-| App UI, xcodeproj, IPA packaging | **Not compiled yet** — requires macOS/Xcode; code and project spec are in place (`project.yml` → xcodegen) |
+| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 and GitHub's macOS runner — **54/54 tests pass**, including 6 real-APK executions; release `compat-audit` builds |
+| compat-audit CLI | built and run on Windows against 3 SHA-256-locked extension APKs; uploaded by Swift CI on macOS |
+| KamiCore (models, SQLite store, MangaDex source) | `swift test` passes in GitHub Actions; package builds as an app dependency for Simulator and device |
+| App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |
+| IPA packaging | the `IPA Package` workflow builds a real Release `Kami.app`, packages `Kami-unsigned.ipa`, and uploads `Kami-unsigned-ipa` |
 
 ## macOS (full build)
 
 ```bash
-brew install xcodegen          # once
-./scripts/bootstrap.sh         # generates Kami.xcodeproj
-open Kami.xcodeproj            # or: ./scripts/build.sh simulator
-./scripts/test.sh              # SwiftPM tests + app tests
-./scripts/package_ipa.sh       # dist/Kami.ipa
+brew install xcodegen             # once
+bash scripts/bootstrap.sh         # generates Kami.xcodeproj
+open Kami.xcodeproj               # or: bash scripts/build.sh simulator
+bash scripts/test.sh              # SwiftPM tests + app tests
+bash scripts/package_ipa.sh       # dist/Kami.ipa
 ```
 
-Deployment target: iOS 16.0 (iPhone + iPad).
+App deployment target: iOS 17.0 (iPhone + iPad). The Swift packages retain an
+iOS 16.0 minimum.
 
 ## Linux / Windows (compat kit only)
 
@@ -36,8 +38,18 @@ swift run --package-path Packages/MihonCompatKit compat-audit inspect some-exten
 ## Test corpus (real extensions)
 
 ```bash
-scripts/fetch_corpus.sh   # downloads APKs from the live Keiyoushi store
+bash scripts/fetch_corpus.sh
 ```
 
-Corpus APKs are gitignored (third-party binaries); the script pins the
-package list and records provenance in `Tests/corpus/manifest.json`.
+Corpus APKs are gitignored third-party binaries. The script downloads immutable
+Keiyoushi release assets and verifies the SHA-256 values recorded in
+`Tests/corpus/manifest.json`; Swift CI runs this before the tests.
+
+## GitHub Actions
+
+- `Swift CI`: corpus fetch, MihonCompatKit tests, release CLI build, KamiCore tests.
+- `iOS Build`: generic Simulator plus unsigned generic-device compilation.
+- `IPA Package`: unsigned device build and downloadable IPA artifact.
+
+A signed install still requires credentials owned by the user; no certificate,
+profile, password, or Apple account secret belongs in this repository.

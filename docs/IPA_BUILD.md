@@ -13,8 +13,8 @@ Kami targets sideloading first (mission §33). Two paths:
 ## Unsigned IPA (sign at install time)
 
 ```bash
-./scripts/bootstrap.sh          # generates Kami.xcodeproj via xcodegen
-./scripts/package_ipa.sh        # → dist/Kami.ipa (unsigned)
+bash scripts/bootstrap.sh          # generates Kami.xcodeproj via xcodegen
+bash scripts/package_ipa.sh        # → dist/Kami.ipa (unsigned)
 ```
 
 Install with Sideloadly / AltStore / SideStore / TrollStore — they apply
@@ -23,8 +23,8 @@ their own signing during installation.
 ## Signed IPA (development team)
 
 ```bash
-./scripts/package_ipa.sh <TEAM_ID>
-# or: DEVELOPMENT_TEAM=<TEAM_ID> ./scripts/package_ipa.sh
+bash scripts/package_ipa.sh <TEAM_ID>
+# or: DEVELOPMENT_TEAM=<TEAM_ID> bash scripts/package_ipa.sh
 ```
 
 `CODE_SIGN_STYLE=Automatic` + `DEVELOPMENT_TEAM` lets Xcode select the
@@ -33,8 +33,9 @@ in your keychain.
 
 ## Notes
 
-- The simulator route (`scripts/build.sh simulator`) produces a `.app` for
+- The simulator route (`bash scripts/build.sh simulator`) produces a `.app` for
   simulator use, not an installable IPA.
 - No placeholder IPAs: `package_ipa.sh` fails loudly if the `.app` was not
-  produced. This build was **not** exercised in this repository yet — it
-  requires macOS; see BUILDING.md for what *was* verified where.
+  produced. GitHub Actions has exercised the unsigned generic-device build and
+  uploaded the resulting `Kami-unsigned-ipa` artifact. A signed physical-device
+  install remains intentionally user-owned.

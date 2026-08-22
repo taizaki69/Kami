@@ -15,5 +15,7 @@
 ## Workflow
 - `scripts/fetch_corpus.sh` pins the test corpus; add package names there
   when expanding coverage, and record results in the matrix.
-- Prefer extending `ExtensionAnalyzer.implementedClasses` + tests over
-  scattering special cases through app code.
+- Change `ExtensionAnalyzer.implementedClasses` only with runtime-backed tests;
+  its class-level score is a prioritization heuristic, not proof that every
+  method on a class is implemented. Keep host behavior centralized in
+  `HostBridge` instead of scattering extension-specific cases through app code.
