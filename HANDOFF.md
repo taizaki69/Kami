@@ -12,7 +12,8 @@ work was recovered, completed, verified, and pushed.
 - Repository: <https://github.com/taizaki69/Kami>
 - Visibility: private
 - Default branch: `main`
-- Current verified runtime implementation baseline: `05720d24d46d13b21e25dee2b95737b59fa65a9d`
+- Current verified runtime implementation baseline: `4d042c99a62536fbd894966286a1de7a93c5d0be`
+- Previous exact-dispatch/class-initialization baseline: `05720d24d46d13b21e25dee2b95737b59fa65a9d`
 - Code and documentation baseline before the original handoff: `4e50e6380c864e09205eb753c3ed7037780f9897`
 - Original Phase 2 baseline: `6f9de0719f057646e228f14620806326840e5c75`
 - Expected state after cloning: clean `main`, tracking `origin/main`
@@ -105,19 +106,61 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 61 Swift tests passed; KamiCore also passed in macOS CI |
+| MihonCompatKit | 63 Swift tests passed; KamiCore also passed in macOS CI |
 | Real APK constructors | Akuma, MangaDex, and BatCave passed |
-| BatCave execution | Exact metadata getters passed; popular path reached and precisely asserted the OkHttp form-builder boundary |
-| Swift CI | [successful run 32586204154](https://github.com/taizaki69/Kami/actions/runs/32586204154) |
-| iOS Simulator and unsigned device builds | [successful run 32586204137](https://github.com/taizaki69/Kami/actions/runs/32586204137) |
-| Unsigned IPA packaging | [successful run 32586204142](https://github.com/taizaki69/Kami/actions/runs/32586204142) |
+| Request-model regressions | 2 focused tests cover request construction, duration/cache conversion, URL scheme rejection, CRLF-header rejection, and body bounds |
+| BatCave execution | Exact metadata getters passed; popular path constructs the expected POST request and stops at the `awaitSuccess` transport seam |
+| Swift CI | [successful run 32587746756](https://github.com/taizaki69/Kami/actions/runs/32587746756) |
+| iOS Simulator and unsigned device builds | [successful run 32587746746](https://github.com/taizaki69/Kami/actions/runs/32587746746) |
+| Unsigned IPA packaging | [successful run 32587746752](https://github.com/taizaki69/Kami/actions/runs/32587746752) |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
 The referenced runs produced `compat-audit-macos` and `Kami-unsigned-ipa`.
 GitHub artifacts expire; rerun the corresponding workflow if they are no
 longer available.
 
-## What the post-handoff continuation completed
+## What the latest continuation completed
+
+Commit `4d042c9` advances the pinned BatCave APK through transport-neutral
+request construction without performing network I/O:
+
+- Public, `Sendable`, equatable `CompatHTTPRequest`, header, form-field, body,
+  and cache-policy values live in
+  `Packages/MihonCompatKit/Sources/MihonCompatKit/Networking/CompatHTTPRequest.swift`.
+- The exact host allow-list now models the BatCave-reached OkHttp surface:
+  per-source `NetworkHelper`/client identity, required default interceptors,
+  client cloning, compression-interceptor setup, headers, HTTP(S) URLs, form
+  and text bodies, cache control, request builders/getters, and inert calls.
+- Request inputs are bounded: URLs are HTTP(S)-only and at most 8 KiB; header
+  names/values reject invalid controls and CRLF injection; header/form
+  collections and aggregate raw bytes are capped; text bodies are capped at
+  1 MiB. These are construction limits, not a substitute for future response
+  streaming limits.
+- Kotlin duration unit fields and the exact duration conversions reached by
+  cache-control setup are modeled. Compiler-only
+  `SpillingKt.nullOutSpilledVariable` is also covered.
+- `HostBridge.lastPreparedRequest` exposes only the inert request handed to
+  `OkHttpClient.newCall`; it does not send it.
+- The real BatCave `getPopularManga` assertion proves this exact request:
+
+  ```text
+  POST https://batcave.biz/comix/
+  dlenewssortby=rating
+  dledirection=desc
+  set_new_sort=dle_sort_cat_1
+  set_direction_sort=dle_direction_cat_1
+  ```
+
+- Execution then stops exactly at the deliberately unresolved method
+  `Leu/kanade/tachiyomi/network/OkHttpExtensionsKt;->awaitSuccess(Lokhttp3/Call;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;`.
+  This is the transport/coroutine boundary, not a successful popular-manga
+  response.
+
+The two new focused request tests and eight pinned real-extension tests are
+part of the 63-test MihonCompatKit suite. All three workflows linked above
+passed for the exact implementation SHA.
+
+## What the preceding runtime continuation completed
 
 Commit `05720d2` advances the same pinned BatCave APK from shallow getters to a
 reproducible pre-request execution path:
@@ -139,12 +182,9 @@ reproducible pre-request execution path:
   filters.
 - `compat-audit methods <apk> [text-or-index]` prints canonical first-DEX
   method identities, making each next missing ABI call reproducible.
-- BatCave's real constructor succeeds. Its real `getPopularManga` path now
-  crosses filters and iteration and stops exactly at
-  `Lokhttp3/FormBody$Builder;.<init>(Ljava/nio/charset/Charset;ILkotlin/jvm/internal/DefaultConstructorMarker;)V`.
-
-That last assertion is the next implementation boundary, not a successful
-popular-manga operation or an HTTP request.
+- BatCave's real constructor succeeds. Its real `getPopularManga` path crossed
+  filters and iteration to the former `FormBody.Builder` boundary; commit
+  `4d042c9` subsequently completed the pure request layer described above.
 
 ## What Phase 2 completed
 
@@ -190,7 +230,10 @@ Proven today:
 - Bounded APK archive, manifest, and DEX structural parsing.
 - Compatibility analysis and the `compat-audit` CLI.
 - Exact execution of the pinned constructors/getters listed above and
-  BatCave's interpreted pre-request popular path to the OkHttp boundary.
+  BatCave's interpreted popular path through exact pure request construction
+  to the `awaitSuccess` transport boundary.
+- Bounded, transport-neutral OkHttp request values with no live-network side
+  effects, including the exact pinned BatCave POST assertion.
 - Native MangaDex browsing through the existing `KamiSource` implementation.
 - Simulator/device compilation and creation of a real unsigned IPA.
 
@@ -198,7 +241,9 @@ Not proven or implemented:
 
 - An interpreted extension completing popular/search, details, chapters, and
   pages through `KamiSource`.
-- General OkHttp, Jsoup, coroutine, preferences, cookie, or WebView bridges.
+- Extension HTTP transport, response/response-body/Okio models, coroutine
+  suspension/resumption across async transport, Jsoup, preferences, cookies,
+  or WebView bridges. The current OkHttp subset is request-only.
 - Full DEX opcode coverage, a pre-execution verifier, or dynamic
   virtual/interface target selection across receiver hierarchies.
 - APK signer authentication and update identity binding.
@@ -265,15 +310,24 @@ The rest of the product backlog is in `TODO.md`.
    exception-handler conversions. Invoke word-count checks are already in.
 4. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
-5. Continue issue #2 from BatCave's exact `FormBody.Builder` constructor gap.
-   Implement a reusable OkHttp model and per-source transport policy, then
-   record the next precise class/method/opcode at each operation stage. Do not
-   add extension-specific shortcuts.
-6. Expose the interpreted source through the existing `KamiSource` contract
+5. Continue issue #2 from the exact `OkHttpExtensionsKt.awaitSuccess` seam.
+   First define an injectable per-source transport contract consuming
+   `CompatHTTPRequest`; production transport must use URLSession with redirect
+   policy, cancellation, timeouts, response-header/body limits, redaction, and
+   isolated cookies. Keep the pinned test on a deterministic fake transport;
+   do not make live requests in the test suite.
+6. Model OkHttp `Response`/`ResponseBody`, the reached Okio surface, and proper
+   coroutine suspension/resumption. Do not register `awaitSuccess` as an
+   unconditional fake success or block the interpreter thread on URLSession.
+   Continue recording the next exact signature at every boundary.
+7. Add response parsing (Jsoup/serialization) and prove BatCave popular output,
+   then search, details, chapters, and pages, before exposing the interpreted
+   source through the existing `KamiSource` contract.
+8. Expose the interpreted source through the existing `KamiSource` contract
    only after exact popular/search, details, chapters, and pages tests pass.
-7. Implement issue #3 before enabling execution of arbitrary repository
+9. Implement issue #3 before enabling execution of arbitrary repository
    downloads or updates.
-8. Add issue #4 diagnostics as local, deterministic, redacted output so the
+10. Add issue #4 diagnostics as local, deterministic, redacted output so the
    compatibility corpus can grow from reproducible failures.
 
 Every new runtime capability should arrive with a synthetic malformed fixture,
@@ -291,6 +345,9 @@ an exact real-APK assertion when reachable, and CI coverage.
 | DEX parser | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/DexFile.swift` |
 | Interpreter | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexInterpreter.swift` |
 | Native capability boundary | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/HostBridge.swift` |
+| Pure HTTP request values | `Packages/MihonCompatKit/Sources/MihonCompatKit/Networking/CompatHTTPRequest.swift` |
+| Request-model regressions | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/CompatHTTPRequestTests.swift` |
+| Real APK execution frontier | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/RealExtensionExecutionTests.swift` |
 | Repository client | `Packages/MihonCompatKit/Sources/MihonCompatKit/Repository/ExtensionRepository.swift` |
 | App source seam | `Packages/MihonCompatKit/Sources/MihonCompatKit/Models/CompatModels.swift` (`KamiSource`) |
 | Persistence | `Packages/KamiCore/Sources/KamiCore/Database/` |
