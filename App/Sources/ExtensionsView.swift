@@ -104,6 +104,7 @@ struct ExtensionsView: View {
             case let .badURL(text): return "invalid URL \(text)"
             case let .http(code): return "HTTP \(code) while fetching the index"
             case let .transport(inner): return inner.localizedDescription
+            case let .badIndex(message): return "invalid repository index: \(message)"
             }
         }
         return error.localizedDescription
