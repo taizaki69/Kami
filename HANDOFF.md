@@ -12,13 +12,14 @@ work was recovered, completed, verified, and pushed.
 - Repository: <https://github.com/taizaki69/Kami>
 - Visibility: private
 - Default branch: `main`
-- Code and documentation baseline before this handoff: `4e50e6380c864e09205eb753c3ed7037780f9897`
+- Current verified runtime implementation baseline: `05720d24d46d13b21e25dee2b95737b59fa65a9d`
+- Code and documentation baseline before the original handoff: `4e50e6380c864e09205eb753c3ed7037780f9897`
 - Original Phase 2 baseline: `6f9de0719f057646e228f14620806326840e5c75`
 - Expected state after cloning: clean `main`, tracking `origin/main`
 
-Always continue from the latest `origin/main`. The SHA above identifies the
-known-good implementation state; the commit adding this handoff follows it and
-contains documentation only.
+Always continue from the latest `origin/main`. The current runtime SHA above is
+the known-good executable state; the commit updating this handoff follows it
+and contains documentation only.
 
 ## Clone and restore the workspace
 
@@ -104,17 +105,46 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit and KamiCore | 54 Swift tests passed |
-| Real APK execution | Akuma and MangaDex constructors passed |
-| BatCave execution | Exact `getBaseUrl`, `getLang`, `getName`, and `getId` assertions passed |
-| Swift CI | [successful run 32582952981](https://github.com/taizaki69/Kami/actions/runs/32582952981) |
-| iOS Simulator and unsigned device builds | [successful run 32582953090](https://github.com/taizaki69/Kami/actions/runs/32582953090) |
-| Unsigned IPA packaging | [successful run 32582953062](https://github.com/taizaki69/Kami/actions/runs/32582953062) |
+| MihonCompatKit | 61 Swift tests passed; KamiCore also passed in macOS CI |
+| Real APK constructors | Akuma, MangaDex, and BatCave passed |
+| BatCave execution | Exact metadata getters passed; popular path reached and precisely asserted the OkHttp form-builder boundary |
+| Swift CI | [successful run 32586204154](https://github.com/taizaki69/Kami/actions/runs/32586204154) |
+| iOS Simulator and unsigned device builds | [successful run 32586204137](https://github.com/taizaki69/Kami/actions/runs/32586204137) |
+| Unsigned IPA packaging | [successful run 32586204142](https://github.com/taizaki69/Kami/actions/runs/32586204142) |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
 The referenced runs produced `compat-audit-macos` and `Kami-unsigned-ipa`.
 GitHub artifacts expire; rerun the corresponding workflow if they are no
 longer available.
+
+## What the post-handoff continuation completed
+
+Commit `05720d2` advances the same pinned BatCave APK from shallow getters to a
+reproducible pre-request execution path:
+
+- DEX and host methods are keyed by exact declaring class, name, parameter
+  descriptors, return descriptor, and static/instance kind. Name-only public
+  calls reject overload ambiguity.
+- Invoke validation checks register-word counts, wide pairs, caller
+  `outs_size`, logical argument categories, return categories, and encoded
+  static/instance consistency. Diagnostics and traces carry canonical method
+  signatures.
+- DEX class initialization runs once before static use/allocation, initializes
+  DEX superclasses first, retains failure state, and shares the entry call's
+  instruction budget.
+- The deny-by-default host surface now includes only exact signatures proven by
+  synthetic or pinned-corpus paths: confined source-field reflection, core
+  Kotlin result/lazy/pair/coroutine primitives, primitive boxes, atomics,
+  bounded collections and iteration, regex/date construction, and Mihon
+  filters.
+- `compat-audit methods <apk> [text-or-index]` prints canonical first-DEX
+  method identities, making each next missing ABI call reproducible.
+- BatCave's real constructor succeeds. Its real `getPopularManga` path now
+  crosses filters and iteration and stops exactly at
+  `Lokhttp3/FormBody$Builder;.<init>(Ljava/nio/charset/Charset;ILkotlin/jvm/internal/DefaultConstructorMarker;)V`.
+
+That last assertion is the next implementation boundary, not a successful
+popular-manga operation or an HTTP request.
 
 ## What Phase 2 completed
 
@@ -159,7 +189,8 @@ Proven today:
 - Real store-index parsing for protobuf and legacy JSON formats.
 - Bounded APK archive, manifest, and DEX structural parsing.
 - Compatibility analysis and the `compat-audit` CLI.
-- Shallow execution of the exact pinned real-extension methods listed above.
+- Exact execution of the pinned constructors/getters listed above and
+  BatCave's interpreted pre-request popular path to the OkHttp boundary.
 - Native MangaDex browsing through the existing `KamiSource` implementation.
 - Simulator/device compilation and creation of a real unsigned IPA.
 
@@ -168,7 +199,8 @@ Not proven or implemented:
 - An interpreted extension completing popular/search, details, chapters, and
   pages through `KamiSource`.
 - General OkHttp, Jsoup, coroutine, preferences, cookie, or WebView bridges.
-- Full DEX opcode coverage, verification, or prototype-aware dispatch.
+- Full DEX opcode coverage, a pre-execution verifier, or dynamic
+  virtual/interface target selection across receiver hierarchies.
 - APK signer authentication and update identity binding.
 - A signed installation on a physical iPhone or iPad.
 - Production compatibility telemetry or a declared repository license.
@@ -204,10 +236,10 @@ Known pre-existing hardening gaps that were not diff-introduced findings:
 - External-list/APK URL scheme, redirect, and destination policy is broad.
 - ZIP/DEX/string processing lacks a complete aggregate resource budget.
 - Catch-handler parsing retains unchecked large ULEB64-to-`Int` conversions.
-- DEX and host dispatch are class-plus-name based rather than full-prototype
-  based, although no current privileged bridge method creates an exploit sink.
+- Dynamic virtual/interface dispatch does not yet walk the receiver hierarchy;
+  exact prototype identity and static/instance kind are enforced.
 - Instruction counts do not price expensive StringBuilder copying or every
-  allocation cost.
+  allocation/host-collection operation cost.
 
 Address these before treating arbitrary downloaded extensions as safe.
 
@@ -215,7 +247,7 @@ Address these before treating arbitrary downloaded extensions as safe.
 
 | Priority | Issue | Purpose |
 |---|---|---|
-| P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Full prototypes, verification, differential semantics, and typed failures |
+| P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining verifier, dynamic dispatch, opcode, and differential semantics work |
 | P0 | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | One real APK through search/popular, details, chapters, pages, and `KamiSource` |
 | Security gate | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | Required before downloaded APK execution |
 | Diagnostics | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Deterministic, redacted unresolved-surface reports |
@@ -226,16 +258,17 @@ The rest of the product backlog is in `TODO.md`.
 ## Recommended next implementation sequence
 
 1. Work only with the pinned local corpus while the signer gate is absent.
-2. Start issue #1 by changing public and internal method lookup to use the
-   declaring class, method name, return type, and parameter descriptors.
-3. Add verifier checks for code-item geometry, branch/payload targets,
-   register types, exception handler conversions, and invoke word counts.
+2. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
+   plus canonical unresolved diagnostics for every new bridge decision.
+3. Continue issue #1 with dynamic receiver-hierarchy dispatch and verifier
+   checks for code-item geometry, branch/payload targets, register types, and
+   exception-handler conversions. Invoke word-count checks are already in.
 4. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
-5. Pick one pinned extension for issue #2 and record the first precise missing
-   class/method/opcode at each operation stage. Implement reusable Java,
-   Kotlin, tachiyomix, OkHttp, and Jsoup behavior; do not add
-   extension-specific shortcuts.
+5. Continue issue #2 from BatCave's exact `FormBody.Builder` constructor gap.
+   Implement a reusable OkHttp model and per-source transport policy, then
+   record the next precise class/method/opcode at each operation stage. Do not
+   add extension-specific shortcuts.
 6. Expose the interpreted source through the existing `KamiSource` contract
    only after exact popular/search, details, chapters, and pages tests pass.
 7. Implement issue #3 before enabling execution of arbitrary repository
