@@ -36,7 +36,7 @@ jobs:
           xcodebuild -project Kami.xcodeproj -scheme Kami \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
-            build 2>&1 | xcbeautify --prefix "##[error]"
+            build 2>&1 | xcbeautify
 
   device:
     name: Generic iOS device build (unsigned)
@@ -57,4 +57,4 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            build 2>&1 | xcbeautify --prefix "##[error]"
+            build 2>&1 | xcbeautify

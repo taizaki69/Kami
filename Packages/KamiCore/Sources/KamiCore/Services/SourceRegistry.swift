@@ -1,13 +1,12 @@
 import Foundation
-import Combine
 import MihonCompatKit
 
 /// Registry of all installed/available sources. Today: native sources only.
 /// The DEX compatibility runtime will register bridged sources here without
 /// the app layer knowing the difference.
 @MainActor
-public final class SourceRegistry: ObservableObject {
-    @Published public private(set) var sources: [any KamiSource] = []
+public final class SourceRegistry {
+    public private(set) var sources: [any KamiSource] = []
 
     public init() {
         registerDefaults()
@@ -47,8 +46,8 @@ public struct LibraryService {
             title: stored.title,
             altTitles: stored.altTitles,
             thumbnailURL: stored.thumbnailURL,
-            author: stored.author,
             artist: stored.artist,
+            author: stored.author,
             description: stored.descriptionText,
             genres: stored.genres,
             status: stored.status

@@ -14,7 +14,13 @@ let package = Package(
         .package(path: "../MihonCompatKit"),
     ],
     targets: [
-        .target(name: "KamiCore", dependencies: ["MihonCompatKit"]),
+        .target(
+            name: "KamiCore",
+            dependencies: ["MihonCompatKit"],
+            linkerSettings: [
+                .linkedLibrary("sqlite3", .when(platforms: [.iOS, .macOS])),
+            ]
+        ),
         .testTarget(name: "KamiCoreTests", dependencies: ["KamiCore"]),
     ]
 )

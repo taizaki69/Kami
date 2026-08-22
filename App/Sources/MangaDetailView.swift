@@ -114,25 +114,35 @@ struct MangaDetailView: View {
     }
 
     private func load() async {
+        loading = true
+        errorText = nil
         defer { loading = false }
         guard let source = model.source(id: manga.sourceId) else {
             errorText = "Source not available for this manga."
             return
         }
         do {
-            try await model.store.upsert(manga, inLibrary: false)
-            // INSERT OR IGNORE returns no rowid on conflict; resolve the real
-            // stored id (and true library state) by identity.
-            if let existing = try await model.store.manga(sourceId: manga.sourceId, url: manga.url) {
-                storedId = existing.id
-                inLibrary = existing.inLibrary
+            _ = try await model.store.upsert(manga)
+            guard let existing = try await model.store.manga(sourceId: manga.sourceId, url: manga.url),
+                  let mangaRowId = existing.id else {
+                errorText = "Could not persist this manga."
+                return
             }
+            storedId = mangaRowId
+            inLibrary = existing.inLibrary
 
             var compat = prefetched ?? SMangaCompat(url: manga.url, title: manga.title)
             if !compat.initialized {
                 compat = try await source.getMangaDetails(manga: compat)
             }
             detail = compat
+
+            var persisted = Manga(sourceId: manga.sourceId, from: compat)
+            persisted.id = mangaRowId
+            persisted.inLibrary = existing.inLibrary
+            persisted.dateAdded = existing.dateAdded
+            persisted.dateUpdated = Int64(Date().timeIntervalSince1970)
+            _ = try await model.store.upsert(persisted)
 
             let chapterList = try await source.getChapterList(manga: compat)
             let domain = chapterList.enumerated().map { order, c in

@@ -1,4 +1,5 @@
 import Foundation
+import MihonCompatKit
 
 #if canImport(SQLite3)
 
@@ -49,8 +50,17 @@ public actor LibraryStore {
                       .int(manga.dateUpdated), .int(id)])
             return id
         }
+        if let existing = try self.manga(sourceId: manga.sourceId, url: manga.url),
+           let existingId = existing.id {
+            var merged = manga
+            merged.id = existingId
+            merged.inLibrary = inLibrary ?? existing.inLibrary
+            if merged.dateAdded == 0 { merged.dateAdded = existing.dateAdded }
+            if merged.dateUpdated == 0 { merged.dateUpdated = existing.dateUpdated }
+            return try upsert(merged, inLibrary: merged.inLibrary)
+        }
         return try db.insert("""
-            INSERT OR IGNORE INTO manga
+            INSERT INTO manga
                 (source_id, url, title, alt_titles, thumbnail_url, author, artist, description,
                  genres, status, in_library, date_added, update_strategy, initialized)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)
@@ -78,27 +88,41 @@ public actor LibraryStore {
     public func replaceChapters(mangaId: Int64, with chapters: [Chapter]) throws {
         try db.execute("BEGIN")
         do {
-            // Preserve read/bookmark/progress state for URLs that persist.
             let existing = try db.query(
-                "SELECT url, read, bookmark, last_page_read FROM chapter WHERE manga_id=?", [.int(mangaId)]
+                "SELECT id, url FROM chapter WHERE manga_id=?", [.int(mangaId)]
             )
-            var state: [String: (Bool, Bool, Int)] = [:]
+            var idsByURL: [String: Int64] = [:]
             for row in existing {
-                if let url = row.string("url") {
-                    state[url] = (row.bool("read"), row.bool("bookmark"), row.int("last_page_read") ?? 0)
+                if let id = row.int64("id"), let url = row.string("url") {
+                    idsByURL[url] = id
                 }
             }
-            try db.run("DELETE FROM chapter WHERE manga_id=?", [.int(mangaId)])
+
             for (order, ch) in chapters.enumerated() {
-                let prior = state[ch.url]
-                _ = try db.insert("""
-                    INSERT INTO chapter (manga_id, source_order, url, name, scanlator, number,
-                                         date_upload, read, bookmark, last_page_read)
-                    VALUES (?,?,?,?,?,?,?,?,?,?)
-                    """, [.int(mangaId), .int(order), .text(ch.url), .text(ch.name),
-                          ch.scanlator.map { SQLiteBindable.text($0) } ?? .null, .double(ch.number),
-                          .int(ch.dateUpload), .bool(prior?.0 ?? ch.read),
-                          .bool(prior?.1 ?? ch.bookmark), .int(prior?.2 ?? ch.lastPageRead)])
+                if let id = idsByURL[ch.url] {
+                    try db.run("""
+                        UPDATE chapter SET source_order=?, name=?, scanlator=?, number=?, date_upload=?
+                        WHERE id=?
+                        """, [.int(order), .text(ch.name),
+                              ch.scanlator.map { SQLiteBindable.text($0) } ?? .null,
+                              .double(ch.number), .int(ch.dateUpload), .int(id)])
+                } else {
+                    _ = try db.insert("""
+                        INSERT INTO chapter (manga_id, source_order, url, name, scanlator, number,
+                                             date_upload, read, bookmark, last_page_read)
+                        VALUES (?,?,?,?,?,?,?,?,?,?)
+                        """, [.int(mangaId), .int(order), .text(ch.url), .text(ch.name),
+                              ch.scanlator.map { SQLiteBindable.text($0) } ?? .null, .double(ch.number),
+                              .int(ch.dateUpload), .bool(ch.read), .bool(ch.bookmark), .int(ch.lastPageRead)])
+                }
+            }
+
+            let incomingURLs = Set(chapters.map(\.url))
+            for row in existing {
+                guard let id = row.int64("id"),
+                      let url = row.string("url"),
+                      !incomingURLs.contains(url) else { continue }
+                try db.run("DELETE FROM chapter WHERE id=?", [.int(id)])
             }
             try db.execute("COMMIT")
         } catch {
@@ -127,7 +151,7 @@ public actor LibraryStore {
             FROM history h JOIN manga m ON m.id = h.manga_id JOIN chapter c ON c.id = h.chapter_id
             ORDER BY h.last_read DESC LIMIT 200
             """)
-        return rows.compactMap { row in
+        return rows.compactMap { row -> (Manga, Chapter, Int64)? in
             guard let m = Self.manga(from: row),
                   let chapterId = row.int("chapter_id"),
                   let chapterUrl = row.string("chapter_url"),

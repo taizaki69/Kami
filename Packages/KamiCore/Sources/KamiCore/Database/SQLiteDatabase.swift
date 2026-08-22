@@ -1,7 +1,9 @@
 import Foundation
-import SQLite3
 
 #if canImport(SQLite3)
+import SQLite3
+
+private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 /// Thin SQLite3 wrapper (system library; no third-party dependency).
 /// Thread-safety: one instance per queue; callers serialize via the Database
@@ -55,7 +57,7 @@ public final class SQLiteDatabase {
             return nil
         }
         public func int(_ column: String) -> Int? {
-            if case let .int(v)? = values[column] { return v }
+            if case let .int(v)? = values[column] { return Int(v) }
             return nil
         }
         public func int64(_ column: String) -> Int64? {
@@ -81,18 +83,19 @@ public final class SQLiteDatabase {
         let stmt = try prepare(sql, params)
         defer { sqlite3_finalize(stmt) }
         var rows: [Row] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var stepResult = sqlite3_step(stmt)
+        while stepResult == SQLITE_ROW {
             var row = Row()
-            let count = sqlite3_column_count(stmt)
-            for i in 0..<Int(count) {
-                let name = String(cString: sqlite3_column_name(stmt, i))
-                switch sqlite3_column_type(stmt, i) {
-                case SQLITE_INTEGER: row.values[name] = .int(sqlite3_column_int64(stmt, i))
-                case SQLITE_FLOAT: row.values[name] = .double(sqlite3_column_double(stmt, i))
-                case SQLITE_TEXT: row.values[name] = .string(String(cString: sqlite3_column_text(stmt, i)))
+            for index in 0..<Int(sqlite3_column_count(stmt)) {
+                let column = Int32(index)
+                let name = String(cString: sqlite3_column_name(stmt, column))
+                switch sqlite3_column_type(stmt, column) {
+                case SQLITE_INTEGER: row.values[name] = .int(sqlite3_column_int64(stmt, column))
+                case SQLITE_FLOAT: row.values[name] = .double(sqlite3_column_double(stmt, column))
+                case SQLITE_TEXT: row.values[name] = .string(String(cString: sqlite3_column_text(stmt, column)))
                 case SQLITE_BLOB:
-                    if let bytes = sqlite3_column_blob(stmt, i) {
-                        let len = Int(sqlite3_column_bytes(stmt, i))
+                    if let bytes = sqlite3_column_blob(stmt, column) {
+                        let len = Int(sqlite3_column_bytes(stmt, column))
                         row.values[name] = .blob(Array(UnsafeRawBufferPointer(start: bytes, count: len)))
                     } else {
                         row.values[name] = .blob([])
@@ -101,6 +104,10 @@ public final class SQLiteDatabase {
                 }
             }
             rows.append(row)
+            stepResult = sqlite3_step(stmt)
+        }
+        guard stepResult == SQLITE_DONE else {
+            throw SQLiteError.step(String(cString: sqlite3_errmsg(handle)), sql: sql)
         }
         return rows
     }
@@ -126,12 +133,21 @@ public final class SQLiteDatabase {
         }
         for (i, p) in params.enumerated() {
             let idx = Int32(i + 1)
+            let result: Int32
             switch p {
-            case let .int(v): sqlite3_bind_int64(stmt, idx, v)
-            case let .double(v): sqlite3_bind_double(stmt, idx, v)
-            case let .text(v): sqlite3_bind_text(stmt, idx, v, -1, SQLITE_TRANSIENT)
-            case let .blob(v): v.withUnsafeBytes { sqlite3_bind_blob(stmt, idx, $0.baseAddress, Int32(v.count), SQLITE_TRANSIENT) }
-            case .null: sqlite3_bind_null(stmt, idx)
+            case let .int(v): result = sqlite3_bind_int64(stmt, idx, v)
+            case let .double(v): result = sqlite3_bind_double(stmt, idx, v)
+            case let .text(v): result = sqlite3_bind_text(stmt, idx, v, -1, sqliteTransient)
+            case let .blob(v):
+                result = v.withUnsafeBytes {
+                    sqlite3_bind_blob(stmt, idx, $0.baseAddress, Int32(v.count), sqliteTransient)
+                }
+            case .null: result = sqlite3_bind_null(stmt, idx)
+            }
+            guard result == SQLITE_OK else {
+                let message = String(cString: sqlite3_errmsg(handle))
+                sqlite3_finalize(stmt)
+                throw SQLiteError.prepare(message, sql: sql)
             }
         }
         return stmt
