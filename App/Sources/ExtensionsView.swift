@@ -105,6 +105,8 @@ struct ExtensionsView: View {
             case let .http(code): return "HTTP \(code) while fetching the index"
             case let .transport(inner): return inner.localizedDescription
             case let .badIndex(message): return "invalid repository index: \(message)"
+            case let .responseTooLarge(limit):
+                return "repository response exceeds the \(limit / 1_048_576) MB safety limit"
             }
         }
         return error.localizedDescription
