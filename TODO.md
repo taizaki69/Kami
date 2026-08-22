@@ -16,7 +16,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       external-list indirection — validated against live Keiyoushi index
       (1372 extensions parsed)
 - [x] Backup reader for legacy (zlib) `.tachibk` + proto schema decode
-- [x] `compat-audit` CLI (inspect/missing/index) — run on 3 real APKs
+- [x] `compat-audit` CLI (inspect/missing/index/methods) — run on 3 real APKs
 
 ## P0 — App foundation
 
@@ -32,13 +32,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## P0 — End-to-end extension execution (the honest frontier)
 
 - [~] DEX interpreter core M1 — frames/registers, core opcode families,
-      objects/arrays/fields/invokes/exceptions, shared budgets, cancellation,
-      and shallow real-APK execution work; full verifier/opcode conformance is
-      tracked in [#1](https://github.com/taizaki69/Kami/issues/1)
-- [~] Kotlin/Java class library M2 — minimal Object/String/StringBuilder,
-      Intrinsics, and source-base constructors work; measured long tail remains
+      objects/arrays/fields/invokes/exceptions, exact prototype dispatch,
+      one-time class initialization, invoke validation, shared budgets,
+      cancellation, and real-APK execution to an HTTP boundary; full
+      verifier/opcode conformance is tracked in
+      [#1](https://github.com/taizaki69/Kami/issues/1)
+- [~] Kotlin/Java class library M2 — Object/String/StringBuilder, core Kotlin
+      ABI, bounded collections, atomics, reflection, and Mihon filters cover
+      the pinned BatCave pre-request path; measured long tail remains
 - [ ] tachiyomix API bridge M3 (`HttpSource` → `KamiSource`)
 - [ ] First real extension executing popular→search→details→chapters→pages —
+      BatCave currently stops exactly at `OkHttp FormBody.Builder`;
       [#2](https://github.com/taizaki69/Kami/issues/2)
 - [ ] Verify store/APK signing identity before enabling downloaded extension
       execution — [#3](https://github.com/taizaki69/Kami/issues/3)

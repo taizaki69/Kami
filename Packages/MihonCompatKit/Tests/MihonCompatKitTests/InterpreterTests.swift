@@ -33,11 +33,12 @@ final class InterpreterTests: XCTestCase {
         var b = DexBuilder()
         b.setClass("LTest;")
         b.addMethod(.init(name: "add", registers: 4, ins: 2, outs: 0,
-                          insns: Insn.binop(0x90, 2, 2, 3) + Insn.returnReg(2), isStatic: true))
+                          insns: Insn.binop(0x90, 2, 2, 3) + Insn.returnReg(2), isStatic: true,
+                          returnType: "I", parameters: ["I", "I"]))
         b.addMethod(.init(name: "run", registers: 2, ins: 0, outs: 2,
                           insns: Insn.const4Units(0, 3) + Insn.const4Units(1, 4)
                               + Insn.invokeStatic(0, [0, 1]) + Insn.moveResult(0)
-                              + Insn.returnReg(0), isStatic: true))
+                              + Insn.returnReg(0), isStatic: true, returnType: "I"))
         let result = try run(b, method: "run")
         XCTAssertEqual(int(result), 7)
     }
@@ -54,7 +55,7 @@ final class InterpreterTests: XCTestCase {
                               + Insn.const4Units(0, 2)
                               + Insn.binop(0x9c, 1, 3, 0)      // div → 21
                               + Insn.returnReg(1),
-                          isStatic: true))
+                          isStatic: true, returnType: "I"))
         let result = try run(b, method: "calc")
         XCTAssertEqual(int(result), 21)
     }
@@ -67,7 +68,7 @@ final class InterpreterTests: XCTestCase {
                               + Insn.const4Units(1, 0)
                               + Insn.binop(0x9c, 2, 0, 1)
                               + Insn.returnReg(2),
-                          isStatic: true))
+                          isStatic: true, returnType: "I"))
         XCTAssertThrowsError(try run(b, method: "div")) { error in
             XCTAssertTrue(error is DEXThrowable, "expected DEXThrowable, got \(error)")
         }
@@ -84,7 +85,8 @@ final class InterpreterTests: XCTestCase {
                 0x029c, 0x0100,         // div-int v2, v0, v1
                 0x020f,
             ],
-            isStatic: true
+            isStatic: true,
+            returnType: "I"
         ))
         XCTAssertEqual(int(try run(division, method: "divide")), .min)
 
@@ -93,7 +95,8 @@ final class InterpreterTests: XCTestCase {
         remainder.addMethod(.init(
             name: "remainder", registers: 3, ins: 0, outs: 0,
             insns: [0x0014, 0x0000, 0x8000, 0xf112, 0x02a0, 0x0100, 0x020f],
-            isStatic: true
+            isStatic: true,
+            returnType: "I"
         ))
         XCTAssertEqual(int(try run(remainder, method: "remainder")), 0)
     }
@@ -107,7 +110,9 @@ final class InterpreterTests: XCTestCase {
         b.addMethod(.init(
             name: "add", registers: 4, ins: 2, outs: 0,
             insns: [0x0290, 0x0302, 0x020f], // add-int v2,v2,v3; return v2
-            isStatic: true
+            isStatic: true,
+            returnType: "I",
+            parameters: ["I", "I"]
         ))
         b.addMethod(.init(
             name: "run", registers: 2, ins: 0, outs: 2,
@@ -116,24 +121,149 @@ final class InterpreterTests: XCTestCase {
                 0x2071, 0x0000, 0x0010,     // invoke-static {v0,v1}, method@0
                 0x000a, 0x000f,             // move-result v0; return v0
             ],
-            isStatic: true
+            isStatic: true,
+            returnType: "I"
         ))
         XCTAssertEqual(int(try run(b, method: "run")), 7)
+    }
+
+    func testNameOnlyPublicCallRejectsOverloadAmbiguityAndExactCallSelectsPrototype() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "pick", registers: 1, ins: 0, outs: 0,
+            insns: Insn.const4Units(0, 1) + Insn.returnReg(0),
+            isStatic: true, returnType: "I"
+        ))
+        builder.addMethod(.init(
+            name: "pick", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 2) + Insn.returnReg(0),
+            isStatic: true, returnType: "I", parameters: ["Ljava/lang/String;"]
+        ))
+        let dex = try DexFile(builder.build())
+        let vm = DexInterpreter(dex: dex)
+
+        XCTAssertThrowsError(try vm.call(classDescriptor: "LTest;", method: "pick")) { error in
+            guard case let VMError.ambiguousMethod(_, _, candidates) = error else {
+                return XCTFail("expected ambiguousMethod, got \(error)")
+            }
+            XCTAssertEqual(candidates, ["pick()I", "pick(Ljava/lang/String;)I"])
+        }
+        XCTAssertEqual(
+            int(try vm.call(classDescriptor: "LTest;", method: "pick", prototype: "()I")),
+            1
+        )
+        XCTAssertEqual(
+            int(try vm.call(
+                classDescriptor: "LTest;",
+                method: "pick",
+                prototype: "(Ljava/lang/String;)I",
+                args: [HostBridge.string("Kami")]
+            )),
+            2
+        )
+    }
+
+    func testMalformedInvokeRejectsMissingWideRegisterWord() throws {
+        var builder = DexBuilder()
+        let target = builder.method(
+            classDescriptor: "LHost;", name: "accept", shorty: "VJ", ret: "V", parameters: ["J"]
+        )
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 2,
+            insns: Insn.const4Units(0, 0)
+                + Insn.invokeStatic(target, [0])
+                + Insn.returnVoid(),
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "run")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("expects 2 invoke register words"), message)
+        }
+    }
+
+    func testInvokeRejectsStaticInstanceMismatchForDefinedMethod() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "target", registers: 1, ins: 0, outs: 0,
+            insns: Insn.const4Units(0, 7) + Insn.returnReg(0),
+            isStatic: true, returnType: "I"
+        ))
+        let testType = builder.typeIdx("LTest;")
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: Insn.newInstance(0, testType)
+                + Insn.invokeVirtual(0, [0])
+                + Insn.returnVoid(),
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "run")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("invoked as instance"), message)
+        }
     }
 
     func testIncomingArgumentsOccupyLastRegisters() throws {
         var b = DexBuilder()
         b.setClass("LTest;")
         b.addMethod(.init(name: "echo", registers: 4, ins: 1, outs: 0,
-                          insns: [0x030f], isStatic: true)) // return v3
+                          insns: [0x030f], isStatic: true, returnType: "I", parameters: ["I"])) // return v3
         XCTAssertEqual(int(try run(b, method: "echo", args: [.int(42)])), 42)
+    }
+
+    func testClassInitializerRunsExactlyOnceBeforeStaticUse() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;", staticFields: [("initializationCount", "I")])
+        builder.addMethod(.init(
+            name: "<clinit>", registers: 1, ins: 0, outs: 0,
+            insns: Insn.sget(0, 0)
+                + Insn.addLit8(0, 0, 1)
+                + Insn.sput(0, 0)
+                + Insn.returnVoid(),
+            isStatic: true
+        ))
+        builder.addMethod(.init(
+            name: "read", registers: 1, ins: 0, outs: 0,
+            insns: Insn.sget(0, 0) + Insn.returnReg(0),
+            isStatic: true, returnType: "I"
+        ))
+        let bytes = builder.build()
+        let dex = try DexFile(bytes)
+        let limitedVM = DexInterpreter(dex: dex, maxInstructions: 5)
+        XCTAssertThrowsError(try limitedVM.call(
+            classDescriptor: "LTest;", method: "read", prototype: "()I"
+        )) { error in
+            guard case VMError.budgetExceeded = error else {
+                return XCTFail("expected class initialization to share the call budget, got \(error)")
+            }
+        }
+
+        let vm = DexInterpreter(dex: dex)
+
+        XCTAssertEqual(
+            int(try vm.call(classDescriptor: "LTest;", method: "read", prototype: "()I")),
+            1
+        )
+        XCTAssertEqual(
+            int(try vm.call(classDescriptor: "LTest;", method: "read", prototype: "()I")),
+            1,
+            "<clinit> must not run again after successful initialization"
+        )
     }
 
     func testRaw12xAndSignedConst4() throws {
         var b = DexBuilder()
         b.setClass("LTest;")
         b.addMethod(.init(name: "move", registers: 2, ins: 0, outs: 0,
-                          insns: [0xf012, 0x0101, 0x010f], isStatic: true))
+                          insns: [0xf012, 0x0101, 0x010f], isStatic: true, returnType: "I"))
         XCTAssertEqual(int(try run(b, method: "move")), -1)
     }
 
@@ -141,13 +271,14 @@ final class InterpreterTests: XCTestCase {
         var unary = DexBuilder()
         unary.setClass("LTest;")
         unary.addMethod(.init(name: "neg", registers: 2, ins: 0, outs: 0,
-                              insns: [0x8012, 0x017b, 0x010f], isStatic: true))
+                              insns: [0x8012, 0x017b, 0x010f], isStatic: true, returnType: "I"))
         XCTAssertEqual(int(try run(unary, method: "neg")), 8)
 
         var twoAddress = DexBuilder()
         twoAddress.setClass("LTest;")
         twoAddress.addMethod(.init(name: "add", registers: 2, ins: 2, outs: 0,
-                                   insns: [0x10b0, 0x000f], isStatic: true))
+                                   insns: [0x10b0, 0x000f], isStatic: true,
+                                   returnType: "I", parameters: ["I", "I"]))
         XCTAssertEqual(int(try run(twoAddress, method: "add", args: [.int(12), .int(30)])), 42)
     }
 
@@ -155,19 +286,22 @@ final class InterpreterTests: XCTestCase {
         var literal = DexBuilder()
         literal.setClass("LTest;")
         literal.addMethod(.init(name: "mul", registers: 2, ins: 0, outs: 0,
-                                insns: [0x2112, 0x10d2, 0x012c, 0x000f], isStatic: true))
+                                insns: [0x2112, 0x10d2, 0x012c, 0x000f], isStatic: true,
+                                returnType: "I"))
         XCTAssertEqual(int(try run(literal, method: "mul")), 600)
 
         var wide = DexBuilder()
         wide.setClass("LTest;")
         wide.addMethod(.init(name: "wide", registers: 2, ins: 0, outs: 0,
-                             insns: [0x0017, 0x0002, 0x0001, 0x0010], isStatic: true))
+                             insns: [0x0017, 0x0002, 0x0001, 0x0010], isStatic: true,
+                             returnType: "J"))
         XCTAssertEqual(long(try run(wide, method: "wide")), 65_538)
 
         var floating = DexBuilder()
         floating.setClass("LTest;")
         floating.addMethod(.init(name: "mul", registers: 3, ins: 2, outs: 0,
-                                 insns: [0x009a, 0x0201, 0x000f], isStatic: true))
+                                 insns: [0x009a, 0x0201, 0x000f], isStatic: true,
+                                 returnType: "F", parameters: ["F", "F"]))
         XCTAssertEqual(float(try run(floating, method: "mul", args: [.float(1.5), .float(4)])), 6)
     }
 
@@ -177,7 +311,9 @@ final class InterpreterTests: XCTestCase {
         b.addMethod(.init(
             name: "same", registers: 3, ins: 2, outs: 0,
             insns: [0x0012, 0x2132, 0x0003, 0x000f, 0x1012, 0x000f],
-            isStatic: true
+            isStatic: true,
+            returnType: "I",
+            parameters: ["Ljava/lang/Object;", "Ljava/lang/Object;"]
         ))
         let first = HostBridge.string("same")
         let second = HostBridge.string("same")
@@ -189,7 +325,8 @@ final class InterpreterTests: XCTestCase {
         var b = DexBuilder()
         b.setClass("LTest;")
         b.addMethod(.init(name: "switch", registers: 1, ins: 0, outs: 0,
-                          insns: [0x002b, 0x7fff, 0x7fff, 0x000f], isStatic: true))
+                          insns: [0x002b, 0x7fff, 0x7fff, 0x000f], isStatic: true,
+                          returnType: "I"))
         XCTAssertThrowsError(try run(b, method: "switch")) { error in
             XCTAssertTrue(error is VMError, "expected VMError, got \(error)")
         }
@@ -202,7 +339,7 @@ final class InterpreterTests: XCTestCase {
         b.setClass("LTest;")
         b.addMethod(.init(name: "neg", registers: 1, ins: 0, outs: 0,
                           insns: Insn.const16Units(0, -1234) + Insn.returnReg(0),
-                          isStatic: true))
+                          isStatic: true, returnType: "I"))
         XCTAssertEqual(int(try run(b, method: "neg")), -1234)
     }
 
@@ -212,7 +349,7 @@ final class InterpreterTests: XCTestCase {
         b.setClass("LTest;")
         b.addMethod(.init(name: "url", registers: 1, ins: 0, outs: 0,
                           insns: Insn.constString(0, 0) + Insn.returnObjectReg(0),
-                          isStatic: true))
+                          isStatic: true, returnType: "Ljava/lang/String;"))
         let result = try run(b, method: "url")
         XCTAssertEqual(vmStringValue(result), "https://batcave.com")
     }
@@ -227,7 +364,8 @@ final class InterpreterTests: XCTestCase {
             + Insn.ifNez(0, 3)
             + Insn.const4Units(0, 0)
             + Insn.returnReg(0)
-        b.addMethod(.init(name: "branch", registers: 1, ins: 0, outs: 0, insns: insns, isStatic: true))
+        b.addMethod(.init(name: "branch", registers: 1, ins: 0, outs: 0,
+                          insns: insns, isStatic: true, returnType: "I"))
         XCTAssertEqual(int(try run(b, method: "branch")), 1)
     }
 
@@ -271,7 +409,8 @@ final class InterpreterTests: XCTestCase {
         insns += Insn.goto(-6)
         // pc12: return v0
         insns += Insn.returnReg(0)
-        b.addMethod(.init(name: "sum", registers: 3, ins: 0, outs: 0, insns: insns, isStatic: true))
+        b.addMethod(.init(name: "sum", registers: 3, ins: 0, outs: 0,
+                          insns: insns, isStatic: true, returnType: "I"))
         XCTAssertEqual(int(try run(b, method: "sum")), 55)
     }
 
@@ -281,7 +420,8 @@ final class InterpreterTests: XCTestCase {
         var b = DexBuilder()
         b.setClass("LTest;", fields: [("value", "I")])
         b.addMethod(.init(name: "getValue", registers: 2, ins: 1, outs: 0,
-                          insns: Insn.iget(0, 1, 0) + Insn.returnReg(0), isStatic: false))
+                          insns: Insn.iget(0, 1, 0) + Insn.returnReg(0), isStatic: false,
+                          returnType: "I"))
         let testTypeIdx = b.typeIdx("LTest;")
         b.addMethod(.init(name: "run", registers: 3, ins: 0, outs: 1,
                           insns: Insn.newInstance(0, testTypeIdx)
@@ -290,7 +430,7 @@ final class InterpreterTests: XCTestCase {
                               + Insn.invokeVirtual(0, [0])
                               + Insn.moveResult(1)
                               + Insn.returnReg(1),
-                          isStatic: true))
+                          isStatic: true, returnType: "I"))
         let dexBytes = b.build()
         let dex = try DexFile(dexBytes)
         let vm = DexInterpreter(dex: dex)
@@ -313,7 +453,7 @@ final class InterpreterTests: XCTestCase {
                               + Insn.aput(3, 1, 2)
                               + Insn.aget(0, 1, 2)
                               + Insn.returnReg(0),
-                          isStatic: true))
+                          isStatic: true, returnType: "I"))
         XCTAssertEqual(int(try run(b, method: "arr")), 1234)
     }
 
@@ -328,7 +468,7 @@ final class InterpreterTests: XCTestCase {
                               + Insn.const4Units(2, 5)
                               + Insn.aget(0, 1, 2)
                               + Insn.returnReg(0),
-                          isStatic: true))
+                          isStatic: true, returnType: "I"))
         XCTAssertThrowsError(try run(b, method: "oob")) { error in
             XCTAssertTrue(error is DEXThrowable)
         }
@@ -336,13 +476,53 @@ final class InterpreterTests: XCTestCase {
 
     // MARK: host bridge
 
+    func testHostBridgeDispatchesByPrototypeAndStaticness() throws {
+        var builder = DexBuilder()
+        let target = builder.method(classDescriptor: "LHost;", name: "value", shorty: "I", ret: "I")
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 0,
+            insns: Insn.invokeStatic(target, [])
+                + Insn.moveResult(0)
+                + Insn.returnReg(0),
+            isStatic: true, returnType: "I"
+        ))
+        let dex = try DexFile(builder.build())
+        let bridge = HostBridge()
+        bridge.register(class: "LHost;", "value", prototype: "()I", isStatic: true) { _, _ in .int(7) }
+        bridge.register(class: "LHost;", "value", prototype: "(I)I", isStatic: true) { _, _ in .int(99) }
+        let vm = DexInterpreter(dex: dex, bridge: bridge)
+        XCTAssertEqual(int(try vm.call(classDescriptor: "LTest;", method: "run")), 7)
+
+        let wrongKind = HostBridge()
+        wrongKind.register(class: "LHost;", "value", prototype: "()I", isStatic: false) { _, _ in .int(8) }
+        let wrongVM = DexInterpreter(dex: dex, bridge: wrongKind)
+        XCTAssertThrowsError(try wrongVM.call(classDescriptor: "LTest;", method: "run")) { error in
+            guard case let VMError.unresolvedMethod(_, signature) = error else {
+                return XCTFail("expected unresolvedMethod, got \(error)")
+            }
+            XCTAssertEqual(signature, "value()I")
+        }
+    }
+
     func testStringBuilderViaHostBridge() throws {
         var b = DexBuilder()
         b.type("Ljava/lang/StringBuilder;")
         b.setClass("LTest;")
         let sbType = b.typeIdx("Ljava/lang/StringBuilder;")
-        b.method(classDescriptor: "Ljava/lang/StringBuilder;", name: "append", shorty: "LL", ret: "L")
-        b.method(classDescriptor: "Ljava/lang/StringBuilder;", name: "toString", shorty: "L", ret: "L")
+        b.method(
+            classDescriptor: "Ljava/lang/StringBuilder;",
+            name: "append",
+            shorty: "LL",
+            ret: "Ljava/lang/StringBuilder;",
+            parameters: ["Ljava/lang/String;"]
+        )
+        b.method(
+            classDescriptor: "Ljava/lang/StringBuilder;",
+            name: "toString",
+            shorty: "L",
+            ret: "Ljava/lang/String;"
+        )
         let appendIdx = 0
         let toStringIdx = 1
         b.addMethod(.init(name: "greet", registers: 2, ins: 0, outs: 2,
@@ -353,13 +533,19 @@ final class InterpreterTests: XCTestCase {
                               + Insn.invokeVirtual(toStringIdx, [0])
                               + Insn.moveResult(0)
                               + Insn.returnObjectReg(0),
-                          isStatic: true))
+                          isStatic: true, returnType: "Ljava/lang/String;"))
         XCTAssertEqual(vmStringValue(try run(b, method: "greet")), "Kami")
     }
 
     func testNegativeStringIndexThrowsInsteadOfIndexingHostArray() throws {
         var b = DexBuilder()
-        let charAt = b.method(classDescriptor: "Ljava/lang/String;", name: "charAt", shorty: "II", ret: "I")
+        let charAt = b.method(
+            classDescriptor: "Ljava/lang/String;",
+            name: "charAt",
+            shorty: "CI",
+            ret: "C",
+            parameters: ["I"]
+        )
         let text = b.string("A")
         b.setClass("LTest;")
         b.addMethod(.init(
@@ -369,7 +555,8 @@ final class InterpreterTests: XCTestCase {
                 + Insn.invokeVirtual(charAt, [0, 1])
                 + Insn.moveResult(0)
                 + Insn.returnReg(0),
-            isStatic: true
+            isStatic: true,
+            returnType: "C"
         ))
         XCTAssertThrowsError(try run(b, method: "badCharAt")) { error in
             XCTAssertTrue(error is DEXThrowable, "expected DEXThrowable, got \(error)")
@@ -424,7 +611,8 @@ final class InterpreterTests: XCTestCase {
                               + Insn.returnVoid(),
                           isStatic: false))
         b.addMethod(.init(name: "get", registers: 2, ins: 1, outs: 0,
-                          insns: Insn.iget(0, 1, 0) + Insn.returnReg(0), isStatic: false))
+                          insns: Insn.iget(0, 1, 0) + Insn.returnReg(0), isStatic: false,
+                          returnType: "I"))
         let dex = try DexFile(b.build())
         let vm = DexInterpreter(dex: dex)
         let obj = try vm.instantiate(classDescriptor: "LTest;")

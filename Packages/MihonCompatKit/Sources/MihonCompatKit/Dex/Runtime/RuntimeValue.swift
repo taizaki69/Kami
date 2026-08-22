@@ -68,10 +68,19 @@ public struct DEXThrowable: Error, CustomStringConvertible {
     public init(_ value: RVal) { self.value = value }
 
     public var description: String {
-        if case let .host(box) = value, let s = box.value as? String {
-            return "DEX exception: \(box.className): \(s)"
+        switch value {
+        case let .host(box):
+            return "DEX exception: \(box.className): \(String(describing: box.value))"
+        case let .obj(object):
+            if let message = object.payload as? String {
+                return "DEX exception: \(object.dexType): \(message)"
+            }
+            return "DEX exception: \(object.dexType)"
+        case let .arr(array):
+            return "DEX exception: [\(array.elemDescriptor)"
+        default:
+            return "DEX exception: \(value)"
         }
-        return "DEX exception: \(value)"
     }
 }
 
@@ -80,6 +89,7 @@ public enum VMError: Error, CustomStringConvertible {
     case budgetExceeded(limit: Int)
     case cancelled
     case unresolvedMethod(class: String, signature: String)
+    case ambiguousMethod(class: String, name: String, candidates: [String])
     case unresolvedClass(String)
     case unresolvedField(class: String, name: String)
     case verify(String)
@@ -89,6 +99,8 @@ public enum VMError: Error, CustomStringConvertible {
         case let .budgetExceeded(limit): return "instruction budget exceeded (\(limit)); possible runaway extension code"
         case .cancelled: return "execution cancelled"
         case let .unresolvedMethod(c, s): return "UNRESOLVED HOST METHOD: \(c).\(s)"
+        case let .ambiguousMethod(c, name, candidates):
+            return "AMBIGUOUS METHOD: \(c).\(name); specify one of \(candidates.joined(separator: ", "))"
         case let .unresolvedClass(c): return "UNRESOLVED CLASS: \(c)"
         case let .unresolvedField(c, n): return "UNRESOLVED FIELD: \(c).\(n)"
         case let .verify(msg): return "verification: \(msg)"

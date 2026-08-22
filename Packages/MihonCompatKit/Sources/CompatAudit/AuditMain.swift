@@ -10,6 +10,7 @@ import MihonCompatKit
 ///   compat-audit inspect <path.apk>       Parse manifest + DEX, print report.
 ///   compat-audit missing <path.apk> [N]   Top-N missing external classes.
 ///   compat-audit index <url-or-file>      Dump an extension store index.
+///   compat-audit methods <path.apk> [q]   Exact first-DEX method references.
 ///
 /// Works on any Swift host (Windows/Linux/macOS); pure Foundation.
 
@@ -24,6 +25,7 @@ struct CompatAudit {
               compat-audit missing <path.apk> [count]
               compat-audit index <url-or-path>
               compat-audit disasm <path.apk> [class-filter]
+              compat-audit methods <path.apk> [text-or-decimal-index]
             """)
             exit(64)
         }
@@ -59,6 +61,14 @@ struct CompatAudit {
             }
             let filter = args.count > 3 ? args[3] : ""
             disasm([UInt8](data), filter: filter)
+
+        case "methods":
+            guard let data = FileManager.default.contents(atPath: args[2]) else {
+                print("error: cannot read \(args[2])")
+                exit(66)
+            }
+            let filter = args.count > 3 ? args[3] : ""
+            methods([UInt8](data), filter: filter)
 
         default:
             print("unknown subcommand \(args[1])")
@@ -113,6 +123,32 @@ struct CompatAudit {
                     let more = code.insnsCount > 12 ? " … (\(code.insnsCount)u)" : ""
                     print("    \(name): \(proto) [regs=\(code.registersSize)] \(insnsText.joined(separator: " "))\(more)")
                 }
+            }
+        } catch {
+            print("error: \(error)")
+            exit(70)
+        }
+    }
+
+    /// Prints canonical overload identities instead of the lossy name/shorty
+    /// view. A decimal filter selects one method_id directly; text matches the
+    /// declaring class or signature case-insensitively.
+    static func methods(_ bytes: [UInt8], filter: String) {
+        do {
+            let zip = try ZipArchive(bytes)
+            let dex = try DexFile(try zip.data(named: "classes.dex"))
+            let selectedIndex = Int(filter)
+            let needle = filter.lowercased()
+            for (index, reference) in dex.methodIds.enumerated() {
+                if let selectedIndex {
+                    if index != selectedIndex { continue }
+                } else if !needle.isEmpty {
+                    let searchable = reference.declaringClass + "." + reference.signature
+                    if !searchable.lowercased().contains(needle) { continue }
+                }
+                let defined = dex.classIndexByDescriptor[reference.declaringClass] == nil ? "external" : "defined"
+                print(String(format: "method@%-6d [%@] %@->%@", index, defined,
+                             reference.declaringClass, reference.signature))
             }
         } catch {
             print("error: \(error)")

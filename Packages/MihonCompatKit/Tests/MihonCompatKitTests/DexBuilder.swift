@@ -12,16 +12,33 @@ struct DexBuilder {
         let outs: Int
         let insns: [UInt16]
         let isStatic: Bool
-        let tryItems: [UInt8] = []   // tries appended raw after insns (advanced tests)
+        let returnType: String
+        let parameters: [String]
+        let tryItems: [UInt8]   // tries appended raw after insns (advanced tests)
+
+        init(name: String, registers: Int, ins: Int, outs: Int,
+             insns: [UInt16], isStatic: Bool, returnType: String = "V",
+             parameters: [String] = [], tryItems: [UInt8] = []) {
+            self.name = name
+            self.registers = registers
+            self.ins = ins
+            self.outs = outs
+            self.insns = insns
+            self.isStatic = isStatic
+            self.returnType = returnType
+            self.parameters = parameters
+            self.tryItems = tryItems
+        }
     }
 
     private var strings: [String] = []
     private var types: [Int] = []                 // type → descriptor string idx
-    private var protos: [(shorty: Int, ret: Int)] = []
+    private var protos: [(shorty: Int, ret: Int, parameters: [Int])] = []
     private var fieldIds: [(classIdx: UInt16, typeIdx: UInt16, nameIdx: Int)] = []
     private var methodIds: [(classIdx: UInt16, protoIdx: UInt16, nameIdx: Int)] = []
     private var classDescriptorIdx: Int = -1
     private var methods: [MethodSpec] = []
+    private var staticFields: [(name: String, type: String)] = []
     private var fields: [(name: String, type: String)] = []
 
     // MARK: registration
@@ -42,16 +59,20 @@ struct DexBuilder {
     }
 
     @discardableResult
-    mutating func proto(shorty: String, ret: String) -> Int {
-        protos.append((string(shorty), type(ret)))
+    mutating func proto(shorty: String, ret: String, parameters: [String] = []) -> Int {
+        let shortyIdx = string(shorty)
+        let returnIdx = type(ret)
+        let parameterIndices = parameters.map { type($0) }
+        protos.append((shortyIdx, returnIdx, parameterIndices))
         return protos.count - 1
     }
 
     @discardableResult
     mutating func method(classDescriptor: String, name: String,
-                         shorty: String = "V", ret: String = "V") -> Int {
+                         shorty: String = "V", ret: String = "V",
+                         parameters: [String] = []) -> Int {
         let cls = type(classDescriptor)
-        let proto = proto(shorty: shorty, ret: ret)
+        let proto = proto(shorty: shorty, ret: ret, parameters: parameters)
         methodIds.append((UInt16(cls), UInt16(proto), string(name)))
         return methodIds.count - 1
     }
@@ -62,9 +83,16 @@ struct DexBuilder {
         return fieldIds.count - 1
     }
 
-    mutating func setClass(_ descriptor: String, fields: [(String, String)] = []) {
+    mutating func setClass(_ descriptor: String,
+                           staticFields: [(String, String)] = [],
+                           fields: [(String, String)] = []) {
         classDescriptorIdx = type(descriptor)
+        self.staticFields = []
         self.fields = []
+        for field in staticFields {
+            _ = self.field(classDescriptor: descriptor, name: field.0, typeDescriptor: field.1)
+            self.staticFields.append((name: field.0, type: field.1))
+        }
         for f in fields {
             _ = field(classDescriptor: descriptor, name: f.0, typeDescriptor: f.1)
             self.fields.append((name: f.0, type: f.1))
@@ -72,12 +100,19 @@ struct DexBuilder {
     }
 
     mutating func addMethod(_ spec: MethodSpec) {
-        // Auto-register the method_id (class = set class, default V proto) so
-        // tests that never call `method(...)` still produce a valid table.
+        // Auto-register the exact method_id so class_data and invoke tests use
+        // the same prototype identity as production DEX files.
         let cls = classDescriptorIdx >= 0 ? classDescriptorIdx : 0
-        let protoIdx = proto(shorty: "V", ret: "V")
+        let shorty = Self.shorty(returnType: spec.returnType, parameters: spec.parameters)
+        let protoIdx = proto(shorty: shorty, ret: spec.returnType, parameters: spec.parameters)
         methodIds.append((UInt16(cls), UInt16(protoIdx), string(spec.name)))
         methods.append(spec)
+    }
+
+    private static func shorty(returnType: String, parameters: [String]) -> String {
+        ([returnType] + parameters).map { descriptor in
+            descriptor.hasPrefix("L") || descriptor.hasPrefix("[") ? "L" : String(descriptor.prefix(1))
+        }.joined()
     }
 
     // MARK: emission
@@ -87,12 +122,20 @@ struct DexBuilder {
         let _ = classDescriptorIdx
 
         // Layout: header(112) stringIds typeIds protoIds fieldIds methodIds
-        //         classDefs(1) stringData classData codeItems
+        //         classDefs(1) stringData protoTypeLists classData codeItems
         let stringIdsSize = strings.count
         let typeIdsSize = types.count
         let protoIdsSize = protos.count
         let fieldIdsSize = fieldIds.count
         let methodIdsSize = methodIds.count
+
+        let stringIdsOff = 112
+        let typeIdsOff = stringIdsOff + stringIdsSize * 4
+        let protoIdsOff = typeIdsOff + typeIdsSize * 4
+        let fieldIdsOff = protoIdsOff + protoIdsSize * 12
+        let methodIdsOff = fieldIdsOff + fieldIdsSize * 8
+        let classDefsOff = methodIdsOff + methodIdsSize * 8
+        let stringDataOff = classDefsOff + 32
 
         var stringData: [UInt8] = []
         var stringOffsets: [Int] = []
@@ -102,6 +145,30 @@ struct DexBuilder {
             stringData.append(contentsOf: ULEB.encode(UInt64(utf8.count)))
             stringData.append(contentsOf: utf8)
             stringData.append(0)
+        }
+
+        // Every non-empty proto parameter list is a 4-byte-aligned type_list.
+        var protoData: [UInt8] = []
+        var protoParameterOffsets: [Int] = []
+        for proto in protos {
+            guard !proto.parameters.isEmpty else {
+                protoParameterOffsets.append(0)
+                continue
+            }
+            while (stringDataOff + stringData.count + protoData.count) % 4 != 0 {
+                protoData.append(0)
+            }
+            protoParameterOffsets.append(stringDataOff + stringData.count + protoData.count)
+            let count = UInt32(proto.parameters.count)
+            protoData.append(UInt8(count & 0xFF))
+            protoData.append(UInt8((count >> 8) & 0xFF))
+            protoData.append(UInt8((count >> 16) & 0xFF))
+            protoData.append(UInt8(count >> 24))
+            for parameter in proto.parameters {
+                let value = UInt16(parameter)
+                protoData.append(UInt8(value & 0xFF))
+                protoData.append(UInt8(value >> 8))
+            }
         }
 
         struct CodeItemLayout {
@@ -118,11 +185,10 @@ struct DexBuilder {
             if m.insns.count % 2 == 1 { codeCursor += 2 } // u32-align next
         }
 
-        // class_data: 0 static fields, N instance fields, M direct methods,
-        // 0 virtual methods. Field indices are consecutive: first absolute,
-        // then diff 1.
+        // class_data: S static fields, N instance fields, M direct methods,
+        // 0 virtual methods. Each field list has its own index-delta stream.
         var classDataHeader: [UInt8] = []
-        classDataHeader.append(contentsOf: ULEB.encode(0))                      // static fields
+        classDataHeader.append(contentsOf: ULEB.encode(UInt64(staticFields.count)))
         classDataHeader.append(contentsOf: ULEB.encode(UInt64(fields.count)))   // instance fields
         classDataHeader.append(contentsOf: ULEB.encode(UInt64(methods.count)))  // direct methods
         classDataHeader.append(contentsOf: ULEB.encode(0))                      // virtual methods
@@ -131,9 +197,14 @@ struct DexBuilder {
         // class_data must encode ABSOLUTE code offsets; uleb width depends on
         // the values, so iterate to a fixed point (converges in one pass here).
         var fieldEntries: [UInt8] = []
+        for index in staticFields.indices {
+            fieldEntries.append(contentsOf: ULEB.encode(UInt64(index == 0 ? 0 : 1)))
+            fieldEntries.append(contentsOf: ULEB.encode(0x8)) // static
+        }
         for i in fields.indices {
-            fieldEntries.append(contentsOf: ULEB.encode(UInt64(i == 0 ? 0 : 1)))
-            fieldEntries.append(contentsOf: ULEB.encode(0x2))                      // private instance
+            let absoluteIndex = staticFields.count + i
+            fieldEntries.append(contentsOf: ULEB.encode(UInt64(i == 0 ? absoluteIndex : 1)))
+            fieldEntries.append(contentsOf: ULEB.encode(0x2)) // private instance
         }
         func buildClassData(codeBaseGuess: Int) -> [UInt8] {
             var out = classDataHeader + fieldEntries
@@ -150,25 +221,16 @@ struct DexBuilder {
         var guessedCodeBase = 0
         classData = buildClassData(codeBaseGuess: guessedCodeBase)
         // Fixed-point: recompute until byte length stabilizes.
-        for _ in 0..<4 {
-            let stringIdsSize2 = strings.count, typeIdsSize2 = types.count
-            let protoIdsSize2 = protos.count, fieldIdsSize2 = fieldIds.count, methodIdsSize2 = methodIds.count
-            let base = 112 + stringIdsSize2*4 + typeIdsSize2*4 + protoIdsSize2*12
-                + fieldIdsSize2*8 + methodIdsSize2*8 + 32
-            let newBase = base + stringData.count + classData.count
+        for _ in 0..<8 {
+            let unalignedBase = stringDataOff + stringData.count + protoData.count + classData.count
+            let newBase = (unalignedBase + 3) & ~3
             if newBase == guessedCodeBase { break }
             guessedCodeBase = newBase
             classData = buildClassData(codeBaseGuess: guessedCodeBase)
         }
-        let stringIdsOff = 112
-        let typeIdsOff = stringIdsOff + stringIdsSize * 4
-        let protoIdsOff = typeIdsOff + typeIdsSize * 4
-        let fieldIdsOff = protoIdsOff + protoIdsSize * 12
-        let methodIdsOff = fieldIdsOff + fieldIdsSize * 8
-        let classDefsOff = methodIdsOff + methodIdsSize * 8
-        let stringDataOff = classDefsOff + 32
-        let classDataOff = stringDataOff + stringData.count
-        let codeOff = classDataOff + classData.count
+        let classDataOff = stringDataOff + stringData.count + protoData.count
+        let codeOff = guessedCodeBase
+        let codePadding = codeOff - (classDataOff + classData.count)
         let fileSize = codeOff + codeCursor
 
         var out: [UInt8] = []
@@ -199,8 +261,10 @@ struct DexBuilder {
         for off in stringOffsets { u32(UInt32(stringDataOff + off)) }
         // type_ids
         for s in types { u32(UInt32(s)) }
-        // proto_ids: shorty_idx, return_type_idx, params_off = 0
-        for p in protos { u32(UInt32(p.shorty)); u32(UInt32(p.ret)); u32(0) }
+        // proto_ids: shorty_idx, return_type_idx, absolute params_off
+        for (index, p) in protos.enumerated() {
+            u32(UInt32(p.shorty)); u32(UInt32(p.ret)); u32(UInt32(protoParameterOffsets[index]))
+        }
         // field_ids
         for f in fieldIds { u16(f.classIdx); u16(f.typeIdx); u32(UInt32(f.nameIdx)) }
         // method_ids
@@ -217,7 +281,9 @@ struct DexBuilder {
         u32(0)
 
         out.append(contentsOf: stringData)
+        out.append(contentsOf: protoData)
         out.append(contentsOf: classData)
+        out.append(contentsOf: [UInt8](repeating: 0, count: codePadding))
 
         for layout in codeLayouts {
             let m = layout.spec
@@ -339,6 +405,12 @@ enum Insn {
     }
     static func iget(_ dst: Int, _ obj: Int, _ fieldIdx: Int) -> [UInt16] {
         [0x52 | UInt16(obj << 12) | UInt16(dst << 8), UInt16(fieldIdx)]
+    }
+    static func sget(_ dst: Int, _ fieldIdx: Int) -> [UInt16] {
+        [0x60 | UInt16(dst << 8), UInt16(fieldIdx)]
+    }
+    static func sput(_ src: Int, _ fieldIdx: Int) -> [UInt16] {
+        [0x67 | UInt16(src << 8), UInt16(fieldIdx)]
     }
     static func addLit8(_ dst: Int, _ src: Int, _ lit: Int8) -> [UInt16] {
         [0xd8 | UInt16(dst << 8), UInt16(src) | (UInt16(UInt8(bitPattern: lit)) << 8)]

@@ -12,6 +12,9 @@ public struct DexFile {
         public let declaringClass: String   // type descriptor, e.g. "Lokhttp3/Request;"
         public let name: String
         public let prototype: Prototype
+
+        /// Canonical DEX method signature, e.g. `append(Ljava/lang/String;)Ljava/lang/StringBuilder;`.
+        public var signature: String { name + prototype.descriptor }
     }
 
     public struct FieldRef {
@@ -24,6 +27,14 @@ public struct DexFile {
         public let shorty: String
         public let returnType: String
         public let parameters: [String]
+
+        /// JVM/DEX descriptor form used as the overload identity.
+        public var descriptor: String { "(" + parameters.joined() + ")" + returnType }
+
+        /// Number of Dalvik register words occupied by the declared parameters.
+        public var parameterWordCount: Int {
+            parameters.reduce(0) { $0 + (($1 == "J" || $1 == "D") ? 2 : 1) }
+        }
     }
 
     public struct EncodedMethod {
@@ -296,9 +307,17 @@ public struct DexFile {
                 virtualMethods = try Self.readMethods(&cr, count: virtualCount, classIndex: classIdx, maximumIndex: methodIdsSize)
             }
 
+            let descriptor = types[classIdx]
+            guard (staticFields + instanceFields).allSatisfy({ fields[$0.fieldIndex].declaringClass == descriptor }) else {
+                throw Error.truncated("encoded field declaring class")
+            }
+            guard (directMethods + virtualMethods).allSatisfy({ methods[$0.methodIndex].declaringClass == descriptor }) else {
+                throw Error.truncated("encoded method declaring class")
+            }
+
             let def = ClassDef(
                 typeIndex: classIdx,
-                descriptor: types[classIdx],
+                descriptor: descriptor,
                 accessFlags: access,
                 superclassIndex: superIdxRaw == 0xFFFF_FFFF ? -1 : Int(superIdxRaw),
                 interfaceIndices: interfaces,

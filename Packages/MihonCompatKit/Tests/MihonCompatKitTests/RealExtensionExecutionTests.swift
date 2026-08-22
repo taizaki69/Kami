@@ -83,6 +83,42 @@ final class RealExtensionExecutionTests: XCTestCase {
         XCTAssertGreaterThan(id, 0, "Mihon source ids are positive 63-bit values")
     }
 
+    /// The real generated source constructor now executes through its Kotlin
+    /// lazy/reflection/atomic setup instead of using a fabricated receiver.
+    func testBatCaveConstructorExecutes() throws {
+        let (vm, _) = try loadVM("batcave")
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let value = try vm.instantiate(classDescriptor: cls)
+        guard case let .obj(object) = value else {
+            return XCTFail("expected BatCave object, got \(value)")
+        }
+        XCTAssertEqual(object.dexType, cls)
+    }
+
+    /// Characterizes the next honest boundary for a complete popular-manga
+    /// request. This locks all interpreted work before OkHttp form encoding:
+    /// class initialization, filters, collections, iteration, and Kotlin ABI.
+    func testBatCavePopularReachesHTTPBridgeFrontier() throws {
+        let (vm, _) = try loadVM("batcave")
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = try vm.instantiate(classDescriptor: cls)
+        XCTAssertThrowsError(try vm.call(
+            classDescriptor: cls,
+            method: "getPopularManga",
+            prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+            args: [receiver, .int(1), .null]
+        )) { error in
+            guard case let VMError.unresolvedMethod(classDescriptor, signature) = error else {
+                return XCTFail("expected exact OkHttp frontier, got \(error)")
+            }
+            XCTAssertEqual(classDescriptor, "Lokhttp3/FormBody$Builder;")
+            XCTAssertEqual(
+                signature,
+                "<init>(Ljava/nio/charset/Charset;ILkotlin/jvm/internal/DefaultConstructorMarker;)V"
+            )
+        }
+    }
+
     /// MangaDex 1.4.212: the factory entry class's REAL constructor executes
     /// (invoke-direct Object.<init> + return-void). Its getters are iget-based
     /// (instance state from the host HttpSource superclass) — that is the M2/M3

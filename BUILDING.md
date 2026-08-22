@@ -4,7 +4,7 @@
 
 | Component | Verified how |
 |---|---|
-| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 and GitHub's macOS runner — **54/54 tests pass**, including 6 real-APK executions; release `compat-audit` builds |
+| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 and GitHub's macOS runner — **61/61 tests pass**, including 8 real-APK execution/frontier assertions; release `compat-audit` builds |
 | compat-audit CLI | built and run on Windows against 3 SHA-256-locked extension APKs; uploaded by Swift CI on macOS |
 | KamiCore (models, SQLite store, MangaDex source) | `swift test` passes in GitHub Actions; package builds as an app dependency for Simulator and device |
 | App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |

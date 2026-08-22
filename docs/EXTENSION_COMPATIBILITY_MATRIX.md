@@ -20,8 +20,8 @@ is no compatibility claim.
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
 | DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| DEX execution | Initial M1 working | 23 interpreter tests plus six exact assertions against methods in pinned APKs |
-| End-to-end source operations | Not implemented | No interpreted search/details/chapters/pages/network claim yet |
+| DEX execution | Partial M1/M2 working | 28 interpreter tests plus eight exact assertions against pinned APK paths; overload identity and invoke shape are checked |
+| End-to-end source operations | Not implemented | BatCave popular reaches the exact OkHttp form-builder boundary; no interpreted operation or network request completes yet |
 
 ## Per-extension execution
 
@@ -29,13 +29,15 @@ is no compatibility claim.
 |---|---:|---|:---:|:---:|---|:---:|:---:|:---:|:---:|
 | MangaDex (`all.mangadex`) | 1.4.212 | `543dcf6a…306fa3` | ✅ | ✅ | — | — | — | — | — |
 | Akuma (`all.akuma`) | 1.4.10 | `9f5e744e…ba39a` | ✅ | ✅ | — | — | — | — | — |
-| BatCave (`en.batcave`) | 1.6.9 | `f5338a90…34fab6` | ✅ | — | ✅ base URL, lang, name, ID | — | — | — | — |
+| BatCave (`en.batcave`) | 1.6.9 | `f5338a90…34fab6` | ✅ | ✅ | ✅ base URL, lang, name, ID | — | — | — | — |
 
-BatCave's metadata assertions use a valid allocated receiver. Its full
-constructor currently reaches unsupported Java reflection
-(`Class.getDeclaredField`), so constructor compatibility is deliberately not
-claimed. MangaDex and Akuma constructors execute their real no-argument DEX
-paths and return objects of the declared entry type.
+All three constructors execute their real no-argument DEX paths and return
+objects of the declared entry type. BatCave's popular path additionally proves
+class initialization, filter construction and iteration, and its pre-request
+Kotlin ABI before asserting the exact unresolved
+`okhttp3.FormBody$Builder.<init>(Charset, int, DefaultConstructorMarker)` call.
+That assertion is a precise implementation frontier, not a successful popular
+operation.
 
 ## Current measured API workload
 
@@ -67,10 +69,11 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 ## Test evidence
 
-- 54/54 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 and in macOS
+- 61/61 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 and in macOS
   GitHub Actions with the corpus present.
-- The six real-extension tests require successful return values; arbitrary VM
-  failures are not accepted as success.
+- Seven real-extension constructor/getter tests require successful return
+  values. The eighth requires the exact current OkHttp frontier; arbitrary VM
+  failures are not accepted as progress.
 - Parser hardening covers checksum/size/count limits and every truncated prefix
   of generated valid DEX and ZIP fixtures.
 - `compat-audit` builds in release mode and is uploaded by Swift CI.
@@ -78,9 +81,9 @@ tests, not the heuristic percentage, are the acceptance signal.
 ## Honest frontier
 
 Kami can download, validate structurally, inspect, classify, and execute a
-small controlled slice of real extension bytecode. It cannot yet use an
-unmodified extension as a reader source. Full DEX verification/opcode work is
-tracked in [#1](https://github.com/taizaki69/Kami/issues/1), the first complete
-source in [#2](https://github.com/taizaki69/Kami/issues/2), APK signer trust in
+controlled real-extension path through the pre-request boundary. It cannot yet
+use an unmodified extension as a reader source. Full DEX verification/opcode
+work is tracked in [#1](https://github.com/taizaki69/Kami/issues/1), the first
+complete source in [#2](https://github.com/taizaki69/Kami/issues/2), APK signer trust in
 [#3](https://github.com/taizaki69/Kami/issues/3), and privacy-safe compatibility
 telemetry in [#4](https://github.com/taizaki69/Kami/issues/4).

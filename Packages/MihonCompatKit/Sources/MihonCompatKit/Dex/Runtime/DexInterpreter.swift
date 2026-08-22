@@ -23,11 +23,20 @@ public final class DexInterpreter {
     private var dexMethodTable: [Int: (DexFile.ClassDef, DexFile.EncodedMethod)] = [:]
     /// Static field storage for DEX-defined classes: "class->name".
     private var dexStatics: [String: RVal] = [:]
+    private enum ClassInitializationState {
+        case initializing
+        case initialized
+        case failed(String)
+    }
+    private var classInitialization: [String: ClassInitializationState] = [:]
     private var lastResult: RVal = .null
     /// Current interpreted-frame depth (recursion guard).
     private var depth = 0
     /// One budget shared by the complete interpreted call tree.
     private var remainingInstructions = 0
+    /// Public entry points can perform class initialization before the first
+    /// frame. Keep that work in the same instruction-budget session.
+    private var entryDepth = 0
     /// Conservative default: interpreted frames are large in debug builds and
     /// unbounded recursion (obfuscated/mis-resolved super calls) must not
     /// overflow the host stack. The production runtime raises this by
@@ -58,10 +67,61 @@ public final class DexInterpreter {
         }
         let def = dex.classDefs[defIndex]
         let all = def.directMethods + def.virtualMethods
-        guard let m = all.first(where: { dex.methodIds[$0.methodIndex].name == method }) else {
+        let matches = all.filter { dex.methodIds[$0.methodIndex].name == method }
+        guard !matches.isEmpty else {
             throw VMError.unresolvedMethod(class: classDescriptor, signature: method)
         }
-        return try execute(def: def, method: m, args: args)
+        guard matches.count == 1, let match = matches.first else {
+            let candidates = matches.map { dex.methodIds[$0.methodIndex].signature }.sorted()
+            throw VMError.ambiguousMethod(class: classDescriptor, name: method, candidates: candidates)
+        }
+        return try withInstructionBudget {
+            if method == "<clinit>" {
+                guard args.isEmpty else {
+                    throw VMError.verify("\(classDescriptor).<clinit>()V expects no arguments")
+                }
+                try ensureClassInitialized(classDescriptor)
+                return .null
+            }
+            if match.accessFlags & 0x8 != 0 {
+                try ensureClassInitialized(classDescriptor)
+            }
+            return try execute(def: def, method: match, args: args)
+        }
+    }
+
+    /// Calls one exact DEX overload. Use this at API boundaries where a class
+    /// may expose multiple methods with the same name.
+    @discardableResult
+    public func call(classDescriptor: String, method: String, prototype: String,
+                     args: [RVal] = []) throws -> RVal {
+        guard let defIndex = dex.classIndexByDescriptor[classDescriptor] else {
+            throw VMError.unresolvedClass(classDescriptor)
+        }
+        let def = dex.classDefs[defIndex]
+        let matches = (def.directMethods + def.virtualMethods).filter {
+            let reference = dex.methodIds[$0.methodIndex]
+            return reference.name == method && reference.prototype.descriptor == prototype
+        }
+        guard !matches.isEmpty else {
+            throw VMError.unresolvedMethod(class: classDescriptor, signature: method + prototype)
+        }
+        guard matches.count == 1, let match = matches.first else {
+            throw VMError.verify("duplicate encoded method \(classDescriptor).\(method)\(prototype)")
+        }
+        return try withInstructionBudget {
+            if method == "<clinit>" {
+                guard prototype == "()V", args.isEmpty else {
+                    throw VMError.verify("\(classDescriptor).<clinit>()V expects no arguments")
+                }
+                try ensureClassInitialized(classDescriptor)
+                return .null
+            }
+            if match.accessFlags & 0x8 != 0 {
+                try ensureClassInitialized(classDescriptor)
+            }
+            return try execute(def: def, method: match, args: args)
+        }
     }
 
     /// Allocates a DEX class instance and runs `<init>` (constructor).
@@ -71,21 +131,72 @@ public final class DexInterpreter {
             throw VMError.unresolvedClass(classDescriptor)
         }
         let def = dex.classDefs[defIndex]
-        let obj = ObjInstance(dexType: classDescriptor)
-        for f in def.instanceFields {
-            guard let field = try? fieldAt(f.fieldIndex) else { continue }
-            obj.fields[field.name] = defaultValue(for: field.type)
+        return try withInstructionBudget {
+            try ensureClassInitialized(classDescriptor)
+            let obj = ObjInstance(dexType: classDescriptor)
+            for f in def.instanceFields {
+                guard let field = try? fieldAt(f.fieldIndex) else { continue }
+                obj.fields[field.name] = defaultValue(for: field.type)
+            }
+            let constructors = def.directMethods.filter { dex.methodIds[$0.methodIndex].name == "<init>" }
+            let noArgumentConstructors = constructors.filter {
+                let reference = dex.methodIds[$0.methodIndex]
+                return reference.prototype.descriptor == "()V"
+            }
+            if noArgumentConstructors.count == 1, let ctor = noArgumentConstructors.first {
+                _ = try execute(def: def, method: ctor, args: [.obj(obj)])
+            } else if noArgumentConstructors.count > 1 {
+                throw VMError.verify("duplicate encoded constructor \(classDescriptor).<init>()V")
+            } else if !constructors.isEmpty {
+                throw VMError.unresolvedMethod(class: classDescriptor, signature: "<init>()V")
+            }
+            return .obj(obj)
         }
-        let constructors = def.directMethods.filter { dex.methodIds[$0.methodIndex].name == "<init>" }
-        if let ctor = constructors.first(where: {
-            let reference = dex.methodIds[$0.methodIndex]
-            return reference.prototype.parameters.isEmpty
-        }) {
-            _ = try execute(def: def, method: ctor, args: [.obj(obj)])
-        } else if !constructors.isEmpty {
-            throw VMError.unresolvedMethod(class: classDescriptor, signature: "<init>()V")
+    }
+
+    private func withInstructionBudget<T>(_ operation: () throws -> T) throws -> T {
+        let startsSession = entryDepth == 0 && depth == 0
+        if startsSession { remainingInstructions = maxInstructions }
+        entryDepth += 1
+        defer { entryDepth -= 1 }
+        return try operation()
+    }
+
+    private func ensureClassInitialized(_ descriptor: String) throws {
+        guard let defIndex = dex.classIndexByDescriptor[descriptor] else { return }
+        if let state = classInitialization[descriptor] {
+            switch state {
+            case .initializing, .initialized:
+                return
+            case let .failed(reason):
+                throw VMError.verify("class initialization previously failed for \(descriptor): \(reason)")
+            }
         }
-        return .obj(obj)
+
+        classInitialization[descriptor] = .initializing
+        do {
+            let def = dex.classDefs[defIndex]
+            if def.superclassIndex >= 0, def.superclassIndex < dex.typeDescriptors.count {
+                try ensureClassInitialized(dex.typeDescriptors[def.superclassIndex])
+            }
+            let initializers = def.directMethods.filter {
+                let reference = dex.methodIds[$0.methodIndex]
+                return reference.name == "<clinit>" && reference.prototype.descriptor == "()V"
+            }
+            guard initializers.count <= 1 else {
+                throw VMError.verify("duplicate class initializer \(descriptor).<clinit>()V")
+            }
+            if let initializer = initializers.first {
+                guard initializer.accessFlags & 0x8 != 0 else {
+                    throw VMError.verify("non-static class initializer \(descriptor).<clinit>()V")
+                }
+                _ = try execute(def: def, method: initializer, args: [])
+            }
+            classInitialization[descriptor] = .initialized
+        } catch {
+            classInitialization[descriptor] = .failed(String(describing: error))
+            throw error
+        }
     }
 
     func defaultValue(for descriptor: String) -> RVal {
@@ -95,6 +206,89 @@ public final class DexInterpreter {
         case "D": return .double(0)
         case "Z", "B", "C", "S", "I": return .int(0)
         default: return .null // L...; and [...
+        }
+    }
+
+    private func validateLogicalArguments(_ args: [RVal], prototype: DexFile.Prototype,
+                                          hasReceiver: Bool, context: String) throws {
+        let expectedCount = prototype.parameters.count + (hasReceiver ? 1 : 0)
+        guard args.count == expectedCount else {
+            throw VMError.verify(
+                "\(context) expects \(expectedCount) logical arguments, got \(args.count)"
+            )
+        }
+
+        var offset = 0
+        if hasReceiver {
+            let receiver = args[0]
+            guard Self.matches(receiver, descriptor: "Ljava/lang/Object;") else {
+                throw VMError.verify("\(context) receiver is not a reference")
+            }
+            if Self.isNullReference(receiver) {
+                throw DEXThrowable(HostBridge.string("NullPointerException"))
+            }
+            offset = 1
+        }
+
+        for (index, descriptor) in prototype.parameters.enumerated() {
+            guard Self.matches(args[index + offset], descriptor: descriptor) else {
+                throw VMError.verify(
+                    "\(context) argument \(index) does not match DEX type \(descriptor)"
+                )
+            }
+        }
+    }
+
+    private func validatedReturn(_ value: RVal, prototype: DexFile.Prototype,
+                                 context: String) throws -> RVal {
+        if prototype.returnType == "V" {
+            guard value.isNull else {
+                throw VMError.verify("\(context) returned a value from a void method")
+            }
+            return .null
+        }
+        guard Self.matches(value, descriptor: prototype.returnType) else {
+            throw VMError.verify(
+                "\(context) result does not match DEX return type \(prototype.returnType)"
+            )
+        }
+        if Self.isReferenceDescriptor(prototype.returnType), Self.isNullReference(value) {
+            return .null
+        }
+        return value
+    }
+
+    private static func isReferenceDescriptor(_ descriptor: String) -> Bool {
+        descriptor.hasPrefix("L") || descriptor.hasPrefix("[")
+    }
+
+    private static func isNullReference(_ value: RVal) -> Bool {
+        if value.isNull { return true }
+        if case let .int(raw) = value { return raw == 0 }
+        return false
+    }
+
+    private static func matches(_ value: RVal, descriptor: String) -> Bool {
+        switch descriptor {
+        case "Z", "B", "C", "S", "I":
+            if case .int = value { return true }
+            return false
+        case "J":
+            if case .long = value { return true }
+            return false
+        case "F":
+            if case .float = value { return true }
+            return false
+        case "D":
+            if case .double = value { return true }
+            return false
+        default:
+            guard isReferenceDescriptor(descriptor) else { return false }
+            switch value {
+            case .null, .obj, .arr, .host: return true
+            case let .int(raw): return raw == 0 // const/4 0 is verifier-polymorphic null
+            default: return false
+            }
         }
     }
 
@@ -108,12 +302,23 @@ public final class DexInterpreter {
 
     @discardableResult
     func execute(def: DexFile.ClassDef, method: DexFile.EncodedMethod, args: [RVal]) throws -> RVal {
+        let ref = dex.methodIds[method.methodIndex]
+        let hasReceiver = method.accessFlags & 0x8 == 0
+        try validateLogicalArguments(
+            args,
+            prototype: ref.prototype,
+            hasReceiver: hasReceiver,
+            context: ref.signature
+        )
+
         guard let code = dex.codeItem(for: method) else {
-            let ref = dex.methodIds[method.methodIndex]
-            if let host = bridge.resolve(class: ref.declaringClass, ref.name) {
-                return try host(self, args)
+            guard method.codeOffset == 0 else {
+                throw VMError.verify("malformed code item for \(ref.declaringClass).\(ref.signature)")
             }
-            throw VMError.unresolvedMethod(class: ref.declaringClass, signature: ref.name)
+            if let host = bridge.resolve(ref, isStatic: !hasReceiver) {
+                return try validatedReturn(try host(self, args), prototype: ref.prototype, context: ref.signature)
+            }
+            throw VMError.unresolvedMethod(class: ref.declaringClass, signature: ref.signature)
         }
         let isRootFrame = depth == 0
         guard depth < maxCallDepth else {
@@ -128,7 +333,7 @@ public final class DexInterpreter {
                 "argument width \(incomingWords) does not match ins_size \(code.insSize) for \(dex.methodIds[method.methodIndex].name)"
             )
         }
-        if isRootFrame { remainingInstructions = maxInstructions }
+        if isRootFrame, entryDepth == 0 { remainingInstructions = maxInstructions }
 
         var regs = [RVal](repeating: .int(0), count: Int(code.registersSize))
         var cursor = regs.count - incomingWords
@@ -153,7 +358,7 @@ public final class DexInterpreter {
             do {
                 pc = try step(pc, &regs, &pendingException, def, method, code)
             } catch let ret as FrameReturn {
-                return ret.value
+                return try validatedReturn(ret.value, prototype: ref.prototype, context: ref.signature)
             } catch let thrown as DEXThrowable {
                 guard let handler = Self.handler(for: thrown.value, at: pc, in: tries) else { throw thrown }
                 pendingException = thrown.value
@@ -226,7 +431,12 @@ public final class DexInterpreter {
         let pc = pc0
         let u = try readUnits(pc, code, count: 5)
         let op = UInt8(u[0] & 0xFF)
-        trace?("pc=\(pc) op=0x\(String(op, radix: 16)) u=\(u.prefix(3).map { String($0, radix: 16) }) regs=\(regs.map { short($0) })")
+        let reference = dex.methodIds[method.methodIndex]
+        trace?(
+            "depth=\(depth) \(reference.declaringClass)->\(reference.signature) "
+                + "pc=\(pc) op=0x\(String(op, radix: 16)) "
+                + "u=\(u.prefix(3).map { String($0, radix: 16) }) regs=\(regs.map { short($0) })"
+        )
 
         // Bounds-safe register access: malformed streams or unsupported
         // instruction sequences must degrade to nulls, never crash the host.
@@ -448,6 +658,9 @@ public final class DexInterpreter {
         case 0x60...0x6d:
             let a = Int(u[0] >> 8)
             let field = try fieldAt(Int(u[1]))
+            if dex.classIndexByDescriptor[field.declaringClass] != nil {
+                try ensureClassInitialized(field.declaringClass)
+            }
             let key = "\(field.declaringClass)->\(field.name)"
             if op <= 0x66 {
                 setReg(a, dexStatics[key] ?? bridge.staticFields[key] ?? defaultValue(for: field.type))
@@ -466,7 +679,13 @@ public final class DexInterpreter {
             // 35c: A|G|op, BBBB method index, F|E|D|C registers.
             var indices = [Int(u[2] & 0x0F), Int(u[2] >> 4 & 0x0F), Int(u[2] >> 8 & 0x0F), Int(u[2] >> 12)]
             if count == 5 { indices.append(g) } else { indices = Array(indices.prefix(count)) }
-            try invokeRegs(methodIndex: Int(u[1]), regs: regs, indices: indices)
+            try invokeRegs(
+                methodIndex: Int(u[1]),
+                regs: regs,
+                indices: indices,
+                isStaticInvocation: op == 0x71,
+                callerOutsSize: Int(code.outsSize)
+            )
             return pc + 3
         }()
 
@@ -476,7 +695,13 @@ public final class DexInterpreter {
             let count = Int(u[0] >> 8)
             let start = Int(u[2])
             let indices = Array(start..<(start + count))
-            try invokeRegs(methodIndex: Int(u[1]), regs: regs, indices: indices)
+            try invokeRegs(
+                methodIndex: Int(u[1]),
+                regs: regs,
+                indices: indices,
+                isStaticInvocation: op == 0x77,
+                callerOutsSize: Int(code.outsSize)
+            )
             return pc + 3
         }()
 
@@ -583,6 +808,7 @@ public final class DexInterpreter {
 
     private func allocate(_ descriptor: String) throws -> RVal {
         if let defIndex = dex.classIndexByDescriptor[descriptor] {
+            try ensureClassInitialized(descriptor)
             let d = dex.classDefs[defIndex]
             let obj = ObjInstance(dexType: descriptor)
             for f in d.instanceFields {
@@ -612,24 +838,60 @@ public final class DexInterpreter {
 
     // MARK: - invocation
 
-    /// Invoke with explicit argument register indices (pair-aware).
-    private func invokeRegs(methodIndex: Int, regs: [RVal], indices: [Int]) throws {
+    /// Invoke with explicit argument register words. The method prototype, not
+    /// the runtime value tags, determines how those words are grouped.
+    private func invokeRegs(methodIndex: Int, regs: [RVal], indices: [Int],
+                            isStaticInvocation: Bool, callerOutsSize: Int) throws {
         guard methodIndex >= 0, methodIndex < dex.methodIds.count else { throw VMError.verify("method index \(methodIndex)") }
         let ref = dex.methodIds[methodIndex]
+        let hasReceiver = !isStaticInvocation
+        let expectedWords = ref.prototype.parameterWordCount + (hasReceiver ? 1 : 0)
+        guard indices.count == expectedWords else {
+            throw VMError.verify(
+                "\(ref.signature) expects \(expectedWords) invoke register words, got \(indices.count)"
+            )
+        }
+        guard indices.count <= callerOutsSize else {
+            throw VMError.verify(
+                "\(ref.signature) uses \(indices.count) outgoing words but caller outs_size is \(callerOutsSize)"
+            )
+        }
 
         var args: [RVal] = []
-        var k = 0
-        while k < indices.count {
-            let idx = indices[k]
+        args.reserveCapacity(ref.prototype.parameters.count + (hasReceiver ? 1 : 0))
+        var word = 0
+
+        func value(at wordOffset: Int, descriptor: String, label: String) throws -> RVal {
+            let idx = indices[wordOffset]
             guard idx >= 0, idx < regs.count else { throw VMError.verify("invoke register v\(idx) outside register file") }
             let value = regs[idx]
-            args.append(value)
-            if value.isWide {
-                guard k + 1 < indices.count, indices[k + 1] == idx + 1 else {
-                    throw VMError.verify("wide invoke argument at v\(idx) is missing its second register word")
+            guard Self.matches(value, descriptor: descriptor) else {
+                throw VMError.verify("\(ref.signature) \(label) at v\(idx) does not match \(descriptor)")
+            }
+            let width = descriptor == "J" || descriptor == "D" ? 2 : 1
+            if width == 2 {
+                guard wordOffset + 1 < indices.count, indices[wordOffset + 1] == idx + 1 else {
+                    throw VMError.verify("wide \(ref.signature) \(label) at v\(idx) is missing its second register word")
+                }
+                guard idx + 1 < regs.count else {
+                    throw VMError.verify("wide \(ref.signature) \(label) exceeds the register file")
                 }
             }
-            k += value.isWide ? 2 : 1
+            if Self.isReferenceDescriptor(descriptor), Self.isNullReference(value) { return .null }
+            return value
+        }
+
+        if hasReceiver {
+            let receiver = try value(at: 0, descriptor: "Ljava/lang/Object;", label: "receiver")
+            if receiver.isNull {
+                throw DEXThrowable(HostBridge.string("NullPointerException"))
+            }
+            args.append(receiver)
+            word = 1
+        }
+        for (argumentIndex, descriptor) in ref.prototype.parameters.enumerated() {
+            args.append(try value(at: word, descriptor: descriptor, label: "argument \(argumentIndex)"))
+            word += descriptor == "J" || descriptor == "D" ? 2 : 1
         }
 
         // Interpret only when the method's declaring class is actually
@@ -637,14 +899,27 @@ public final class DexInterpreter {
         // shadow host implementations (e.g. java.lang.Object.<init>).
         if dex.classIndexByDescriptor[ref.declaringClass] != nil,
            let (def, encoded) = dexMethodTable[methodIndex] {
+            let encodedIsStatic = encoded.accessFlags & 0x8 != 0
+            guard encodedIsStatic == isStaticInvocation else {
+                throw VMError.verify(
+                    "\(ref.signature) invoked as \(isStaticInvocation ? "static" : "instance") but encoded method is \(encodedIsStatic ? "static" : "instance")"
+                )
+            }
+            if isStaticInvocation, ref.name != "<clinit>" {
+                try ensureClassInitialized(ref.declaringClass)
+            }
             lastResult = try execute(def: def, method: encoded, args: args)
             return
         }
-        if let host = bridge.resolve(class: ref.declaringClass, ref.name) {
-            lastResult = try host(self, args)
+        if let host = bridge.resolve(ref, isStatic: isStaticInvocation) {
+            lastResult = try validatedReturn(
+                try host(self, args),
+                prototype: ref.prototype,
+                context: ref.signature
+            )
             return
         }
-        throw VMError.unresolvedMethod(class: ref.declaringClass, signature: "\(ref.name) shorty=\(ref.prototype.shorty)")
+        throw VMError.unresolvedMethod(class: ref.declaringClass, signature: ref.signature)
     }
 
     // MARK: - arithmetic

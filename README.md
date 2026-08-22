@@ -10,12 +10,15 @@ measured status.
 **Honest status (2026-08-22):** the pure-Swift extension pipeline now covers
 store indexes, APK download, bounded ZIP/DEFLATE and binary-manifest parsing,
 validated DEX parsing, compatibility analysis, and an initial interpreter.
-Pinned real-APK tests execute the Akuma and MangaDex entry constructors and
-BatCave's `getBaseUrl`, `getLang`, `getName`, and `getId` methods. This is a
-measured M1 runtime slice, **not end-to-end source compatibility**: interpreted
-search, details, chapters, pages, networking, and most Kotlin/Java APIs remain
-open (`docs/EXTENSION_RUNTIME.md`). Kami currently reads through its native
-MangaDex source.
+Pinned real-APK tests execute the Akuma, MangaDex, and BatCave entry
+constructors plus BatCave's `getBaseUrl`, `getLang`, `getName`, and `getId`
+methods. BatCave's real popular-manga path now runs through Kotlin class
+initialization, filters, collections, iteration, and coroutine setup to the
+first exact OkHttp form-builder call. This is a measured M1/M2 runtime slice,
+**not end-to-end source compatibility**: no interpreted request has completed,
+and details, chapters, pages, networking, and much of the Kotlin/Java surface
+remain open (`docs/EXTENSION_RUNTIME.md`). Kami currently reads through its
+native MangaDex source.
 
 ## Layout
 
@@ -47,7 +50,7 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 54 tests run on Windows with Swift 6.3
+The compatibility kit and all 61 tests run on Windows with Swift 6.3
 (`scripts/windows_dev_test.bat`). GitHub Actions independently runs the pinned
 real-APK suite on macOS, compiles both Simulator and unsigned device targets,
 and publishes an unsigned IPA artifact. The `compat-audit` CLI produced the

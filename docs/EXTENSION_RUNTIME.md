@@ -4,17 +4,24 @@
 
 ## Where we are
 
-Kami has crossed from DEX analysis into controlled execution. The initial M1
-interpreter runs synthetic conformance fixtures and shallow methods from three
-pinned, current Mihon extension APKs. It is not yet a complete verifier, Java or
-Kotlin runtime, network bridge, or end-to-end source implementation.
+Kami has crossed from DEX analysis into controlled execution. The partial M1
+interpreter runs synthetic conformance fixtures and progressively deeper paths
+from three pinned, current Mihon extension APKs. It is not yet a complete
+verifier, Java or Kotlin runtime, network bridge, or end-to-end source
+implementation.
 
 Measured real-APK behavior today:
 
-- Akuma 1.4.10 and MangaDex 1.4.212 entry constructors return real DEX objects.
+- Akuma 1.4.10, MangaDex 1.4.212, and BatCave 1.6.9 entry constructors return
+  real DEX objects.
 - BatCave 1.6.9 returns its real base URL, language, name, and 64-bit source ID.
-- No test claims search, details, chapters, pages, filters, HTTP, HTML parsing,
-  JSON serialization, coroutines, preferences, or Cloudflare behavior yet.
+- BatCave's real `getPopularManga` path executes class initialization, Kotlin
+  pairs and collections, Mihon filters and iteration, and synchronous coroutine
+  setup before stopping at the exact unimplemented OkHttp form-body builder:
+  `FormBody.Builder.<init>(Charset, int, DefaultConstructorMarker)`.
+- No test claims a completed popular/search request, details, chapters, pages,
+  HTTP transport, HTML parsing, JSON serialization, preferences, or Cloudflare
+  behavior yet.
 
 ## Architecture
 
@@ -23,8 +30,8 @@ Extension APK                       (untrusted)
    ↓ bounded ZIP/DEFLATE + CRC      working
 AndroidManifest.xml (AXML)          working
 classes*.dex                        validated structural parse
-   ↓ DexInterpreter                 partial M1; real shallow methods execute
-   ↓ Java/Kotlin HostBridge         minimal M2 surface
+   ↓ DexInterpreter                 partial M1; measured real paths execute
+   ↓ Java/Kotlin HostBridge         partial exact-signature M2 surface
    ↓ tachiyomix API bridge          not implemented
 KamiSource (Swift protocol)         working for native sources
    ↓ SourceRegistry / app / DB      working
@@ -42,7 +49,8 @@ DEX instruction formats and bytecode semantics documented by AOSP:
 Implemented slice:
 
 - Incoming parameters occupy the final `ins_size` register words, including
-  wide values; calls use one shared instruction budget across the call tree.
+  wide values; calls and entry-triggered class initializers use one shared
+  instruction budget across the call tree.
 - Integer, long, float, double, object, null, array, and host values; instance
   and static fields; object and array allocation.
 - Move/constant/return, branches and switches, arrays, fields, invoke and
@@ -50,13 +58,19 @@ Implemented slice:
   opcode families reached by the current fixtures.
 - Java-compatible integer divide/remainder edge cases, reference identity,
   exception handlers, recursion limit, cancellation, and trace callback.
+- Exact declaring-class/name/prototype dispatch for interpreted and host calls;
+  static/instance kind, invoke word count, caller `outs_size`, wide-register
+  pairing, logical argument categories, and return categories are checked.
+- One-time DEX class initialization, including DEX superclass initialization,
+  before static use and allocation; failed initialization remains failed.
 - Precise unresolved-class/method/opcode failures instead of treating arbitrary
-  VM errors as compatibility success.
+  VM errors as compatibility success. Trace entries include depth and canonical
+  method identity.
 
 Still required before M1 is complete:
 
 - Full instruction and payload coverage for the expanding corpus.
-- Prototype-aware overload dispatch in both interpreted and host calls.
+- Dynamic virtual/interface target selection across the receiver hierarchy.
 - A pre-execution verifier for register types, targets, code-item layout, and
   exception tables.
 - Differential fixtures against AOSP-compatible reference execution.
@@ -65,15 +79,23 @@ This work is tracked in [GitHub issue #1](https://github.com/taizaki69/Kami/issu
 
 ## M2 — Java/Kotlin and Android-compatible host surface
 
-The current explicit allow-list covers only the behavior proven by tests:
+The current exact-signature allow-list covers only behavior reached by the
+synthetic and pinned-corpus tests:
 
 - `java.lang.Object`, `String`, and `StringBuilder` basics.
-- Kotlin `Intrinsics` null checks and related exceptions.
-- Empty construction shims for `HttpSource` and `ParsedHttpSource` superclasses.
+- Confined Java reflection over DEX fields and the source-base field bag;
+  primitive boxes, atomics, concurrent maps, bounded lists, and iterators.
+- Kotlin `Intrinsics`, `Result`, basic synchronous continuation setup, lazy
+  values, pairs, `isBlank`, regex construction, and mutable reference boxes.
+- Mihon filter/filter-list construction and state access, plus construction
+  shims for `HttpSource` and `ParsedHttpSource` superclasses.
+- The date-pattern object needed by the pinned BatCave constructor.
 
-The measured next layers are collections and strings, Kotlin duration/regex,
-serialization, OkHttp, Jsoup, preferences, Android context/UI shims, and
-coroutine continuation state machines. A class appearing in the analyzer's
+The measured next layer is the OkHttp request surface, beginning with the exact
+`FormBody.Builder` constructor above, followed by transport isolation and
+response limits. The longer tail remains string/collection overloads, Kotlin
+duration and full coroutine resumption, serialization, Jsoup, preferences, and
+Android context/UI shims. A class appearing in the analyzer's
 `implementedClasses` set is only a coarse prioritization signal; it does not
 mean every method on that class is callable.
 
@@ -97,7 +119,8 @@ The current parsers reject malformed table ranges, non-progressing chunks,
 overlong LEB128 values, excessive field/entry counts, encrypted or multi-disk
 ZIPs, oversized entries, decompression bombs, invalid DEX versions, and failed
 ZIP/DEX/zlib/gzip checksums. Interpreter execution has instruction, call-depth,
-array-size, and cancellation limits.
+array-size, host-collection-size, and cancellation limits. Native host calls
+require an exact method prototype and static/instance kind.
 
 Checksums establish corruption detection, not publisher identity. APK signer
 verification must land before downloaded extensions are enabled for execution;
@@ -106,9 +129,9 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 54 passing tests: 23 interpreter tests, 10 parser
+`MihonCompatKit` currently has 61 passing tests: 28 interpreter tests, 10 parser
 hardening tests (including every truncated prefix of generated DEX and ZIP
-fixtures), 6 pinned real-extension executions, and 15 reader/inflate/repository
+fixtures), 8 pinned real-extension executions, and 15 reader/inflate/repository
 tests. GitHub Swift CI fetches the SHA-256-locked APK corpus before running them.
 
 The compatibility matrix records the exact versions, hashes, and methods. New
