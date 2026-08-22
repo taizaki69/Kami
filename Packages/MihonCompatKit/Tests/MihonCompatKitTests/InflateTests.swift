@@ -83,11 +83,42 @@ final class InflateTests: XCTestCase {
         XCTAssertThrowsError(try Inflate.decompress(bad))
     }
 
+    func testOutputLimitStopsExpansion() {
+        let stream = storedBlocks(Array("too large".utf8))
+        XCTAssertThrowsError(try Inflate.decompress(stream, outputLimit: 3)) { error in
+            guard case Inflate.Error.outputLimitExceeded(3) = error else {
+                return XCTFail("expected outputLimitExceeded, got \(error)")
+            }
+        }
+    }
+
+    func testOversubscribedHuffmanTableIsRejected() {
+        XCTAssertThrowsError(try Inflate.Huffman(lengths: [1, 1, 1])) { error in
+            guard case Inflate.Error.badHuffmanCode = error else {
+                return XCTFail("expected badHuffmanCode, got \(error)")
+            }
+        }
+    }
+
     func testZlibWrapper() throws {
         // zlib stream of a single stored block containing "dex".
         let inner: [UInt8] = [0x01, 0x03, 0x00, 0xFC, 0xFF] + Array("dex".utf8)
-        let stream: [UInt8] = [0x78, 0x01] + inner + [0x00, 0x00, 0x00, 0x00]
+        let stream: [UInt8] = [0x78, 0x01] + inner + [0x02, 0x71, 0x01, 0x42]
         let result = try Zlib.decompress(stream)
         XCTAssertEqual(String(decoding: result, as: UTF8.self), "dex")
+    }
+
+    func testZlibRejectsBadHeaderAndChecksum() {
+        let inner: [UInt8] = [0x01, 0x03, 0x00, 0xFC, 0xFF] + Array("dex".utf8)
+        XCTAssertThrowsError(try Zlib.decompress([0x78, 0x00] + inner + [0x02, 0x71, 0x01, 0x42]))
+        XCTAssertThrowsError(try Zlib.decompress([0x78, 0x01] + inner + [0, 0, 0, 0]))
+    }
+
+    func testGzipWrapperAndIntegrityChecks() throws {
+        let inner: [UInt8] = [0x01, 0x03, 0x00, 0xFC, 0xFF] + Array("dex".utf8)
+        let header: [UInt8] = [0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0, 0, 0]
+        let trailer: [UInt8] = [0x02, 0xdc, 0xcb, 0xf6, 3, 0, 0, 0]
+        XCTAssertEqual(try Gzip.decompress(header + inner + trailer), Array("dex".utf8))
+        XCTAssertThrowsError(try Gzip.decompress(header + inner + [UInt8](repeating: 0, count: 8)))
     }
 }

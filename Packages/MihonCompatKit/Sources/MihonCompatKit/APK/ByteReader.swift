@@ -32,7 +32,8 @@ struct ByteReader {
     }
 
     mutating func skip(_ n: Int) throws {
-        try seek(offset + n)
+        guard n >= 0, n <= remaining else { throw Error.outOfBounds(needed: max(0, n), at: offset) }
+        offset += n
     }
 
     mutating func u8() throws -> UInt8 {
@@ -42,13 +43,13 @@ struct ByteReader {
     }
 
     mutating func u16() throws -> UInt16 {
-        guard offset + 2 <= bytes.count else { throw Error.outOfBounds(needed: 2, at: offset) }
+        guard remaining >= 2 else { throw Error.outOfBounds(needed: 2, at: offset) }
         defer { offset += 2 }
         return UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8)
     }
 
     mutating func u32() throws -> UInt32 {
-        guard offset + 4 <= bytes.count else { throw Error.outOfBounds(needed: 4, at: offset) }
+        guard remaining >= 4 else { throw Error.outOfBounds(needed: 4, at: offset) }
         defer { offset += 4 }
         return UInt32(bytes[offset])
             | (UInt32(bytes[offset + 1]) << 8)

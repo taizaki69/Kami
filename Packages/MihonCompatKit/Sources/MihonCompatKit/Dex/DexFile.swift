@@ -1,12 +1,12 @@
 import Foundation
 
-/// DEX (Dalvik Executable, format 035–039) parser.
+/// DEX (Dalvik Executable, formats 035 and 037–040) parser.
 ///
 /// Parses the full structural tables — strings, types, protos, fields, methods,
 /// class definitions with encoded fields/methods and code items — and exposes
-/// them for analysis and (later) interpretation. Admissible magic values cover
-/// all versions emitted by current Android toolchains; minSdk-specific
-/// instructions inside `insns` are not validated here.
+/// them for analysis and interpretation. Version 041 uses a different
+/// container/header contract and is intentionally rejected; minSdk-specific
+/// instructions inside `insns` are validated by the interpreter as reached.
 public struct DexFile {
     public struct MethodRef {
         public let declaringClass: String   // type descriptor, e.g. "Lokhttp3/Request;"
@@ -64,12 +64,14 @@ public struct DexFile {
     enum Error: Swift.Error, CustomStringConvertible {
         case badMagic(String)
         case badEndianTag(UInt32)
+        case checksumMismatch
         case truncated(String)
 
         var description: String {
             switch self {
             case let .badMagic(m): return "not a DEX file (magic \(m.debugDescription))"
             case let .badEndianTag(t): return "unexpected endian tag 0x\(String(t, radix: 16)) (only little-endian DEX supported)"
+            case .checksumMismatch: return "DEX failed its Adler-32 checksum"
             case let .truncated(what): return "truncated DEX while reading \(what)"
             }
         }
@@ -93,16 +95,19 @@ public struct DexFile {
         var r = ByteReader(bytes)
 
         // magic: "dex\n" + 3 version digits + '\0'
-        guard bytes.count >= 36 else { throw Error.truncated("header") }
+        guard bytes.count >= 112 else { throw Error.truncated("header") }
         let magic = String(decoding: bytes[0..<8], as: UTF8.self)
-        guard magic.hasPrefix("dex\n"), magic.hasSuffix("\0") else {
+        let supportedMagics = [35, 37, 38, 39, 40].map { String(format: "dex\n%03d\0", $0) }
+        guard supportedMagics.contains(magic) else {
             throw Error.badMagic(magic)
         }
         try r.seek(8)
-        _ = try r.u32() // checksum (adler32)
+        let declaredChecksum = try r.u32()
         _ = try r.skip(20) // sha1 signature
-        _ = try r.u32() // file size
-        _ = try r.u32() // header size
+        let declaredFileSize = Int(try r.u32())
+        let headerSize = Int(try r.u32())
+        guard declaredFileSize == bytes.count, headerSize == 112 else { throw Error.truncated("header") }
+        guard Self.adler32(bytes, from: 12) == declaredChecksum else { throw Error.checksumMismatch }
         let endian = try r.u32()
         guard endian == 0x12345678 else { throw Error.badEndianTag(endian) }
         _ = try r.u32() // link size
@@ -121,12 +126,32 @@ public struct DexFile {
         let methodIdsOff = Int(try r.u32())
         let classDefsSize = Int(try r.u32())
         let classDefsOff = Int(try r.u32())
+        let dataSize = Int(try r.u32())
+        let dataOff = Int(try r.u32())
+
+        func tableFits(size: Int, offset: Int, width: Int) -> Bool {
+            if size == 0 { return offset == 0 }
+            guard offset >= headerSize, offset <= bytes.count else { return false }
+            let (tableBytes, overflow) = size.multipliedReportingOverflow(by: width)
+            return !overflow && tableBytes <= bytes.count - offset
+        }
+        guard tableFits(size: stringIdsSize, offset: stringIdsOff, width: 4),
+              tableFits(size: typeIdsSize, offset: typeIdsOff, width: 4),
+              tableFits(size: protoIdsSize, offset: protoIdsOff, width: 12),
+              tableFits(size: fieldIdsSize, offset: fieldIdsOff, width: 8),
+              tableFits(size: methodIdsSize, offset: methodIdsOff, width: 8),
+              tableFits(size: classDefsSize, offset: classDefsOff, width: 32),
+              (dataSize == 0 && dataOff == 0) ||
+                (dataOff >= headerSize && dataOff <= bytes.count && dataSize <= bytes.count - dataOff) else {
+            throw Error.truncated("header tables")
+        }
 
         // --- string_ids → MUTF-8 data
         var strings: [String] = []
         strings.reserveCapacity(stringIdsSize)
         for i in 0..<stringIdsSize {
-            let dataOff = try Int(r.u32(at: stringIdsOff + i * 4))
+            let dataOff = Int(try r.u32(at: stringIdsOff + i * 4))
+            guard dataOff >= 0, dataOff < bytes.count else { throw Error.truncated("string data") }
             var sr = r
             try sr.seek(dataOff)
             _ = try sr.uleb128()      // utf16 code unit count
@@ -134,6 +159,7 @@ public struct DexFile {
             while true {
                 let b = try sr.u8()
                 if b == 0 { break }
+                guard utf8.count < 16 * 1024 * 1024 else { throw Error.truncated("string data") }
                 utf8.append(b)
             }
             strings.append(Self.decodeMUTF8(utf8))
@@ -145,6 +171,7 @@ public struct DexFile {
         types.reserveCapacity(typeIdsSize)
         for i in 0..<typeIdsSize {
             let descriptorIdx = Int(try r.u32(at: typeIdsOff + i * 4))
+            guard descriptorIdx >= 0, descriptorIdx < strings.count else { throw Error.truncated("type descriptor") }
             types.append(strings[descriptorIdx])
         }
         self.typeDescriptors = types
@@ -157,13 +184,18 @@ public struct DexFile {
             let shortyIdx = Int(try r.u32(at: base))
             let returnIdx = Int(try r.u32(at: base + 4))
             let paramsOff = Int(try r.u32(at: base + 8))
+            guard shortyIdx >= 0, shortyIdx < strings.count,
+                  returnIdx >= 0, returnIdx < types.count else { throw Error.truncated("prototype") }
             var params: [String] = []
             if paramsOff != 0 {
                 var pr = r
                 try pr.seek(paramsOff)
                 let count = Int(try pr.u32())
+                guard count <= pr.remaining / 2 else { throw Error.truncated("prototype parameters") }
+                params.reserveCapacity(count)
                 for _ in 0..<count {
                     let idx = Int(try pr.u16())
+                    guard idx >= 0, idx < types.count else { throw Error.truncated("prototype parameter type") }
                     params.append(types[idx])
                 }
             }
@@ -181,6 +213,9 @@ public struct DexFile {
             let classIdx = Int(try fr.u16())
             let typeIdx = Int(try fr.u16())
             let nameIdx = Int(try fr.u32())
+            guard classIdx < types.count, typeIdx < types.count, nameIdx < strings.count else {
+                throw Error.truncated("field id")
+            }
             fields.append(FieldRef(declaringClass: types[classIdx], type: types[typeIdx], name: strings[nameIdx]))
         }
         self.fieldIds = fields
@@ -195,6 +230,9 @@ public struct DexFile {
             let classIdx = Int(try mr.u16())
             let protoIdx = Int(try mr.u16())
             let nameIdx = Int(try mr.u32())
+            guard classIdx < types.count, protoIdx < protos.count, nameIdx < strings.count else {
+                throw Error.truncated("method id")
+            }
             methods.append(MethodRef(declaringClass: types[classIdx], name: strings[nameIdx], prototype: protos[protoIdx]))
         }
         self.methodIds = methods
@@ -213,13 +251,24 @@ public struct DexFile {
             _ = try r.u32(at: base + 20) // annotations off
             let classDataOff = Int(try r.u32(at: base + 24))
             _ = try r.u32(at: base + 28) // static values off
+            guard classIdx >= 0, classIdx < types.count,
+                  superIdxRaw == 0xFFFF_FFFF || Int(superIdxRaw) < types.count,
+                  sourceIdxRaw == 0xFFFF_FFFF || Int(sourceIdxRaw) < strings.count else {
+                throw Error.truncated("class definition")
+            }
 
             var interfaces: [Int] = []
             if interfacesOff != 0 {
                 var ir = r
                 try ir.seek(interfacesOff)
                 let count = Int(try ir.u32())
-                for _ in 0..<count { interfaces.append(Int(try ir.u16())) }
+                guard count <= ir.remaining / 2 else { throw Error.truncated("interface list") }
+                interfaces.reserveCapacity(count)
+                for _ in 0..<count {
+                    let interface = Int(try ir.u16())
+                    guard interface < types.count else { throw Error.truncated("interface type") }
+                    interfaces.append(interface)
+                }
             }
 
             var staticFields: [EncodedField] = []
@@ -230,15 +279,21 @@ public struct DexFile {
             if classDataOff != 0 {
                 var cr = r
                 try cr.seek(classDataOff)
-                let staticCount = Int(try cr.uleb128())
-                let instanceCount = Int(try cr.uleb128())
-                let directCount = Int(try cr.uleb128())
-                let virtualCount = Int(try cr.uleb128())
+                let staticCount = try Self.integer(try cr.uleb128(), "static field count")
+                let instanceCount = try Self.integer(try cr.uleb128(), "instance field count")
+                let directCount = try Self.integer(try cr.uleb128(), "direct method count")
+                let virtualCount = try Self.integer(try cr.uleb128(), "virtual method count")
+                guard staticCount <= fieldIdsSize,
+                      instanceCount <= fieldIdsSize - staticCount,
+                      directCount <= methodIdsSize,
+                      virtualCount <= methodIdsSize - directCount else {
+                    throw Error.truncated("class data counts")
+                }
 
-                staticFields = try Self.readFields(&cr, count: staticCount)
-                instanceFields = try Self.readFields(&cr, count: instanceCount)
-                directMethods = try Self.readMethods(&cr, count: directCount, classIndex: classIdx)
-                virtualMethods = try Self.readMethods(&cr, count: virtualCount, classIndex: classIdx)
+                staticFields = try Self.readFields(&cr, count: staticCount, maximumIndex: fieldIdsSize)
+                instanceFields = try Self.readFields(&cr, count: instanceCount, maximumIndex: fieldIdsSize)
+                directMethods = try Self.readMethods(&cr, count: directCount, classIndex: classIdx, maximumIndex: methodIdsSize)
+                virtualMethods = try Self.readMethods(&cr, count: virtualCount, classIndex: classIdx, maximumIndex: methodIdsSize)
             }
 
             let def = ClassDef(
@@ -261,29 +316,61 @@ public struct DexFile {
         self.classIndexByDescriptor = byDescriptor
     }
 
-    private static func readFields(_ cr: inout ByteReader, count: Int) throws -> [EncodedField] {
+    private static func readFields(_ cr: inout ByteReader, count: Int, maximumIndex: Int) throws -> [EncodedField] {
         var result: [EncodedField] = []
         result.reserveCapacity(count)
         var idx: UInt64 = 0
         for _ in 0..<count {
-            idx += try cr.uleb128() // diff-encoded field index
-            let flags = UInt32(try cr.uleb128())
-            result.append(EncodedField(fieldIndex: Int(idx), accessFlags: flags))
+            let (nextIndex, overflow) = idx.addingReportingOverflow(try cr.uleb128())
+            guard !overflow, nextIndex < UInt64(maximumIndex) else { throw Error.truncated("encoded field index") }
+            idx = nextIndex
+            let flagsRaw = try cr.uleb128()
+            guard flagsRaw <= UInt64(UInt32.max) else { throw Error.truncated("field access flags") }
+            result.append(EncodedField(fieldIndex: Int(idx), accessFlags: UInt32(flagsRaw)))
         }
         return result
     }
 
-    private static func readMethods(_ cr: inout ByteReader, count: Int, classIndex: Int) throws -> [EncodedMethod] {
+    private static func readMethods(_ cr: inout ByteReader, count: Int, classIndex: Int,
+                                    maximumIndex: Int) throws -> [EncodedMethod] {
         var result: [EncodedMethod] = []
         result.reserveCapacity(count)
         var idx: UInt64 = 0
         for _ in 0..<count {
-            idx += try cr.uleb128()
-            let flags = UInt32(try cr.uleb128())
-            let codeOff = Int(try cr.uleb128())
-            result.append(EncodedMethod(methodIndex: Int(idx), accessFlags: flags, codeOffset: codeOff, definingClassIndex: classIndex))
+            let (nextIndex, overflow) = idx.addingReportingOverflow(try cr.uleb128())
+            guard !overflow, nextIndex < UInt64(maximumIndex) else { throw Error.truncated("encoded method index") }
+            idx = nextIndex
+            let flagsRaw = try cr.uleb128()
+            guard flagsRaw <= UInt64(UInt32.max) else { throw Error.truncated("method access flags") }
+            let codeOff = try Self.integer(try cr.uleb128(), "method code offset")
+            result.append(EncodedMethod(
+                methodIndex: Int(idx), accessFlags: UInt32(flagsRaw), codeOffset: codeOff, definingClassIndex: classIndex
+            ))
         }
         return result
+    }
+
+    private static func integer(_ value: UInt64, _ what: String) throws -> Int {
+        guard value <= UInt64(Int.max) else { throw Error.truncated(what) }
+        return Int(value)
+    }
+
+    private static func adler32(_ bytes: [UInt8], from start: Int) -> UInt32 {
+        let modulus: UInt64 = 65_521
+        var a: UInt64 = 1
+        var b: UInt64 = 0
+        var offset = start
+        while offset < bytes.count {
+            let end = offset + min(5_552, bytes.count - offset)
+            for byte in bytes[offset..<end] {
+                a += UInt64(byte)
+                b += a
+            }
+            a %= modulus
+            b %= modulus
+            offset = end
+        }
+        return UInt32(b << 16 | a)
     }
 
     /// Parses the code item for a method; nil when abstract/native.
@@ -297,13 +384,15 @@ public struct DexFile {
               let tries = try? r.u16() else { return nil }
         _ = try? r.u32() // debug info off
         guard let insnsCount = try? r.u32() else { return nil }
+        let count = Int(insnsCount)
+        guard ins <= registers, count <= r.remaining / 2 else { return nil }
         return CodeItem(
             registersSize: registers,
             insSize: ins,
             outsSize: outs,
             triesCount: tries,
             insnsOffset: r.offset,
-            insnsCount: Int(insnsCount)
+            insnsCount: count
         )
     }
 

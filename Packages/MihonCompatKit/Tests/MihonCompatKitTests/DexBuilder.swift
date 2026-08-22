@@ -180,20 +180,20 @@ struct DexBuilder {
 
         // Header.
         out.append(contentsOf: Array("dex\n035\0".utf8))
-        u32(0)      // checksum (unchecked by parser)
+        u32(0)      // checksum, filled after the rest of the file is assembled
         out.append(contentsOf: [UInt8](repeating: 0, count: 20))
         u32(UInt32(fileSize))
         u32(112)
         u32(0x12345678)
         u32(0); u32(0) // link size/off
         u32(0)         // map off (unused by parser)
-        u32(UInt32(stringIdsSize)); u32(UInt32(stringIdsOff))
-        u32(UInt32(typeIdsSize)); u32(UInt32(typeIdsOff))
-        u32(UInt32(protoIdsSize)); u32(UInt32(protoIdsOff))
-        u32(UInt32(fieldIdsSize)); u32(UInt32(fieldIdsOff))
-        u32(UInt32(methodIdsSize)); u32(UInt32(methodIdsOff))
+        u32(UInt32(stringIdsSize)); u32(stringIdsSize == 0 ? 0 : UInt32(stringIdsOff))
+        u32(UInt32(typeIdsSize)); u32(typeIdsSize == 0 ? 0 : UInt32(typeIdsOff))
+        u32(UInt32(protoIdsSize)); u32(protoIdsSize == 0 ? 0 : UInt32(protoIdsOff))
+        u32(UInt32(fieldIdsSize)); u32(fieldIdsSize == 0 ? 0 : UInt32(fieldIdsOff))
+        u32(UInt32(methodIdsSize)); u32(methodIdsSize == 0 ? 0 : UInt32(methodIdsOff))
         u32(1); u32(UInt32(classDefsOff))
-        u32(0); u32(UInt32(codeOff)) // data size/off placeholder (unused)
+        u32(UInt32(fileSize - stringDataOff)); u32(UInt32(stringDataOff))
 
         // string_ids → absolute offsets into stringData
         for off in stringOffsets { u32(UInt32(stringDataOff + off)) }
@@ -231,6 +231,17 @@ struct DexBuilder {
             if m.insns.count % 2 == 1 { u16(0) } // padding to u32
         }
 
+        var a: UInt32 = 1
+        var b: UInt32 = 0
+        for byte in out.dropFirst(12) {
+            a = (a + UInt32(byte)) % 65_521
+            b = (b + a) % 65_521
+        }
+        let checksum = b << 16 | a
+        out[8] = UInt8(checksum & 0xff)
+        out[9] = UInt8((checksum >> 8) & 0xff)
+        out[10] = UInt8((checksum >> 16) & 0xff)
+        out[11] = UInt8(checksum >> 24)
         return out
     }
 

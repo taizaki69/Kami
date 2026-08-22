@@ -41,7 +41,11 @@ public struct BinaryXMLDocument {
         var intValue: Int32? {
             switch self {
             case let .int(i): return i
-            case let .float(f): return Int32(f)
+            case let .float(f):
+                let value = Double(f)
+                guard value.isFinite,
+                      value >= Double(Int32.min), value <= Double(Int32.max) else { return nil }
+                return Int32(value)
             case let .boolean(b): return b ? 1 : 0
             default: return nil
             }
@@ -81,32 +85,51 @@ public struct BinaryXMLDocument {
         let fileHeaderSize = Int(try r.u16())
         let totalSize = Int(try r.u32())
         guard fileType == 0x0003 else { throw Error.badMagic(UInt32(fileType)) }
-        _ = fileHeaderSize
+        guard fileHeaderSize >= 8, totalSize >= fileHeaderSize, totalSize <= bytes.count else {
+            throw Error.truncated
+        }
+        try r.seek(fileHeaderSize)
 
         var stringTable: [String] = []
         var elements: [Element] = []
         var openStack: [String] = []
 
         while r.offset < totalSize {
+            guard r.offset <= totalSize - 8 else { throw Error.truncated }
             let chunkType = try r.u16()
             let chunkHeaderSize = Int(try r.u16())
             let chunkSize = Int(try r.u32())
             let chunkStart = r.offset - 8
+            guard chunkHeaderSize >= 8, chunkSize >= chunkHeaderSize,
+                  chunkSize <= totalSize - chunkStart else { throw Error.truncated }
+            let chunkEnd = chunkStart + chunkSize
 
             switch chunkType {
             case Self.chunkStringPool:
-                stringTable = try Self.parseStringPool(&r, headerSize: chunkHeaderSize)
+                stringTable = try Self.parseStringPool(&r, headerSize: chunkHeaderSize, chunkSize: chunkSize)
 
             case Self.chunkStartElement:
+                // ResXMLTree_node has a fixed 16-byte header. The attribute
+                // extension starts immediately after it, so accepting a larger
+                // header here would make us interpret header padding as fields.
+                guard chunkHeaderSize == 16, chunkSize >= 36 else { throw Error.truncated }
                 try r.skip(8) // line number, comment
+                let attributeExtensionStart = r.offset
                 _ = try r.u32() // namespace ref (-1 when absent)
                 let nameIdx = Int(try r.u32())
-                _ = try r.u16() // attribute start
-                _ = try r.u16() // attribute size
+                let attributeStart = Int(try r.u16())
+                let attributeSize = Int(try r.u16())
                 let attrCount = Int(try r.u16())
                 _ = try r.u16() // id index
                 _ = try r.u16() // class index
                 _ = try r.u16() // style index
+                guard attributeSize >= 20,
+                      attributeStart >= 20,
+                      attributeExtensionStart + attributeStart <= chunkEnd,
+                      attrCount <= (chunkEnd - attributeExtensionStart - attributeStart) / attributeSize else {
+                    throw Error.truncated
+                }
+                try r.seek(attributeExtensionStart + attributeStart)
 
                 var attrs: [Attribute] = []
                 attrs.reserveCapacity(attrCount)
@@ -128,8 +151,10 @@ public struct BinaryXMLDocument {
                         rawValue: raw,
                         typedValue: Self.typedValue(type: dataType, data: data, strings: stringTable)
                     ))
+                    try r.skip(attributeSize - 20)
                 }
                 let elementName = Self.string(at: nameIdx, in: stringTable) ?? "unknown"
+                guard elements.count < 100_000 else { throw Error.truncated }
                 elements.append(Element(name: elementName, attributes: attrs))
                 openStack.append(elementName)
 
@@ -140,7 +165,7 @@ public struct BinaryXMLDocument {
                 break // namespace chunks, CDATA, resource map — not needed
             }
 
-            try r.seek(chunkStart + chunkSize)
+            try r.seek(chunkEnd)
         }
 
         self.allElements = elements
@@ -166,10 +191,12 @@ public struct BinaryXMLDocument {
         }
     }
 
-    private static func parseStringPool(_ r: inout ByteReader, headerSize: Int) throws -> [String] {
+    private static func parseStringPool(_ r: inout ByteReader, headerSize: Int, chunkSize: Int) throws -> [String] {
         let chunkStart = r.offset - 8
+        let chunkEnd = chunkStart + chunkSize
+        guard headerSize >= 28, headerSize <= chunkSize else { throw Error.truncated }
         let stringCount = Int(try r.u32())
-        _ = try r.u32() // style count
+        let styleCount = Int(try r.u32())
         let flags = try r.u32()
         let stringsStart = Int(try r.u32()) // relative to chunk start
         _ = try r.u32() // styles start
@@ -177,6 +204,9 @@ public struct BinaryXMLDocument {
 
         let offsetsBase = chunkStart + headerSize
         let dataBase = chunkStart + stringsStart
+        guard stringCount <= 100_000,
+              stringCount + styleCount <= (chunkSize - headerSize) / 4,
+              dataBase >= offsetsBase, dataBase <= chunkEnd else { throw Error.truncated }
 
         var result: [String] = []
         result.reserveCapacity(stringCount)
@@ -185,18 +215,21 @@ public struct BinaryXMLDocument {
             var or = r
             try or.seek(offsetsBase + i * 4)
             let offset = Int(try or.u32())
+            guard offset <= chunkEnd - dataBase else { throw Error.truncated }
             var sr = r
             try sr.seek(dataBase + offset)
 
             if isUTF8 {
                 _ = try Self.u8Length(&sr) // character count (may differ from byte count)
                 let byteLen = try Self.u8Length(&sr)
+                guard byteLen <= chunkEnd - sr.offset else { throw Error.truncated }
                 var data: [UInt8] = []
                 data.reserveCapacity(byteLen)
                 for _ in 0..<byteLen { data.append(try sr.u8()) }
                 result.append(String(decoding: data, as: UTF8.self))
             } else {
                 let charCount = try Self.u16Length(&sr)
+                guard charCount <= (chunkEnd - sr.offset) / 2 else { throw Error.truncated }
                 var units: [UInt16] = []
                 units.reserveCapacity(charCount)
                 for _ in 0..<charCount { units.append(try sr.u16()) }

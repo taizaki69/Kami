@@ -59,7 +59,7 @@ public struct ExtensionAnalyzer {
 
         let targets: [ZipArchive.Entry]
         if let dexIndex {
-            guard dexIndex < dexNames.count else {
+            guard dexIndex >= 0, dexIndex < dexNames.count else {
                 throw ZipArchive.Error.entryMissing(dexNames[dexNames.count - 1].name)
             }
             targets = [dexNames[dexIndex]]
@@ -67,7 +67,7 @@ public struct ExtensionAnalyzer {
             targets = dexNames
         }
 
-        var external: [String: Int] = [:]
+        var references: [String: Int] = [:]
         var defined: Set<String> = []
         var sourceClasses: [String] = []
         var dexCount = 0
@@ -79,11 +79,11 @@ public struct ExtensionAnalyzer {
             for def in dex.classDefs {
                 defined.insert(def.descriptor)
             }
-            for ref in dex.methodIds where !defined.contains(ref.declaringClass) {
-                external[ref.declaringClass, default: 0] += 1
+            for ref in dex.methodIds {
+                references[ref.declaringClass, default: 0] += 1
             }
-            for ref in dex.fieldIds where !defined.contains(ref.declaringClass) {
-                external[ref.declaringClass, default: 0] += 1
+            for ref in dex.fieldIds {
+                references[ref.declaringClass, default: 0] += 1
             }
             // Find declared source/factory classes inside this dex.
             for def in dex.classDefs {
@@ -92,6 +92,10 @@ public struct ExtensionAnalyzer {
                 if let f = manifest.resolvedSourceFactory, name == f { sourceClasses.append(name) }
             }
         }
+
+        // Filter only after every DEX has contributed its definitions. A class
+        // referenced by classes.dex but defined in classes2.dex is internal.
+        let external = references.filter { !defined.contains($0.key) }
 
         let supported = external.keys.filter { Self.implementedClasses.contains($0) }
         let missing = external

@@ -6,6 +6,12 @@ import FoundationNetworking
 /// Normalized view over both extension-store index formats:
 /// legacy JSON (`index.min.json`) and the new protobuf index (`index.pb`).
 public struct ExtensionRepositoryIndex: Equatable, Sendable {
+    enum ParseError: Swift.Error {
+        case indexTooLarge(Int)
+    }
+
+    static let maximumIndexSize = 32 * 1024 * 1024
+
     public struct Source: Equatable, Sendable {
         public let id: Int64
         public let name: String
@@ -89,8 +95,11 @@ public struct ExtensionRepositoryIndex: Equatable, Sendable {
     /// Detects and parses either format from raw bytes fetched at `url`.
     /// gzip-wrapped payloads (GitHub raw serves these) are unwrapped first.
     public init(bytes rawBytes: [UInt8], url: URL) throws {
+        guard rawBytes.count <= Self.maximumIndexSize else {
+            throw ParseError.indexTooLarge(Self.maximumIndexSize)
+        }
         let bytes = (rawBytes.count > 2 && rawBytes[0] == 0x1f && rawBytes[1] == 0x8b)
-            ? try Gzip.decompress(rawBytes)
+            ? try Gzip.decompress(rawBytes, outputLimit: Self.maximumIndexSize)
             : rawBytes
 
         // The new index is a protobuf `Index` message. Legacy index is JSON.
@@ -146,6 +155,9 @@ public struct LegacyIndexEntry: Decodable, Sendable {
 extension ExtensionRepositoryIndex {
     /// Parses the external extension list (`ExtensionList` protobuf message).
     public static func parseExternalList(_ bytes: [UInt8]) throws -> [Extension] {
+        guard bytes.count <= Self.maximumIndexSize else {
+            throw ParseError.indexTooLarge(Self.maximumIndexSize)
+        }
         let list = try ProtoMessage(bytes)
         return list.messages(1).map { Extension(fromProto: $0) }
     }
@@ -159,8 +171,10 @@ public actor ExtensionStoreClient {
         case transport(Swift.Error)
         case http(Int)
         case badIndex(String)
+        case responseTooLarge(Int)
     }
 
+    private static let maximumAPKSize = 128 * 1024 * 1024
     private let session: URLSession
 
     public init(session: URLSession = .shared) {
@@ -176,10 +190,16 @@ public actor ExtensionStoreClient {
         }
         let (data, response) = try await get(url)
         try check(response)
+        guard data.count <= ExtensionRepositoryIndex.maximumIndexSize else {
+            throw FetchError.responseTooLarge(ExtensionRepositoryIndex.maximumIndexSize)
+        }
         var index = try ExtensionRepositoryIndex(bytes: [UInt8](data), url: url)
         if let external = index.externalListURL {
             let (listData, listResponse) = try await get(external)
             try check(listResponse)
+            guard listData.count <= ExtensionRepositoryIndex.maximumIndexSize else {
+                throw FetchError.responseTooLarge(ExtensionRepositoryIndex.maximumIndexSize)
+            }
             let extensions = try ExtensionRepositoryIndex.parseExternalList([UInt8](listData))
             index = ExtensionRepositoryIndex(
                 storeName: index.storeName,
@@ -196,6 +216,9 @@ public actor ExtensionStoreClient {
         guard let url = URL(string: apkURL) else { throw FetchError.badURL(apkURL) }
         let (data, response) = try await get(url)
         try check(response)
+        guard data.count <= Self.maximumAPKSize else {
+            throw FetchError.responseTooLarge(Self.maximumAPKSize)
+        }
         return [UInt8](data)
     }
 
@@ -206,8 +229,10 @@ public actor ExtensionStoreClient {
             session.dataTask(with: url) { data, response, error in
                 if let error {
                     continuation.resume(throwing: FetchError.transport(error))
+                } else if let response {
+                    continuation.resume(returning: (data ?? Data(), response))
                 } else {
-                    continuation.resume(returning: (data ?? Data(), response!))
+                    continuation.resume(throwing: FetchError.badIndex("HTTP response was missing"))
                 }
             }.resume()
         }

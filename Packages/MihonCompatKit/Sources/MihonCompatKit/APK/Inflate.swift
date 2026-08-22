@@ -19,6 +19,7 @@ enum Inflate {
         case invalidCodeLengthRepeat
         case incompleteStream
         case unexpectedEnd
+        case outputLimitExceeded(Int)
 
         var description: String {
             switch self {
@@ -29,6 +30,7 @@ enum Inflate {
             case .invalidCodeLengthRepeat: return "code length repeat without preceding length"
             case .incompleteStream: return "final block ended before stream was complete"
             case .unexpectedEnd: return "unexpected end of compressed stream"
+            case let .outputLimitExceeded(limit): return "decompressed data exceeds the \(limit)-byte limit"
             }
         }
     }
@@ -94,6 +96,11 @@ enum Inflate {
                 guard l < counts.count else { throw Error.badHuffmanCode }
                 counts[l] += 1
             }
+            var codesRemaining = 1
+            for length in 1...15 {
+                codesRemaining = (codesRemaining << 1) - counts[length]
+                guard codesRemaining >= 0 else { throw Error.badHuffmanCode }
+            }
             var offsets = [Int](repeating: 0, count: 16)
             for l in 1..<15 { offsets[l + 1] = offsets[l] + counts[l] }
             symbols = [Int](repeating: 0, count: lengths.filter { $0 != 0 }.count)
@@ -110,8 +117,11 @@ enum Inflate {
             for length in 1...15 {
                 code |= Int(try br.bitValue())
                 let count = counts[length]
-                if code - first < count {
-                    return symbols[index + (code - first)]
+                let offset = code - first
+                if offset >= 0, offset < count {
+                    let position = index + offset
+                    guard position >= 0, position < symbols.count else { throw Error.badHuffmanCode }
+                    return symbols[position]
                 }
                 index += count
                 first = (first + count) << 1
@@ -122,10 +132,14 @@ enum Inflate {
     }
 
     /// Decompresses a raw DEFLATE stream (no zlib/gzip wrapper).
-    static func decompress(_ input: [UInt8]) throws -> [UInt8] {
+    static let defaultOutputLimit = 128 * 1024 * 1024
+
+    static func decompress(_ input: [UInt8], outputLimit: Int = defaultOutputLimit) throws -> [UInt8] {
+        guard outputLimit >= 0 else { throw Error.outputLimitExceeded(outputLimit) }
         var br = BitReader(input)
         var out: [UInt8] = []
-        out.reserveCapacity(input.count * 4)
+        let (scaledCapacity, overflow) = input.count.multipliedReportingOverflow(by: 4)
+        out.reserveCapacity(min(outputLimit, overflow ? outputLimit : scaledCapacity))
 
         while true {
             let final = try br.bits(1)
@@ -136,6 +150,7 @@ enum Inflate {
                 let len = Int(try br.bits(16))
                 let nlen = Int(try br.bits(16))
                 guard len & 0xffff == (~nlen & 0xffff) else { throw Error.storedLengthMismatch }
+                guard len <= outputLimit - out.count else { throw Error.outputLimitExceeded(outputLimit) }
                 for _ in 0..<len {
                     out.append(UInt8(try br.bits(8)))
                 }
@@ -147,11 +162,11 @@ enum Inflate {
                 litLengths += [Int](repeating: 8, count: 8)
                 let lit = try Huffman(lengths: litLengths)
                 let dist = try Huffman(lengths: [Int](repeating: 5, count: 30))
-                try inflateBlock(&br, &out, lit, dist)
+                try inflateBlock(&br, &out, lit, dist, outputLimit: outputLimit)
 
             case 2:
                 let (lit, dist) = try dynamicTables(&br)
-                try inflateBlock(&br, &out, lit, dist)
+                try inflateBlock(&br, &out, lit, dist, outputLimit: outputLimit)
 
             default:
                 throw Error.badBlockType(Int(type))
@@ -188,12 +203,15 @@ enum Inflate {
             case 16:
                 guard let prev = lengths.last else { throw Error.invalidCodeLengthRepeat }
                 let repeatCount = 3 + Int(try br.bits(2))
+                guard repeatCount <= hlit + hdist - lengths.count else { throw Error.badHuffmanCode }
                 lengths += [Int](repeating: prev, count: repeatCount)
             case 17:
                 let repeatCount = 3 + Int(try br.bits(3))
+                guard repeatCount <= hlit + hdist - lengths.count else { throw Error.badHuffmanCode }
                 lengths += [Int](repeating: 0, count: repeatCount)
             case 18:
                 let repeatCount = 11 + Int(try br.bits(7))
+                guard repeatCount <= hlit + hdist - lengths.count else { throw Error.badHuffmanCode }
                 lengths += [Int](repeating: 0, count: repeatCount)
             default:
                 throw Error.badHuffmanCode
@@ -210,10 +228,12 @@ enum Inflate {
         return (lit, dist)
     }
 
-    private static func inflateBlock(_ br: inout BitReader, _ out: inout [UInt8], _ lit: Huffman, _ dist: Huffman) throws {
+    private static func inflateBlock(_ br: inout BitReader, _ out: inout [UInt8], _ lit: Huffman, _ dist: Huffman,
+                                     outputLimit: Int = defaultOutputLimit) throws {
         while true {
             let symbol = try lit.decode(&br)
             if symbol < 256 {
+                guard out.count < outputLimit else { throw Error.outputLimitExceeded(outputLimit) }
                 out.append(UInt8(symbol))
             } else if symbol == 256 {
                 return
@@ -225,6 +245,7 @@ enum Inflate {
                 guard dsymbol < distBase.count else { throw Error.badHuffmanCode }
                 let distance = distBase[dsymbol] + Int(try br.bits(distExtra[dsymbol]))
                 guard distance <= out.count else { throw Error.distanceTooFar(distance) }
+                guard length <= outputLimit - out.count else { throw Error.outputLimitExceeded(outputLimit) }
                 let from = out.count - distance
                 for i in 0..<length {
                     out.append(out[from + i])
@@ -239,13 +260,44 @@ enum Inflate {
 enum Zlib {
     enum Error: Swift.Error, CustomStringConvertible {
         case notZlib
-        var description: String { "stream does not start with a zlib header (0x78)" }
+        case presetDictionaryUnsupported
+        case checksumMismatch
+
+        var description: String {
+            switch self {
+            case .notZlib: return "stream has an invalid zlib header"
+            case .presetDictionaryUnsupported: return "zlib preset dictionaries are not supported"
+            case .checksumMismatch: return "zlib stream failed its Adler-32 check"
+            }
+        }
     }
 
-    static func decompress(_ input: [UInt8]) throws -> [UInt8] {
-        guard input.count > 6, input[0] == 0x78 else { throw Error.notZlib }
+    static func decompress(_ input: [UInt8], outputLimit: Int = Inflate.defaultOutputLimit) throws -> [UInt8] {
+        guard input.count >= 6 else { throw Error.notZlib }
+        let cmf = input[0]
+        let flg = input[1]
+        let header = UInt16(cmf) << 8 | UInt16(flg)
+        guard cmf & 0x0f == 8, cmf >> 4 <= 7, header % 31 == 0 else { throw Error.notZlib }
+        guard flg & 0x20 == 0 else { throw Error.presetDictionaryUnsupported }
         let body = Array(input[2..<(input.count - 4)])
-        return try Inflate.decompress(body)
+        let decoded = try Inflate.decompress(body, outputLimit: outputLimit)
+        let expected = UInt32(input[input.count - 4]) << 24
+            | UInt32(input[input.count - 3]) << 16
+            | UInt32(input[input.count - 2]) << 8
+            | UInt32(input[input.count - 1])
+        guard adler32(decoded) == expected else { throw Error.checksumMismatch }
+        return decoded
+    }
+
+    private static func adler32(_ bytes: [UInt8]) -> UInt32 {
+        let modulus: UInt32 = 65_521
+        var a: UInt32 = 1
+        var b: UInt32 = 0
+        for byte in bytes {
+            a = (a + UInt32(byte)) % modulus
+            b = (b + a) % modulus
+        }
+        return b << 16 | a
     }
 }
 
@@ -254,29 +306,69 @@ enum Zlib {
 enum Gzip {
     enum Error: Swift.Error, CustomStringConvertible {
         case notGzip
-        var description: String { "stream does not start with a gzip header (1f 8b)" }
+        case checksumMismatch
+        case sizeMismatch
+
+        var description: String {
+            switch self {
+            case .notGzip: return "stream has an invalid gzip header"
+            case .checksumMismatch: return "gzip stream failed its CRC-32 check"
+            case .sizeMismatch: return "gzip stream failed its uncompressed-size check"
+            }
+        }
     }
 
-    static func decompress(_ input: [UInt8]) throws -> [UInt8] {
-        guard input.count > 18, input[0] == 0x1f, input[1] == 0x8b else { throw Error.notGzip }
+    static func decompress(_ input: [UInt8], outputLimit: Int = Inflate.defaultOutputLimit) throws -> [UInt8] {
+        guard input.count > 18, input[0] == 0x1f, input[1] == 0x8b,
+              input[2] == 8 else { throw Error.notGzip }
         let flags = input[3]
+        guard flags & 0xe0 == 0 else { throw Error.notGzip }
+        let trailerStart = input.count - 8
         var start = 10
         if flags & 0x04 != 0 { // FEXTRA
-            guard start + 2 <= input.count else { throw Error.notGzip }
+            guard start <= trailerStart - 2 else { throw Error.notGzip }
             let xlen = Int(input[start]) | Int(input[start + 1]) << 8
-            start += 2 + xlen
+            start += 2
+            guard xlen <= trailerStart - start else { throw Error.notGzip }
+            start += xlen
         }
         if flags & 0x08 != 0 { // FNAME: zero-terminated
-            while start < input.count, input[start] != 0 { start += 1 }
+            while start < trailerStart, input[start] != 0 { start += 1 }
+            guard start < trailerStart else { throw Error.notGzip }
             start += 1
         }
         if flags & 0x10 != 0 { // FCOMMENT
-            while start < input.count, input[start] != 0 { start += 1 }
+            while start < trailerStart, input[start] != 0 { start += 1 }
+            guard start < trailerStart else { throw Error.notGzip }
             start += 1
         }
-        if flags & 0x02 != 0 { start += 2 } // FHCRC
-        guard start < input.count - 8 else { throw Error.notGzip }
-        let body = Array(input[start..<(input.count - 8)])
-        return try Inflate.decompress(body)
+        if flags & 0x02 != 0 { // FHCRC
+            guard start <= trailerStart - 2 else { throw Error.notGzip }
+            start += 2
+        }
+        guard start < trailerStart else { throw Error.notGzip }
+        let body = Array(input[start..<trailerStart])
+        let decoded = try Inflate.decompress(body, outputLimit: outputLimit)
+        let expectedCRC = littleEndianUInt32(input, at: trailerStart)
+        let expectedSize = littleEndianUInt32(input, at: trailerStart + 4)
+        guard crc32(decoded) == expectedCRC else { throw Error.checksumMismatch }
+        guard UInt32(truncatingIfNeeded: decoded.count) == expectedSize else { throw Error.sizeMismatch }
+        return decoded
+    }
+
+    private static func littleEndianUInt32(_ bytes: [UInt8], at offset: Int) -> UInt32 {
+        UInt32(bytes[offset]) | UInt32(bytes[offset + 1]) << 8
+            | UInt32(bytes[offset + 2]) << 16 | UInt32(bytes[offset + 3]) << 24
+    }
+
+    private static func crc32(_ bytes: [UInt8]) -> UInt32 {
+        var crc: UInt32 = 0xffff_ffff
+        for byte in bytes {
+            crc ^= UInt32(byte)
+            for _ in 0..<8 {
+                crc = (crc >> 1) ^ (crc & 1 == 0 ? 0 : 0xedb8_8320)
+            }
+        }
+        return ~crc
     }
 }
