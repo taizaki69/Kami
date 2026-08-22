@@ -41,6 +41,10 @@ bash scripts/package_ipa.sh      # dist/Kami.ipa (unsigned; sign at install)
 
 Requirements: Xcode 15+, xcodegen. Details: `BUILDING.md`, `docs/IPA_BUILD.md`.
 
+Moving development to another computer? Start with [HANDOFF.md](HANDOFF.md);
+it records the known-good SHA, restore commands, verification evidence,
+security boundaries, and the recommended next implementation sequence.
+
 ## Verified on Windows too
 
 The compatibility kit and all 54 tests run on Windows with Swift 6.3

@@ -4,7 +4,15 @@ rem the VS Build Tools environment + user-local Swift toolchain.
 rem Usage: windows_dev_test.bat <package-dir> [test|build]
 setlocal enabledelayedexpansion
 
-set "PKG=%~1"
+if "%~1"=="" (
+    echo Usage: windows_dev_test.bat ^<package-dir^> [test^|build]
+    exit /b 2
+)
+
+rem Resolve the package while still in the caller's working directory. The
+rem helper changes directory to the Swift toolchain below, so keeping a
+rem relative path here would make --package-path point inside that toolchain.
+for %%I in ("%~1") do set "PKG=%%~fI"
 set "ACTION=%~2"
 if "%ACTION%"=="" set "ACTION=test"
 
