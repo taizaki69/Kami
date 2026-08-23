@@ -12,7 +12,8 @@ work was recovered, completed, verified, and pushed.
 - Repository: <https://github.com/taizaki69/Kami>
 - Visibility: private
 - Default branch: `main`
-- Current verified runtime implementation baseline: `66d41261e4cfa70bea2fd9a89a2f0dcdb670eff6`
+- Current verified runtime implementation baseline: `7ce3c812d5eca159a28d680591a45a72ff325956`
+- Previous exception-verifier baseline: `66d41261e4cfa70bea2fd9a89a2f0dcdb670eff6`
 - Previous structural-verifier baseline: `284b24dc2b7bec838afed5b6a2c9ea07df8b8f0b`
 - Previous receiver-directed dispatch baseline: `057169640b43c516455f753ae3efd81e3db02e61`
 - Previous request-model runtime baseline: `4d042c99a62536fbd894966286a1de7a93c5d0be`
@@ -109,10 +110,12 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 85 Swift tests passed locally on Windows/Swift 6.3.3; the last published macOS CI baseline passed 63 |
+| MihonCompatKit | 94 Swift tests passed locally on Windows/Swift 6.3.3; the last published macOS CI baseline passed 63 |
 | Real APK constructors | Akuma, MangaDex, and BatCave passed |
 | Structural verifier | 9 focused regressions cover instruction geometry, branch/fallthrough boundaries, and aligned, bounded, correctly typed payloads and switch targets |
 | Exception/control verifier | 11 focused regressions cover strict try/catch decoding, handler execution, and AOSP branch/result/exception-entry rules |
+| Register-category verifier | 8 focused regressions cover dead-code bounds, parameter seeding, undefined/conflicting joins, zero/reference merging, result/invoke categories, wide-pair clobbering, and exception edges |
+| Binary opcode semantics | 1 focused regression covers AOSP operation/type-major ordering across int, long, float, double, and `/2addr` forms |
 | Receiver dispatch | 2 focused regressions cover virtual override and interface implementation selection from the runtime receiver |
 | Request-model regressions | 2 focused tests cover request construction, duration/cache conversion, URL scheme rejection, CRLF-header rejection, and body bounds |
 | BatCave execution | Exact metadata getters passed; popular path constructs the expected POST request and stops at the `awaitSuccess` transport seam |
@@ -122,13 +125,45 @@ At the implementation baseline:
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
 The referenced runs validate the earlier `4d042c9` request-model baseline and
-produced `compat-audit-macos` and `Kami-unsigned-ipa`. The `66d4126`
-exception-verifier continuation was verified locally; require the same SHA to
+produced `compat-audit-macos` and `Kami-unsigned-ipa`. The `7ce3c81`
+register-verifier continuation was verified locally; require the same SHA to
 pass Swift CI, iOS build, and IPA workflows before calling it the published
 cross-platform checkpoint. GitHub artifacts expire; rerun the corresponding
 workflow if they are no longer available.
 
 ## What the latest continuation completed
+
+Commit `7ce3c81` adds bounded register-category verification and corrects the
+interpreter's binary arithmetic opcode mapping:
+
+- All structurally accepted instructions receive static register-bounds checks,
+  even when unreachable. Exposed string, type, field, method, and prototype
+  indexes are also checked before dataflow begins.
+- Method parameters seed the final `ins_size` words from the exact prototype and
+  receiver staticness. A bounded worklist propagates types over normal and
+  exception edges, with deterministic switch/handler successor ordering.
+- The lattice tracks undefined and conflicting values, the
+  verifier-polymorphic zero, category-1 primitives, adjacent wide halves, and
+  reference descriptors. Wide-pair halves are invalidated when clobbered.
+- Moves, result/return forms, invokes, fields, arrays, branches, unary/binary
+  operations, and literal operations require compatible categories before the
+  interpreter runs. The per-method caps are 250,000 states, 8,000,000 register
+  cells, and 8,000,000 merges.
+- The new checks exposed a real semantic error in the interpreter's
+  `0x90...0xcf` table. It now follows AOSP's operation/type-major ordering;
+  BatCave's real `0x95` instruction executes as `and-int` instead of being
+  misread as `sub-long` and silently coerced through defensive zero values.
+- Eight focused register-verifier regressions and one binary-op ordering
+  regression bring MihonCompatKit to 94 passing tests. All eight pinned
+  real-extension paths still pass, and a clean KamiCore dependency build sees
+  the new verifier source.
+
+This is category-level verification, not the complete Dalvik verifier. Exact
+`int`/`float` and `long`/`double` distinctions, uninitialized-instance
+constructor rules, resolved reference-hierarchy assignability, and resolved
+catch-type assignability to `Throwable` remain issue #1 work.
+
+## What the preceding exception-verifier continuation completed
 
 Commit `66d4126` extends pre-execution verification through DEX exception data
 and the related verifier-only control-flow rules:
@@ -151,9 +186,9 @@ and the related verifier-only control-flow rules:
   including all eight pinned real-extension paths, pass locally, and KamiCore
   still builds as a dependency.
 
-This closes strict exception-table geometry and decoding, not the complete
-Dalvik verifier. Register-type dataflow, exact result/return category tracking,
-and resolved catch-type assignability to `Throwable` remain issue #1 work.
+At that checkpoint, strict exception-table geometry and decoding were complete,
+while register-category dataflow and resolved catch-type assignability remained.
+Commit `7ce3c81` subsequently added bounded category-level dataflow.
 
 ## What the preceding structural-verifier continuation completed
 
@@ -294,6 +329,9 @@ Proven today:
   to the `awaitSuccess` transport boundary.
 - Bounded, transport-neutral OkHttp request values with no live-network side
   effects, including the exact pinned BatCave POST assertion.
+- Bounded pre-execution verification of complete instruction geometry,
+  try/catch tables, register operands, and category-level register dataflow over
+  normal and exception edges.
 - Native MangaDex browsing through the existing `KamiSource` implementation.
 - Simulator/device compilation and creation of a real unsigned IPA.
 
@@ -304,11 +342,13 @@ Not proven or implemented:
 - Extension HTTP transport, response/response-body/Okio models, coroutine
   suspension/resumption across async transport, Jsoup, preferences, cookies,
   or WebView bridges. The current OkHttp subset is request-only.
-- Full DEX opcode/register-type coverage or resolved `Throwable` assignability
-  for catch types. Structural code-item/control-flow/exception-table
-  verification and receiver-directed virtual/interface selection across parsed
-  DEX superclass chains are working; complete behavior when hierarchy data
-  leaves the parsed DEX remains open.
+- Full DEX opcode coverage; exact primitive subtype typing, uninitialized
+  instance/constructor semantics, resolved reference assignability, or resolved
+  `Throwable` assignability for catch types. Structural
+  code-item/control-flow/exception-table and category-level register
+  verification plus receiver-directed virtual/interface selection across
+  parsed DEX superclass chains are working; complete behavior when hierarchy
+  data leaves the parsed DEX remains open.
 - APK signer authentication and update identity binding.
 - A signed installation on a physical iPhone or iPad.
 - Production compatibility telemetry or a declared repository license.
@@ -344,7 +384,7 @@ Known pre-existing hardening gaps that were not diff-introduced findings:
 - External-list/APK URL scheme, redirect, and destination policy is broad.
 - ZIP/DEX/string processing lacks a complete aggregate resource budget.
 - Catch type matching still uses an approximate hierarchy; full resolved
-  `Throwable` assignability belongs to register/type verification.
+  `Throwable` assignability belongs to the exact reference-hierarchy verifier.
 - Receiver-directed virtual/interface lookup walks parsed DEX superclasses;
   complete interface-default and invoke-super resolution across hierarchy data
   that leaves the parsed DEX remains open.
@@ -357,7 +397,7 @@ Address these before treating arbitrary downloaded extensions as safe.
 
 | Priority | Issue | Purpose |
 |---|---|---|
-| P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining register verifier, external hierarchy, opcode, and differential semantics work |
+| P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining exact subtype/uninitialized-reference verifier, external hierarchy, opcode, and differential semantics work |
 | P0 | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | One real APK through search/popular, details, chapters, pages, and `KamiSource` |
 | Security gate | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | Required before downloaded APK execution |
 | Diagnostics | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Deterministic, redacted unresolved-surface reports |
@@ -370,11 +410,13 @@ The rest of the product backlog is in `TODO.md`.
 1. Work only with the pinned local corpus while the signer gate is absent.
 2. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
    plus canonical unresolved diagnostics for every new bridge decision.
-3. Continue issue #1 with register-type dataflow, exact result/return category
-   checks, and resolved catch-type `Throwable` assignability. Code-item
-   geometry, strict try/catch decoding, branch/move-result/move-exception rules,
-   receiver-directed virtual/interface lookup, and invoke word-count checks are
-   already in; complete partially external hierarchy semantics remains open.
+3. Continue issue #1 with exact primitive subtype tracking, uninitialized
+   instance/constructor rules, resolved reference-hierarchy assignability, and
+   resolved catch-type `Throwable` assignability. Code-item geometry, strict
+   try/catch decoding, branch/move-result/move-exception rules, bounded
+   category-level dataflow, receiver-directed virtual/interface lookup, and
+   invoke word-count checks are already in; complete partially external
+   hierarchy semantics remains open.
 4. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
 5. Continue issue #2 from the exact `OkHttpExtensionsKt.awaitSuccess` seam.

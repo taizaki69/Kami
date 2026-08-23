@@ -69,6 +69,14 @@ Implemented slice:
   and AOSP control-flow rules for `move-result`, `move-exception`, branch-zero
   forms, and `outs_size`. Typed and catch-all handlers execute; handlers may
   intentionally ignore the exception as ART permits.
+- Every structurally accepted instruction has its register and exposed
+  string/type/field/method/prototype operands checked, including unreachable
+  code. A bounded worklist then propagates seeded parameter types across normal
+  and exception edges, tracking undefined/conflicting values, the
+  verifier-polymorphic zero, category-1 primitives, adjacent wide pairs, and
+  references. It checks moves/results/returns, calls, arrays, fields, branches,
+  and numeric operations before execution. The caps are 250,000 states,
+  8,000,000 register cells, and 8,000,000 merges per method.
 - Java-compatible integer divide/remainder edge cases, reference identity,
   exception handlers, recursion limit, cancellation, and trace callback.
 - Exact name/prototype dispatch for interpreted and host calls; virtual and
@@ -81,14 +89,19 @@ Implemented slice:
 - Precise unresolved-class/method/opcode failures instead of treating arbitrary
   VM errors as compatibility success. Trace entries include depth and canonical
   method identity.
+- Binary operations `0x90...0xcf` follow the AOSP operation/type grouping for
+  int, long, float, double, and `/2addr`; the pinned BatCave path now executes
+  its real `0x95` `and-int` instead of relying on a defensive zero coercion.
 
 Still required before M1 is complete:
 
 - Full instruction and payload coverage for the expanding corpus.
 - Complete interface-default and invoke-super resolution when hierarchy data
   leaves the parsed DEX.
-- Register-type dataflow verification, including exact result/return categories
-  and resolved catch-type assignability to `Throwable`.
+- Exact primitive subtype tracking (`int` versus `float`, `long` versus
+  `double`), uninitialized-instance rules around constructors, resolved
+  reference-hierarchy assignability, and resolved catch-type assignability to
+  `Throwable`.
 - Differential fixtures against AOSP-compatible reference execution.
 
 This work is tracked in [GitHub issue #1](https://github.com/taizaki69/Kami/issues/1).
@@ -148,7 +161,7 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 85 passing tests: 50 interpreter tests, 10 parser
+`MihonCompatKit` currently has 94 passing tests: 59 interpreter tests, 10 parser
 hardening tests (including every truncated prefix of generated DEX and ZIP
 fixtures), 8 pinned real-extension executions, 2 bounded request-model tests,
 and 15 reader/inflate/repository tests. GitHub Swift CI fetches the

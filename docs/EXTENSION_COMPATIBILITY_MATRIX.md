@@ -20,7 +20,7 @@ is no compatibility claim.
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
 | DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| DEX execution | Partial M1/M2 working | 50 interpreter tests plus eight exact assertions against pinned APK paths; method/exception geometry, overload identity, and invoke shape are checked |
+| DEX execution | Partial M1/M2 working | 59 interpreter tests plus eight exact assertions against pinned APK paths; method/exception geometry, register-category dataflow, overload identity, invoke shape, and AOSP binary-op ordering are checked |
 | End-to-end source operations | Not implemented | BatCave popular constructs an exact inert POST request and reaches `awaitSuccess`; no interpreted response or network operation completes yet |
 
 ## Per-extension execution
@@ -69,7 +69,7 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 ## Test evidence
 
-- 85/85 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+- 94/94 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present. The last published macOS CI baseline passed 63/63 before the
   receiver-dispatch and verifier regressions were added.
 - Seven real-extension constructor/getter tests require successful return
@@ -77,10 +77,14 @@ tests, not the heuristic percentage, are the acceptance signal.
   frontier; arbitrary VM failures are not accepted as progress.
 - Two focused receiver-dispatch tests prove virtual and interface invokes use
   the runtime receiver's matching DEX implementation.
-- Twenty focused pre-execution-verifier tests cover complete instruction
+- Twenty-eight focused pre-execution-verifier tests cover complete instruction
   decoding, instruction-boundary control flow, payload alignment/family/size,
   switch targets and sparse ordering, array-data element widths, AOSP branch
-  and result rules, and strict typed/catch-all exception-table decoding.
+  and result rules, strict typed/catch-all exception-table decoding, dead-code
+  register bounds, parameter seeding, normal/exception-edge category dataflow,
+  joins, move/result/invoke categories, and wide-pair clobbering.
+- One focused arithmetic regression covers AOSP's operation/type-major binary
+  opcode ordering across int, long, float, double, and `/2addr` instructions.
 - Two focused host-bridge tests verify the pure request model, Kotlin duration
   conversion, size bounds, scheme rejection, and CRLF-header rejection.
 - Parser hardening covers checksum/size/count limits and every truncated prefix
@@ -92,7 +96,8 @@ tests, not the heuristic percentage, are the acceptance signal.
 Kami can download, validate structurally, inspect, classify, and execute a
 controlled real-extension path through pure request construction. It cannot yet
 use an unmodified extension as a reader source. Full DEX verification/opcode
-work (notably register types and unresolved catch-type assignability) is tracked in
+work (notably exact primitive subtypes, uninitialized references, resolved
+reference hierarchy, and catch-type assignability) is tracked in
 [#1](https://github.com/taizaki69/Kami/issues/1), the first
 complete source in [#2](https://github.com/taizaki69/Kami/issues/2), APK signer trust in
 [#3](https://github.com/taizaki69/Kami/issues/3), and privacy-safe compatibility
