@@ -34,7 +34,10 @@ fixture remains deterministic and offline. BatCave's nonblank text-search path
 also proves the exact page-2 GET and its 600-second cache policy before parsing
 the result through the same bounded surface. The public latest-updates path
 proves its cached page-3 GET, and the real manga-details worker proves its
-cached detail GET before returning the expected core `SManga` fields.
+cached detail GET before returning the expected core `SManga` fields. The
+combined update worker reuses the same bounded response path and returns exact
+generated-DTO chapter results. The next page-list slice still needs its JSON
+request body and exact POST.
 
 ## Remaining extension-facing stack
 

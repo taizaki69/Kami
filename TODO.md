@@ -49,17 +49,20 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       the pinned BatCave request path; bounded form/header/URL/cache/request/
       call models, Kotlin duration shims, async frame resumption, source-scoped
       transport, response/body/Okio values, bounded Jsoup document/element/CSS
-      selectors (including modern direct-child relative selectors), bounded
-      Kotlin collection joining, and the reached `SManga`/`MangasPage` model
-      surface now cover BatCave popular, text search, latest updates, and core
-      manga details; measured long tail remains
+      selectors (including modern direct-child and `:containsData` semantics),
+      bounded Kotlin string/collection helpers, generated-serializer JSON decode,
+      the reached Java-time subset, and `SManga`/`MangasPage`/`SChapter`/
+      `SMangaUpdate` models now cover BatCave popular, text search, latest,
+      details, and chapters; measured long tail remains
 - [ ] tachiyomix API bridge M3 (`HttpSource` → `KamiSource`)
 - [~] First real extension executing popular→search→details→chapters→pages —
       BatCave now sends its exact popular POST through a deterministic injected
       transport and parses the response into an exact `MangasPage`; its encoded,
       paginated text-search GET and public latest-updates GET also return exact
       pages, and its real details worker returns the expected core `SManga`
-      fields. Filtered search, chapters, pages, and `KamiSource` exposure are next;
+      fields. Its real combined update worker decodes generated chapter DTOs and
+      returns exact chapters. Filtered search, page images, and `KamiSource`
+      exposure are next;
       [#2](https://github.com/taizaki69/Kami/issues/2)
 - [ ] Verify store/APK signing identity before enabling downloaded extension
       execution — [#3](https://github.com/taizaki69/Kami/issues/3)

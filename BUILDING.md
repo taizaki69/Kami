@@ -4,9 +4,9 @@
 
 | Component | Verified how |
 |---|---|
-| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 — **155/155 tests pass**, including 13 real-APK paths, 6 bounded HTML/selector regressions, 46 pre-execution-verifier tests, and async HTTP/DEX coverage; exact-head macOS verification is pending restoration of GitHub Actions billing |
+| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 — **159/159 tests pass**, including 15 real-APK paths, 7 bounded HTML/selector regressions, 46 pre-execution-verifier tests, and async HTTP/DEX coverage; exact-head macOS verification is pending restoration of GitHub Actions billing |
 | compat-audit CLI | built and run on Windows against 3 SHA-256-locked extension APKs; uploaded by Swift CI on macOS |
-| KamiCore (models, SQLite store, MangaDex source) | `swift test` passes in GitHub Actions; package builds as an app dependency for Simulator and device |
+| KamiCore (models, SQLite store, MangaDex source) | `swift test` passes locally, including legacy/new chapter-number conversion; package builds as an app dependency for Simulator and device at the last dispatched iOS checkpoint |
 | App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |
 | IPA packaging | the `IPA Package` workflow builds a real Release `Kami.app`, packages `Kami-unsigned.ipa`, and uploads `Kami-unsigned-ipa` |
 

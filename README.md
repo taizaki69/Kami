@@ -31,9 +31,13 @@ policy, and returns the parsed result. The public latest-updates path likewise
 builds its cached page GET and returns a parsed page. The real manga-details
 worker now returns URL, title, thumbnail, publisher/year description, author,
 artist, genres, and status using modern Jsoup direct-child selector semantics.
+Its combined manga-update worker also extracts `window.__DATA__`, drives the
+APK's generated kotlinx serializers through a bounded generic JSON decoder,
+and returns exact `SChapter` values plus `SMangaUpdate`, including fractional
+chapter numbers, source-local dates, invalid-date fallback, and xhash URLs.
 A separate real-APK regression proves non-2xx responses become Mihon's
 `HttpException`. This is a measured M1/M2 runtime slice, **not end-to-end source
-compatibility**: filtered search, chapters, pages, preferences, the
+compatibility**: filtered search, pages, preferences, the
 `KamiSource` adapter, and much of the Kotlin/Java surface remain open
 (`docs/EXTENSION_RUNTIME.md`). Kami currently reads through its native
 MangaDex source.
@@ -68,7 +72,7 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 155 tests run on Windows with Swift 6.3
+The compatibility kit and all 159 tests run on Windows with Swift 6.3
 (`scripts/windows_dev_test.bat`). GitHub Actions is configured to run the pinned
 real-APK suite on macOS, compiles both Simulator and unsigned device targets,
 and publishes an unsigned IPA artifact. The `compat-audit` CLI produced the
