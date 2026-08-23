@@ -17,7 +17,8 @@ let package = Package(
         // extension-runtime parsing behavior.
         .package(url: "https://github.com/scinfu/SwiftSoup.git", exact: "2.9.6"),
         // 3.12.5 is the newest Swift Crypto release with a Swift 5.9 package
-        // manifest. It supplies cross-platform SHA-256 for pinned APK gates.
+        // manifest. Crypto plus CryptoExtras provide the portable digest,
+        // RSA, and ECDSA primitives used to authenticate APK signers.
         .package(url: "https://github.com/apple/swift-crypto.git", exact: "3.12.5"),
     ],
     targets: [
@@ -26,6 +27,7 @@ let package = Package(
             dependencies: [
                 .product(name: "SwiftSoup", package: "SwiftSoup"),
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
             ]
         ),
         .executableTarget(

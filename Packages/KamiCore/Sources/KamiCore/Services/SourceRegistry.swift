@@ -20,7 +20,26 @@ public final class SourceRegistry {
         sources.first { $0.id == id }
     }
 
-    public func add(_ source: any KamiSource) {
+    /// Registers a compiled, exact-hash pinned adapter. The concrete type
+    /// prevents this path from accepting an arbitrary downloaded source.
+    public func addPinned(_ source: PinnedInterpretedSource) {
+        addTrusted(source)
+    }
+
+    /// The only public registration path for a source constructed from a
+    /// downloaded APK. The capability is issued after signer trust is
+    /// persisted, and the source ID must have been declared by that extension.
+    public func addDownloaded(
+        _ source: any KamiSource,
+        admission: ExtensionAdmission
+    ) throws {
+        guard admission.sourceIDs.contains(source.id) else {
+            throw ExtensionAdmissionError.sourceNotDeclared(source.id)
+        }
+        addTrusted(source)
+    }
+
+    private func addTrusted(_ source: any KamiSource) {
         guard !sources.contains(where: { $0.id == source.id }) else { return }
         sources.append(source)
     }

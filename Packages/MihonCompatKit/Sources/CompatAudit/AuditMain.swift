@@ -289,6 +289,7 @@ struct CompatAudit {
         print("== Extension ==")
         print("package:            \(r.manifest.packageName)")
         print("name:               \(r.manifest.appName ?? "?")")
+        print("version:            \(r.manifest.versionName ?? "?") (\(r.manifest.versionCode.map(String.init) ?? "?"))")
         print("extensionLib:       \(r.manifest.extensionLibVersion ?? "?")")
         print("source class:       \(r.manifest.resolvedSourceClass ?? "?")")
         print("source factory:     \(r.manifest.resolvedSourceFactory ?? "?")")

@@ -7,6 +7,7 @@ final class AppModel: ObservableObject {
     let store: LibraryStore
     let registry: SourceRegistry
     let storeClient: ExtensionStoreClient
+    let admissionService: ExtensionAdmissionService
 
     @Published var library: [Manga] = []
     @Published var loading = false
@@ -17,9 +18,11 @@ final class AppModel: ObservableObject {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let dbPath = url.appendingPathComponent("kami.sqlite").path
 
-        self.store = (try? LibraryStore(path: dbPath)) ?? (try! LibraryStore(inMemory: true))
+        let store = (try? LibraryStore(path: dbPath)) ?? (try! LibraryStore(inMemory: true))
+        self.store = store
         self.registry = SourceRegistry()
         self.storeClient = ExtensionStoreClient()
+        self.admissionService = ExtensionAdmissionService(store: store)
         reloadLibrary()
     }
 

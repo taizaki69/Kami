@@ -1,5 +1,5 @@
 {
-  "source": "keiyoushi/extensions GitHub release assets",
+  "source": "Keiyoushi release assets and AOSP apksig conformance fixtures",
   "locked": "2026-08-21",
   "artifacts": [
     {
@@ -19,6 +19,42 @@
       "package": "eu.kanade.tachiyomi.extension.en.batcave",
       "version": "1.6.9",
       "sha256": "f5338a90f9b9b40c27a2106ceb1e0c94713c38208998fd735bfabda18934fab6"
+    },
+    {
+      "name": "aosp-v3-original",
+      "sourceRevision": "platform/tools/apksig@184702d9d18877edf9e5296c4e191cf0aa2b5fbb",
+      "license": "Apache-2.0",
+      "sha256": "6e606307a39c826330db293a63c677566265d593bcb9b5c6fa58b34f86102668"
+    },
+    {
+      "name": "aosp-v3-lineage",
+      "sourceRevision": "platform/tools/apksig@184702d9d18877edf9e5296c4e191cf0aa2b5fbb",
+      "license": "Apache-2.0",
+      "sha256": "e2f5131444fdefb60614ae48c5cd0092ccddd7eceb75b13a349045c9acad8632"
+    },
+    {
+      "name": "aosp-v1",
+      "sourceRevision": "platform/tools/apksig@184702d9d18877edf9e5296c4e191cf0aa2b5fbb",
+      "license": "Apache-2.0",
+      "sha256": "b9513e617253cc5864bccd731adeae270861e690a8dae86c15b1ee2aa3f867f4"
+    },
+    {
+      "name": "aosp-unsigned",
+      "sourceRevision": "platform/tools/apksig@184702d9d18877edf9e5296c4e191cf0aa2b5fbb",
+      "license": "Apache-2.0",
+      "sha256": "8739c76e681f900923b900c9df0ef75cf421d39cabb54650c4b9ad19b6a76d85"
+    },
+    {
+      "name": "aosp-v2-invalid-signature",
+      "sourceRevision": "platform/tools/apksig@184702d9d18877edf9e5296c4e191cf0aa2b5fbb",
+      "license": "Apache-2.0",
+      "sha256": "ae2f6bf5ae1cf510cc871f0e81bf8577c986362717e91d3bccb63d642760d02e"
+    },
+    {
+      "name": "aosp-v3-stripped",
+      "sourceRevision": "platform/tools/apksig@184702d9d18877edf9e5296c4e191cf0aa2b5fbb",
+      "license": "Apache-2.0",
+      "sha256": "ba6b48842c845d1593f3f54104ab8457e7fafc930ce67d7e61d62eefdf201f95"
     }
   ]
 }

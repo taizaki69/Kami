@@ -36,8 +36,8 @@ final class SourceRegistryTests: XCTestCase {
             let registry = SourceRegistry()
             let initialCount = registry.sources.count
 
-            registry.add(source)
-            registry.add(source)
+            registry.addPinned(source)
+            registry.addPinned(source)
 
             XCTAssertEqual(registry.sources.count, initialCount + 1)
             let registered = try XCTUnwrap(registry.source(id: source.id))

@@ -27,8 +27,13 @@ decision.
   selector engine behind the Jsoup compatibility bridge. Source:
   <https://github.com/scinfu/SwiftSoup/tree/2.9.6>.
 - **Swift Crypto 3.12.5** — Apache-2.0 license. Used for cross-platform SHA-256
-  verification before a pinned extension APK is admitted to the interpreter.
+  plus RSA/ECDSA verification before an extension APK is admitted to the
+  interpreter.
   Source: <https://github.com/apple/swift-crypto/tree/3.12.5>.
+- **AOSP apksig conformance fixtures** — Apache-2.0 license. A small set is
+  fetched only for tests at revision `184702d9d18877edf9e5296c4e191cf0aa2b5fbb`;
+  binaries remain ignored and are not distributed in Kami's source tree.
+  Source: <https://android.googlesource.com/platform/tools/apksig/>.
 - SQLite via the system library.
 
 If a zstd decoder or another runtime dependency is added later, its license

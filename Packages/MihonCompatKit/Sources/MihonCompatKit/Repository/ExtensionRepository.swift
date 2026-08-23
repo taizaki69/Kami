@@ -19,6 +19,22 @@ public struct ExtensionRepositoryIndex: Equatable, Sendable {
         public let homeURL: String
         public let mirrors: [String]
         public let message: String?
+
+        public init(
+            id: Int64,
+            name: String,
+            language: String,
+            homeURL: String,
+            mirrors: [String] = [],
+            message: String? = nil
+        ) {
+            self.id = id
+            self.name = name
+            self.language = language
+            self.homeURL = homeURL
+            self.mirrors = mirrors
+            self.message = message
+        }
     }
 
     public struct Extension: Equatable, Sendable {
@@ -35,6 +51,28 @@ public struct ExtensionRepositoryIndex: Equatable, Sendable {
         public let apkURL: String
         public let iconURL: String?
         public let sources: [Source]
+
+        public init(
+            name: String,
+            packageName: String,
+            versionName: String,
+            versionCode: Int64,
+            extensionLib: String,
+            contentWarning: ContentWarning,
+            apkURL: String,
+            iconURL: String? = nil,
+            sources: [Source]
+        ) {
+            self.name = name
+            self.packageName = packageName
+            self.versionName = versionName
+            self.versionCode = versionCode
+            self.extensionLib = extensionLib
+            self.contentWarning = contentWarning
+            self.apkURL = apkURL
+            self.iconURL = iconURL
+            self.sources = sources
+        }
 
         /// Legacy-format entries list APK filename relative to the index URL.
         public init(fromLegacy entry: LegacyIndexEntry, baseURL: URL) {

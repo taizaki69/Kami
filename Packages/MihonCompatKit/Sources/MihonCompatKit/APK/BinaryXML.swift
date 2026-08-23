@@ -260,6 +260,8 @@ public struct BinaryXMLDocument {
 /// keys Mihon's ExtensionLoader reads (`tachiyomi.*` / `tachiyomix.*`).
 public struct ExtensionManifest {
     public let packageName: String
+    public let versionName: String?
+    public let versionCode: Int64?
     public let appName: String?
     public let sourceClass: String?
     public let sourceFactory: String?
@@ -269,7 +271,7 @@ public struct ExtensionManifest {
     /// `tachiyomi.extension` uses-feature declared.
     public let declaresExtensionFeature: Bool
 
-    init(apkBytes: [UInt8]) throws {
+    public init(apkBytes: [UInt8]) throws {
         let zip = try ZipArchive(apkBytes)
         let manifestBytes = try zip.data(named: "AndroidManifest.xml")
         let doc = try BinaryXMLDocument(manifestBytes)
@@ -279,6 +281,8 @@ public struct ExtensionManifest {
             throw BinaryXMLDocument.Error.truncated
         }
         packageName = pkg
+        versionName = root.attribute("versionName")?.typedValue.stringValue
+        versionCode = root.attribute("versionCode")?.typedValue.intValue.map(Int64.init)
 
         var class_: String?
         var factory: String?

@@ -6,6 +6,8 @@ import Foundation
 public enum PinnedInterpretedSourceError: Error, Sendable, Equatable, LocalizedError {
     case invalidAPKSize(profile: String)
     case apkDigestMismatch(profile: String)
+    case apkSignatureInvalid(profile: String)
+    case apkSignerMismatch(profile: String)
     case manifestMismatch(profile: String)
     case missingEntryClass(profile: String)
     case invalidMetadata(profile: String)
@@ -20,6 +22,10 @@ public enum PinnedInterpretedSourceError: Error, Sendable, Equatable, LocalizedE
             return "Pinned extension \(profile) has an invalid APK size."
         case let .apkDigestMismatch(profile):
             return "Pinned extension \(profile) failed its SHA-256 check."
+        case let .apkSignatureInvalid(profile):
+            return "Pinned extension \(profile) failed APK signature verification."
+        case let .apkSignerMismatch(profile):
+            return "Pinned extension \(profile) has an unexpected signing identity."
         case let .manifestMismatch(profile):
             return "Pinned extension \(profile) does not match its manifest identity."
         case let .missingEntryClass(profile):
@@ -39,8 +45,8 @@ public enum PinnedInterpretedSourceError: Error, Sendable, Equatable, LocalizedE
 }
 
 /// The first app-facing DEX-backed source. Construction is deliberately limited
-/// to profiles compiled into Kami: arbitrary downloaded APK execution remains
-/// disabled until signer verification is implemented.
+/// to profiles compiled into Kami. Downloaded adapters use the separate,
+/// persisted `ExtensionAdmissionService` capability before registration.
 public struct PinnedInterpretedSource: KamiSource {
     public let id: Int64
     public let name: String
@@ -166,6 +172,7 @@ private struct PinnedInterpretedProfile: Sendable {
     let identifier: String
     let networkIdentity: String
     let sha256: String
+    let signerFingerprint: String
     let maximumAPKBytes: Int
     let packageName: String
     let extensionLibVersion: String
@@ -185,6 +192,7 @@ private struct PinnedInterpretedProfile: Sendable {
         identifier: "batcave-1.6.9",
         networkIdentity: "eu.kanade.tachiyomi.extension.en.batcave@1.6.9",
         sha256: "f5338a90f9b9b40c27a2106ceb1e0c94713c38208998fd735bfabda18934fab6",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
         maximumAPKBytes: 64 * 1024 * 1024,
         packageName: "eu.kanade.tachiyomi.extension.en.batcave",
         extensionLibVersion: "1.6",
@@ -242,6 +250,15 @@ private actor PinnedInterpretedRuntime {
         }
         guard Self.sha256Hex(apkBytes) == profile.sha256 else {
             throw PinnedInterpretedSourceError.apkDigestMismatch(profile: profile.identifier)
+        }
+        let signingIdentity: APKSigningIdentity
+        do {
+            signingIdentity = try APKSignatureVerifier().verify(apkBytes: apkBytes)
+        } catch {
+            throw PinnedInterpretedSourceError.apkSignatureInvalid(profile: profile.identifier)
+        }
+        guard signingIdentity.contains(fingerprint: profile.signerFingerprint) else {
+            throw PinnedInterpretedSourceError.apkSignerMismatch(profile: profile.identifier)
         }
 
         let manifest = try ExtensionManifest(apkBytes: apkBytes)

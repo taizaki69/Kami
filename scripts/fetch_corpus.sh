@@ -39,6 +39,33 @@ download() {
   trap - EXIT
 }
 
+# Gitiles exposes immutable blob bytes as base64 when `format=TEXT` is used.
+download_gitiles() {
+  local name="$1"
+  local url="$2"
+  local expected="$3"
+  local destination="$CORPUS/$name.apk"
+  local encoded="$destination.b64.tmp.$$"
+  local temporary="$destination.tmp.$$"
+
+  if [[ -f "$destination" ]] && [[ "$(sha256 "$destination")" == "$expected" ]]; then
+    echo "==> $name.apk already matches the corpus lock"
+    return
+  fi
+
+  trap 'rm -f "${encoded:-}" "${temporary:-}"' EXIT
+  echo "==> Fetching $name.apk"
+  curl --fail --location --silent --show-error --retry 3 \
+    --proto '=https' --tlsv1.2 "$url" --output "$encoded"
+  if ! base64 --decode "$encoded" > "$temporary" 2>/dev/null; then
+    base64 -D "$encoded" > "$temporary"
+  fi
+  [[ "$(sha256 "$temporary")" == "$expected" ]]
+  mv "$temporary" "$destination"
+  rm -f "$encoded"
+  trap - EXIT
+}
+
 download \
   akuma \
   "https://github.com/keiyoushi/extensions/releases/download/a76c957-0/tachiyomi-all.akuma-v1.4.10.apk" \
@@ -53,6 +80,42 @@ download \
   batcave \
   "https://github.com/keiyoushi/extensions/releases/download/a18924b/tachiyomi-en.batcave-v1.6.9.apk" \
   "f5338a90f9b9b40c27a2106ceb1e0c94713c38208998fd735bfabda18934fab6"
+
+# Small Apache-2.0 Android Open Source Project apksig conformance fixtures,
+# pinned to one source revision. They cover schemes absent from the extension
+# sample without checking generated binaries into Kami.
+AOSP_APKSIG_REV="184702d9d18877edf9e5296c4e191cf0aa2b5fbb"
+AOSP_APKSIG_BASE="https://android.googlesource.com/platform/tools/apksig/+/$AOSP_APKSIG_REV/src/test/resources/com/android/apksig"
+
+download_gitiles \
+  aosp-v3-original \
+  "$AOSP_APKSIG_BASE/golden-aligned-v3-out.apk?format=TEXT" \
+  "6e606307a39c826330db293a63c677566265d593bcb9b5c6fa58b34f86102668"
+
+download_gitiles \
+  aosp-v3-lineage \
+  "$AOSP_APKSIG_BASE/golden-aligned-v3-lineage-out.apk?format=TEXT" \
+  "e2f5131444fdefb60614ae48c5cd0092ccddd7eceb75b13a349045c9acad8632"
+
+download_gitiles \
+  aosp-v1 \
+  "$AOSP_APKSIG_BASE/golden-aligned-v1-out.apk?format=TEXT" \
+  "b9513e617253cc5864bccd731adeae270861e690a8dae86c15b1ee2aa3f867f4"
+
+download_gitiles \
+  aosp-unsigned \
+  "$AOSP_APKSIG_BASE/empty-unsigned.apk?format=TEXT" \
+  "8739c76e681f900923b900c9df0ef75cf421d39cabb54650c4b9ad19b6a76d85"
+
+download_gitiles \
+  aosp-v2-invalid-signature \
+  "$AOSP_APKSIG_BASE/v2-only-with-rsa-pkcs1-sha256-2048-sig-does-not-verify.apk?format=TEXT" \
+  "ae2f6bf5ae1cf510cc871f0e81bf8577c986362717e91d3bccb63d642760d02e"
+
+download_gitiles \
+  aosp-v3-stripped \
+  "$AOSP_APKSIG_BASE/v2v3-signed-v3-block-stripped.apk?format=TEXT" \
+  "ba6b48842c845d1593f3f54104ab8457e7fafc930ce67d7e61d62eefdf201f95"
 
 echo "==> Pinned corpus ready"
 

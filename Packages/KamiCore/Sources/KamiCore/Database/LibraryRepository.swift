@@ -165,7 +165,147 @@ public actor LibraryStore {
         try db.run("UPDATE chapter SET last_page_read=? WHERE id=?", [.int(page), .int(chapterId)])
     }
 
+    // MARK: - Extension signer trust
+
+    public func installedExtensionTrust(packageName: String) throws -> InstalledExtensionTrust? {
+        guard let row = try db.query(
+            "SELECT * FROM installed_extension WHERE package_name=? LIMIT 1",
+            [.text(packageName)]
+        ).first,
+        let versionName = row.string("version_name"),
+        let versionCode = row.int64("version_code"),
+        let apkPath = row.string("apk_path"),
+        let apkSHA256 = row.string("apk_sha256"), !apkSHA256.isEmpty,
+        let schemeText = row.string("signature_scheme"),
+        let scheme = APKSigningIdentity.Scheme(rawValue: schemeText),
+        let currentSigners = Self.stringArray(row.string("current_signers")),
+        !currentSigners.isEmpty,
+        let signerHistory = Self.stringArray(row.string("signer_history")),
+        !signerHistory.isEmpty,
+        let trustText = row.string("trust_source"),
+        let trustSource = ExtensionTrustSource(persistedValue: trustText) else {
+            // Rows created before signer admission are intentionally not
+            // executable until they are re-admitted and populated.
+            return nil
+        }
+        return InstalledExtensionTrust(
+            packageName: packageName,
+            versionName: versionName,
+            versionCode: versionCode,
+            apkPath: apkPath,
+            apkSHA256: apkSHA256,
+            signatureScheme: scheme,
+            currentSigners: currentSigners,
+            signerHistory: signerHistory,
+            trustSource: trustSource,
+            sourceIDs: Set(Self.int64Array(row.string("source_ids")))
+        )
+    }
+
+    func commitExtensionAdmission(
+        _ candidate: ExtensionAdmissionCandidate
+    ) throws -> ExtensionAdmission {
+        let existing = try installedExtensionTrust(packageName: candidate.packageName)
+        let trustSource: ExtensionTrustSource
+        if let existing {
+            guard candidate.versionCode >= existing.versionCode else {
+                throw ExtensionAdmissionError.downgrade(
+                    installed: existing.versionCode,
+                    candidate: candidate.versionCode
+                )
+            }
+            if candidate.versionCode == existing.versionCode,
+               candidate.apkSHA256 != existing.apkSHA256 {
+                throw ExtensionAdmissionError.sameVersionContentMismatch
+            }
+            guard ExtensionAdmissionService.updatePreservesIdentity(
+                existingCurrentSigners: existing.currentSigners,
+                candidate: candidate.signingIdentity
+            ) else {
+                throw ExtensionAdmissionError.updateSignerMismatch
+            }
+            // Initial trust is sticky. Repository metadata may disappear or
+            // change, but it cannot replace the package's persisted identity.
+            trustSource = existing.trustSource
+        } else {
+            guard let presented = candidate.presentedTrustSource else {
+                throw ExtensionAdmissionError.untrustedSigner(
+                    candidate.signingIdentity.signers.map(\.currentFingerprint)
+                )
+            }
+            trustSource = presented
+        }
+
+        let currentSigners = candidate.signingIdentity.signers
+            .map(\.currentFingerprint)
+            .sorted()
+        let signerHistory = Array(candidate.signingIdentity.allFingerprints).sorted()
+        let currentJSON = try Self.json(currentSigners)
+        let historyJSON = try Self.json(signerHistory)
+        let sourceJSON = try Self.json(candidate.sourceIDs.sorted())
+        let now = Int64(Date().timeIntervalSince1970)
+        try db.run("""
+            INSERT INTO installed_extension
+                (package_name, version_name, version_code, apk_path, repo_url,
+                 installed_at, enabled, apk_sha256, signature_scheme,
+                 current_signers, signer_history, trust_source, source_ids)
+            VALUES (?,?,?,?,?,?,1,?,?,?,?,?,?)
+            ON CONFLICT(package_name) DO UPDATE SET
+                version_name=excluded.version_name,
+                version_code=excluded.version_code,
+                apk_path=excluded.apk_path,
+                repo_url=excluded.repo_url,
+                installed_at=excluded.installed_at,
+                enabled=1,
+                apk_sha256=excluded.apk_sha256,
+                signature_scheme=excluded.signature_scheme,
+                current_signers=excluded.current_signers,
+                signer_history=excluded.signer_history,
+                trust_source=excluded.trust_source,
+                source_ids=excluded.source_ids
+            """, [
+                .text(candidate.packageName),
+                .text(candidate.versionName),
+                .int(candidate.versionCode),
+                .text(candidate.apkPath),
+                candidate.repositoryURL.map(SQLiteBindable.text) ?? .null,
+                .int(now),
+                .text(candidate.apkSHA256),
+                .text(candidate.signingIdentity.scheme.rawValue),
+                .text(currentJSON),
+                .text(historyJSON),
+                .text(trustSource.persistedValue),
+                .text(sourceJSON),
+            ])
+
+        return ExtensionAdmission(
+            packageName: candidate.packageName,
+            versionName: candidate.versionName,
+            versionCode: candidate.versionCode,
+            apkPath: candidate.apkPath,
+            apkSHA256: candidate.apkSHA256,
+            signingIdentity: candidate.signingIdentity,
+            trustSource: trustSource,
+            sourceIDs: candidate.sourceIDs
+        )
+    }
+
     // MARK: - Row mapping
+
+    private static func json<T: Encodable>(_ value: T) throws -> String {
+        let data = try JSONEncoder().encode(value)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func stringArray(_ value: String?) -> [String] {
+        guard let data = value?.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+    }
+
+    private static func int64Array(_ value: String?) -> [Int64] {
+        guard let data = value?.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([Int64].self, from: data)) ?? []
+    }
 
     private static func manga(from row: SQLiteDatabase.Row) -> Manga? {
         guard let id = row.int64("id"),
