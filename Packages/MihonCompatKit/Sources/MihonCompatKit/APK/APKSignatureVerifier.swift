@@ -995,9 +995,19 @@ public struct APKSignatureVerifier {
         padding: _RSA.Signing.Padding,
         allowLegacyKey: Bool = false
     ) throws -> Bool {
-        let key = allowLegacyKey
-            ? try _RSA.Signing.PublicKey(unsafeDERRepresentation: Data(publicKey))
-            : try _RSA.Signing.PublicKey(derRepresentation: Data(publicKey))
+        let key: _RSA.Signing.PublicKey
+        do {
+            key = allowLegacyKey
+                ? try _RSA.Signing.PublicKey(unsafeDERRepresentation: Data(publicKey))
+                : try _RSA.Signing.PublicKey(derRepresentation: Data(publicKey))
+        } catch {
+            // Do not leak backend-specific Security/BoringSSL diagnostics to
+            // admission callers. This also keeps every verifier failure inside
+            // the public, redacted error domain.
+            throw APKSignatureVerificationError.unsupported(
+                "RSA public key cannot be imported by this platform"
+            )
+        }
         let signature = _RSA.Signing.RSASignature(rawRepresentation: Data(signature))
         let data = Data(message)
         switch digest {
