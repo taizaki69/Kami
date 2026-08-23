@@ -138,6 +138,16 @@ public final class HostBridge {
         let pathSegments: [String]
     }
 
+    private final class HttpUrlBuilderBox {
+        let baseURL: String
+        var queryParameters: [(name: String, value: String?)] = []
+        var addedURLBytes = 0
+
+        init(baseURL: String) {
+            self.baseURL = baseURL
+        }
+    }
+
     private struct MediaTypeBox {
         let value: String
     }
@@ -280,6 +290,7 @@ public final class HostBridge {
 
     private indirect enum JSONEncodedValue {
         case null
+        case bool(Bool)
         case string(String)
         case int(Int32)
         case float(Float)
@@ -783,6 +794,41 @@ public final class HostBridge {
         }
         bridge.register(
             class: "Lkotlin/text/StringsKt;",
+            "equals",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;Z)Z",
+            isStatic: true
+        ) { _, args in
+            let operation = "StringsKt.equals"
+            func nullableString(_ index: Int) throws -> String? {
+                let value = try argument(args, index, operation)
+                if value.isNull { return nil }
+                guard let result = stringPayload(value) else {
+                    throw VMError.verify("\(operation) argument \(index)")
+                }
+                return result
+            }
+            let left = try nullableString(0)
+            let right = try nullableString(1)
+            guard case let .int(rawIgnoreCase) = try argument(args, 2, operation) else {
+                throw VMError.verify("\(operation) ignoreCase")
+            }
+            guard let left, let right else {
+                return .int(left == nil && right == nil ? 1 : 0)
+            }
+            let maximumBytes = bridge.htmlPolicy.maximumExtractedStringBytes
+            guard left.utf8.count <= maximumBytes, right.utf8.count <= maximumBytes else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "equals input is too long"
+                )
+            }
+            let matches = rawIgnoreCase == 0
+                ? left == right
+                : left.compare(right, options: [.caseInsensitive]) == .orderedSame
+            return .int(matches ? 1 : 0)
+        }
+        bridge.register(
+            class: "Lkotlin/text/StringsKt;",
             "isBlank",
             prototype: "(Ljava/lang/CharSequence;)Z",
             isStatic: true
@@ -829,6 +875,45 @@ public final class HostBridge {
                 }
                 let options: String.CompareOptions = beforeLast ? [.backwards] : []
                 guard let range = value.range(of: delimiter, options: options) else {
+                    return string(missingValue)
+                }
+                let result = beforeLast
+                    ? String(value[..<range.lowerBound])
+                    : String(value[range.upperBound...])
+                return string(result)
+            }
+        }
+        for (name, beforeLast) in [
+            ("substringAfterLast$default", false),
+            ("substringBeforeLast$default", true),
+        ] {
+            bridge.register(
+                class: "Lkotlin/text/StringsKt;",
+                name,
+                prototype: "(Ljava/lang/String;CLjava/lang/String;ILjava/lang/Object;)Ljava/lang/String;",
+                isStatic: true
+            ) { _, args in
+                let operation = "StringsKt.\(name)"
+                let value = try requiredString(args, 0, operation)
+                guard case let .int(rawDelimiter) = try argument(args, 1, operation),
+                      case let .int(mask) = try argument(args, 3, operation) else {
+                    throw VMError.verify("\(operation) arguments")
+                }
+                let missingValue = mask & 0x02 != 0
+                    ? value
+                    : try requiredString(args, 2, operation)
+                let maximumBytes = bridge.htmlPolicy.maximumExtractedStringBytes
+                guard value.utf8.count <= maximumBytes,
+                      missingValue.utf8.count <= maximumBytes else {
+                    throw hostThrowable(
+                        "Ljava/lang/IllegalArgumentException;",
+                        "substring input is too long"
+                    )
+                }
+                guard rawDelimiter >= 0,
+                      rawDelimiter <= 0xFFFF,
+                      let scalar = UnicodeScalar(UInt32(rawDelimiter)),
+                      let range = value.range(of: String(scalar), options: [.backwards]) else {
                     return string(missingValue)
                 }
                 let result = beforeLast
@@ -1423,6 +1508,8 @@ public final class HostBridge {
                 switch value {
                 case .null:
                     try append("null")
+                case let .bool(value):
+                    try append(value ? "true" : "false")
                 case let .string(value):
                     try appendString(value)
                 case let .int(value):
@@ -1571,14 +1658,22 @@ public final class HostBridge {
             _ args: [RVal],
             _ method: String
         ) throws -> Any {
+            let value = try nullableElement(args, method)
+            guard !(value is NSNull) else {
+                throw serializationThrowable("unexpected null JSON element")
+            }
+            return value
+        }
+
+        func nullableElement(
+            _ args: [RVal],
+            _ method: String
+        ) throws -> Any {
             let box = try composite(args, method)
             guard case let .int(rawIndex) = try argument(args, 2, method),
                   rawIndex >= 0,
                   let value = box.value(at: Int(rawIndex)) else {
                 throw serializationThrowable("missing or invalid JSON element")
-            }
-            guard !(value is NSNull) else {
-                throw serializationThrowable("unexpected null JSON element")
             }
             return value
         }
@@ -1850,6 +1945,21 @@ public final class HostBridge {
         }
         bridge.register(
             class: compositeEncoder,
+            "encodeBooleanElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;IZ)V"
+        ) { _, args in
+            guard case let .int(value) = try argument(
+                args, 3, "CompositeEncoder.encodeBooleanElement"
+            ) else { throw serializationThrowable("expected JSON boolean") }
+            try setEncodedElement(
+                args,
+                "CompositeEncoder.encodeBooleanElement",
+                value: .bool(value != 0)
+            )
+            return .null
+        }
+        bridge.register(
+            class: compositeEncoder,
             "encodeStringElement",
             prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;ILjava/lang/String;)V"
         ) { _, args in
@@ -1999,6 +2109,18 @@ public final class HostBridge {
         }
         bridge.register(
             class: compositeDecoder,
+            "decodeBooleanElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)Z"
+        ) { _, args in
+            guard let value = try element(
+                args, "CompositeDecoder.decodeBooleanElement"
+            ) as? Bool else {
+                throw serializationThrowable("expected JSON boolean")
+            }
+            return .int(value ? 1 : 0)
+        }
+        bridge.register(
+            class: compositeDecoder,
             "decodeIntElement",
             prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)I"
         ) { _, args in
@@ -2048,6 +2170,23 @@ public final class HostBridge {
             try deserialize(
                 try argument(args, 3, "CompositeDecoder.decodeSerializableElement"),
                 value: try element(args, "CompositeDecoder.decodeSerializableElement"),
+                vm: vm
+            )
+        }
+        bridge.register(
+            class: compositeDecoder,
+            "decodeNullableSerializableElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;ILkotlinx/serialization/DeserializationStrategy;Ljava/lang/Object;)Ljava/lang/Object;"
+        ) { vm, args in
+            let value = try nullableElement(
+                args, "CompositeDecoder.decodeNullableSerializableElement"
+            )
+            if value is NSNull {
+                return .null
+            }
+            return try deserialize(
+                try argument(args, 3, "CompositeDecoder.decodeNullableSerializableElement"),
+                value: value,
                 vm: vm
             )
         }
@@ -2470,6 +2609,84 @@ public final class HostBridge {
         let zoneID = "Ljava/time/ZoneId;"
         let zonedDateTime = "Ljava/time/ZonedDateTime;"
         let instant = "Ljava/time/Instant;"
+        let kotlinInstant = "Lkotlin/time/Instant;"
+        let kotlinInstantCompanion = "Lkotlin/time/Instant$Companion;"
+
+        bridge.staticFields["\(kotlinInstant)->Companion"] = .obj(ObjInstance(
+            dexType: kotlinInstantCompanion,
+            isHost: true
+        ))
+        bridge.register(
+            class: kotlinInstantCompanion,
+            "parseOrNull",
+            prototype: "(Ljava/lang/CharSequence;)Lkotlin/time/Instant;"
+        ) { _, args in
+            let input = try requiredString(args, 1, "kotlin.time.Instant.parseOrNull")
+            guard input.utf8.count <= 256 else { return .null }
+            let options: [ISO8601DateFormatter.Options] = [
+                [.withInternetDateTime, .withFractionalSeconds],
+                [.withInternetDateTime],
+            ]
+            var parsed: Date?
+            for option in options {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = option
+                if let value = formatter.date(from: input) {
+                    parsed = value
+                    break
+                }
+            }
+            guard parsed != nil else { return .null }
+
+            // Date stores fractional seconds as a binary floating-point value.
+            // Derive milliseconds from the decimal ISO fraction so Kotlin's
+            // exact truncation semantics cannot lose one millisecond to drift.
+            let fractionStart = input.firstIndex(of: ".")
+            let fractionEnd = fractionStart.map { start in
+                input[input.index(after: start)...].firstIndex(where: { !$0.isNumber })
+                    ?? input.endIndex
+            }
+            let fraction = fractionStart.flatMap { start in
+                fractionEnd.map { String(input[input.index(after: start)..<$0]) }
+            } ?? ""
+            let normalized: String
+            if let fractionStart, let fractionEnd {
+                normalized = String(input[..<fractionStart]) + String(input[fractionEnd...])
+            } else {
+                normalized = input
+            }
+            let wholeFormatter = ISO8601DateFormatter()
+            wholeFormatter.formatOptions = [.withInternetDateTime]
+            guard let wholeDate = wholeFormatter.date(from: normalized) else { return .null }
+            let seconds = wholeDate.timeIntervalSince1970.rounded()
+            guard seconds.isFinite,
+                  seconds >= Double(Int64.min / 1_000),
+                  seconds <= Double(Int64.max / 1_000) else { return .null }
+            let wholeMilliseconds = Int64(seconds).multipliedReportingOverflow(by: 1_000)
+            guard !wholeMilliseconds.overflow else { return .null }
+            let fractionMilliseconds = Int64(String((fraction + "000").prefix(3))) ?? 0
+            let milliseconds = wholeMilliseconds.partialValue.addingReportingOverflow(
+                fractionMilliseconds
+            )
+            guard !milliseconds.overflow else { return .null }
+            return .obj(ObjInstance(
+                dexType: kotlinInstant,
+                payload: EpochMillisecondsBox(value: milliseconds.partialValue),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: kotlinInstant,
+            "toEpochMilliseconds",
+            prototype: "()J"
+        ) { _, args in
+            guard case let .obj(object) = try argument(
+                args, 0, "kotlin.time.Instant.toEpochMilliseconds"
+            ), let epoch = object.payload as? EpochMillisecondsBox else {
+                throw VMError.verify("kotlin.time.Instant.toEpochMilliseconds receiver")
+            }
+            return .long(epoch.value)
+        }
 
         bridge.register(
             class: dateFormatter,
@@ -2737,6 +2954,36 @@ public final class HostBridge {
             isStatic: true
         ) { _, args in
             try listBox(args, "CollectionsKt.firstOrNull").elements.first ?? .null
+        }
+        bridge.register(
+            class: collections,
+            "distinct",
+            prototype: "(Ljava/lang/Iterable;)Ljava/util/List;",
+            isStatic: true
+        ) { _, args in
+            let source = try listBox(args, "CollectionsKt.distinct").elements
+            try requireCollectionCapacity(source.count, "CollectionsKt.distinct")
+            let maximumComparisons = 8_000_000
+            var comparisons = 0
+            var result: [RVal] = []
+            result.reserveCapacity(source.count)
+            for value in source {
+                var isDuplicate = false
+                for existing in result {
+                    guard comparisons < maximumComparisons else {
+                        throw VMError.verify(
+                            "CollectionsKt.distinct exceeds 8000000 equality comparisons"
+                        )
+                    }
+                    comparisons += 1
+                    if javaValueEquals(existing, value) {
+                        isDuplicate = true
+                        break
+                    }
+                }
+                if !isDuplicate { result.append(value) }
+            }
+            return hostList(result, isMutable: false)
         }
         bridge.register(
             class: collections,
@@ -3215,10 +3462,39 @@ public final class HostBridge {
             class: httpSource,
             "getHeaders",
             prototype: "()Lokhttp3/Headers;"
-        ) { _, _ in
-            .obj(ObjInstance(
+        ) { vm, args in
+            let receiver = try argument(args, 0, "HttpSource.getHeaders")
+            let emptyBuilder = RVal.obj(ObjInstance(
+                dexType: "Lokhttp3/Headers$Builder;",
+                payload: HeadersBuilderBox(),
+                isHost: true
+            ))
+            let configuredBuilder: RVal
+            if case let .obj(source) = receiver {
+                do {
+                    configuredBuilder = try vm.call(
+                        classDescriptor: source.dexType,
+                        method: "headersBuilder",
+                        prototype: "()Lokhttp3/Headers$Builder;",
+                        args: [receiver]
+                    )
+                } catch let error as VMError {
+                    if case .unresolvedMethod = error {
+                        configuredBuilder = emptyBuilder
+                    } else {
+                        throw error
+                    }
+                }
+            } else {
+                throw VMError.verify("HttpSource.getHeaders receiver")
+            }
+            guard case let .obj(builderObject) = configuredBuilder,
+                  let builder = builderObject.payload as? HeadersBuilderBox else {
+                throw VMError.verify("HttpSource.headersBuilder result")
+            }
+            return .obj(ObjInstance(
                 dexType: "Lokhttp3/Headers;",
-                payload: HeadersBox(headers: []),
+                payload: HeadersBox(headers: builder.headers),
                 isHost: true
             ))
         }
@@ -3513,6 +3789,7 @@ public final class HostBridge {
         }
 
         let httpUrl = "Lokhttp3/HttpUrl;"
+        let httpUrlBuilder = "Lokhttp3/HttpUrl$Builder;"
         let httpUrlCompanion = "Lokhttp3/HttpUrl$Companion;"
         bridge.staticFields["\(httpUrl)->Companion"] = .obj(ObjInstance(
             dexType: httpUrlCompanion,
@@ -3558,6 +3835,91 @@ public final class HostBridge {
                 throw VMError.verify("HttpUrl.toString receiver")
             }
             return string(url.value)
+        }
+        bridge.register(
+            class: httpUrl,
+            "newBuilder",
+            prototype: "()Lokhttp3/HttpUrl$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "HttpUrl.newBuilder"),
+                  let url = object.payload as? HttpUrlBox else {
+                throw VMError.verify("HttpUrl.newBuilder receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: httpUrlBuilder,
+                payload: HttpUrlBuilderBox(baseURL: url.value),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: httpUrlBuilder,
+            "addQueryParameter",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Lokhttp3/HttpUrl$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "HttpUrl.Builder.addQueryParameter"),
+                  let builder = object.payload as? HttpUrlBuilderBox else {
+                throw VMError.verify("HttpUrl.Builder.addQueryParameter receiver")
+            }
+            let name = try requiredString(args, 1, "HttpUrl.Builder.addQueryParameter")
+            let value = try optionalString(args, 2, "HttpUrl.Builder.addQueryParameter")
+            let maximumURLBytes = 8_192
+            guard name.utf8.count <= maximumURLBytes,
+                  value?.utf8.count ?? 0 <= maximumURLBytes,
+                  let encodedNameBytes = httpQueryComponentEncodedByteCount(
+                      name,
+                      maximum: maximumURLBytes
+                  ) else {
+                throw DEXThrowable(string("IllegalArgumentException: query parameter is too large"))
+            }
+            let encodedValueBytes: Int?
+            if let value {
+                guard let count = httpQueryComponentEncodedByteCount(
+                    value,
+                    maximum: maximumURLBytes
+                ) else {
+                    throw DEXThrowable(string("IllegalArgumentException: query parameter is too large"))
+                }
+                encodedValueBytes = count
+            } else {
+                encodedValueBytes = nil
+            }
+            let parameterBytes = 1 + encodedNameBytes
+                + (encodedValueBytes.map { 1 + $0 } ?? 0)
+            let addedBytes = builder.addedURLBytes.addingReportingOverflow(parameterBytes)
+            guard !addedBytes.overflow,
+                  builder.baseURL.utf8.count <= maximumURLBytes,
+                  addedBytes.partialValue <= maximumURLBytes - builder.baseURL.utf8.count else {
+                throw DEXThrowable(string("IllegalArgumentException: query parameter is too large"))
+            }
+            builder.addedURLBytes = addedBytes.partialValue
+            builder.queryParameters.append((name, value))
+            return .obj(object)
+        }
+        bridge.register(
+            class: httpUrlBuilder,
+            "build",
+            prototype: "()Lokhttp3/HttpUrl;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "HttpUrl.Builder.build"),
+                  let builder = object.payload as? HttpUrlBuilderBox,
+                  var components = URLComponents(string: builder.baseURL) else {
+                throw VMError.verify("HttpUrl.Builder.build receiver")
+            }
+            var parts: [String] = []
+            if let existing = components.percentEncodedQuery, !existing.isEmpty {
+                parts.append(existing)
+            }
+            parts.append(contentsOf: builder.queryParameters.map { parameter in
+                let name = httpQueryComponentEncode(parameter.name)
+                guard let value = parameter.value else { return name }
+                return name + "=" + httpQueryComponentEncode(value)
+            })
+            components.percentEncodedQuery = parts.isEmpty ? nil : parts.joined(separator: "&")
+            guard let value = components.string,
+                  let parsed = parsedHTTPURL(value) else {
+                throw DEXThrowable(string("IllegalArgumentException: invalid HTTP URL"))
+            }
+            return .obj(ObjInstance(dexType: httpUrl, payload: parsed, isHost: true))
         }
 
         let mediaType = "Lokhttp3/MediaType;"
@@ -4779,6 +5141,47 @@ public final class HostBridge {
             case 0x20:
                 result.append(0x2B)
             default:
+                result.append(0x25)
+                result.append(hex[Int(byte >> 4)])
+                result.append(hex[Int(byte & 0x0F)])
+            }
+        }
+        return String(decoding: result, as: UTF8.self)
+    }
+
+    /// Conservative RFC 3986 query-component encoding. Encoding every byte
+    /// outside the unreserved set preserves OkHttp's decoded parameter
+    /// semantics while preventing separators and `+` from changing meaning.
+    private static func httpQueryComponentEncodedByteCount(
+        _ value: String,
+        maximum: Int
+    ) -> Int? {
+        var count = 0
+        for byte in value.utf8 {
+            let increment = isHTTPQueryUnreserved(byte) ? 1 : 3
+            guard count <= maximum - increment else { return nil }
+            count += increment
+        }
+        return count
+    }
+
+    private static func isHTTPQueryUnreserved(_ byte: UInt8) -> Bool {
+        switch byte {
+        case 0x41...0x5A, 0x61...0x7A, 0x30...0x39, 0x2D, 0x2E, 0x5F, 0x7E:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func httpQueryComponentEncode(_ value: String) -> String {
+        let hex = Array("0123456789ABCDEF".utf8)
+        var result: [UInt8] = []
+        result.reserveCapacity(value.utf8.count * 3)
+        for byte in value.utf8 {
+            if isHTTPQueryUnreserved(byte) {
+                result.append(byte)
+            } else {
                 result.append(0x25)
                 result.append(hex[Int(byte >> 4)])
                 result.append(hex[Int(byte & 0x0F)])

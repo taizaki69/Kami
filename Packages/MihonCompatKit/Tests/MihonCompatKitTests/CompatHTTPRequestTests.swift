@@ -166,6 +166,107 @@ final class CompatHTTPRequestTests: XCTestCase {
         ))
     }
 
+    func testHttpUrlBuilderPreservesOrderAndEncodesQueryComponents() throws {
+        let (vm, bridge) = try makeVM()
+        let companion = try XCTUnwrap(bridge.staticFields["Lokhttp3/HttpUrl;->Companion"])
+        let url = try invoke(
+            bridge, vm,
+            class: "Lokhttp3/HttpUrl$Companion;", "get",
+            prototype: "(Ljava/lang/String;)Lokhttp3/HttpUrl;",
+            args: [companion, HostBridge.string("https://example.test/api?existing=1")]
+        )
+        let builder = try invoke(
+            bridge, vm,
+            class: "Lokhttp3/HttpUrl;", "newBuilder",
+            prototype: "()Lokhttp3/HttpUrl$Builder;",
+            args: [url]
+        )
+        for (name, value) in [("action", "search"), ("q", "hero & +/?")] {
+            _ = try invoke(
+                bridge, vm,
+                class: "Lokhttp3/HttpUrl$Builder;", "addQueryParameter",
+                prototype: "(Ljava/lang/String;Ljava/lang/String;)Lokhttp3/HttpUrl$Builder;",
+                args: [builder, HostBridge.string(name), HostBridge.string(value)]
+            )
+        }
+        let built = try invoke(
+            bridge, vm,
+            class: "Lokhttp3/HttpUrl$Builder;", "build",
+            prototype: "()Lokhttp3/HttpUrl;",
+            args: [builder]
+        )
+        let rendered = try invoke(
+            bridge, vm,
+            class: "Lokhttp3/HttpUrl;", "toString",
+            prototype: "()Ljava/lang/String;",
+            args: [built]
+        )
+
+        XCTAssertEqual(
+            vmStringValue(rendered),
+            "https://example.test/api?existing=1&action=search&q=hero%20%26%20%2B%2F%3F"
+        )
+    }
+
+    func testHttpUrlBuilderRejectsOversizedPercentEncodedQuery() throws {
+        let (vm, bridge) = try makeVM()
+        let companion = try XCTUnwrap(bridge.staticFields["Lokhttp3/HttpUrl;->Companion"])
+        let url = try invoke(
+            bridge, vm,
+            class: "Lokhttp3/HttpUrl$Companion;", "get",
+            prototype: "(Ljava/lang/String;)Lokhttp3/HttpUrl;",
+            args: [companion, HostBridge.string("https://example.test/api")]
+        )
+        let builder = try invoke(
+            bridge, vm,
+            class: "Lokhttp3/HttpUrl;", "newBuilder",
+            prototype: "()Lokhttp3/HttpUrl$Builder;",
+            args: [url]
+        )
+
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Lokhttp3/HttpUrl$Builder;", "addQueryParameter",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Lokhttp3/HttpUrl$Builder;",
+            args: [
+                builder,
+                HostBridge.string("q"),
+                HostBridge.string(String(repeating: " ", count: 3_000)),
+            ]
+        ))
+    }
+
+    func testKotlinInstantParseOrNullReturnsEpochMilliseconds() throws {
+        let (vm, bridge) = try makeVM()
+        let companion = try XCTUnwrap(
+            bridge.staticFields["Lkotlin/time/Instant;->Companion"]
+        )
+        let parsed = try invoke(
+            bridge, vm,
+            class: "Lkotlin/time/Instant$Companion;", "parseOrNull",
+            prototype: "(Ljava/lang/CharSequence;)Lkotlin/time/Instant;",
+            args: [companion, HostBridge.string("1970-01-01T00:00:01.234Z")]
+        )
+        let milliseconds = try invoke(
+            bridge, vm,
+            class: "Lkotlin/time/Instant;", "toEpochMilliseconds",
+            prototype: "()J",
+            args: [parsed]
+        )
+        guard case let .long(value) = milliseconds else {
+            return XCTFail("expected epoch milliseconds")
+        }
+        XCTAssertEqual(value, 1_234)
+
+        let invalid = try invoke(
+            bridge, vm,
+            class: "Lkotlin/time/Instant$Companion;", "parseOrNull",
+            prototype: "(Ljava/lang/CharSequence;)Lkotlin/time/Instant;",
+            args: [companion, HostBridge.string("not-an-instant")]
+        )
+        XCTAssertTrue(invalid.isNull)
+    }
+
     func testHostBridgeRejectsMalformedRequestInputs() throws {
         let (vm, bridge) = try makeVM()
         let urlCompanion = try XCTUnwrap(bridge.staticFields["Lokhttp3/HttpUrl;->Companion"])
@@ -306,6 +407,73 @@ final class CompatHTTPRequestTests: XCTestCase {
         ))
     }
 
+    func testKotlinDistinctPreservesFirstOccurrenceOrder() throws {
+        let (vm, bridge) = try makeVM()
+        let values = RVal.arr(ArrInstance(
+            elemDescriptor: "Ljava/lang/Object;",
+            elements: [
+                HostBridge.string("Manga"),
+                HostBridge.string("Action"),
+                HostBridge.string("Manga"),
+                HostBridge.string("Drama"),
+                HostBridge.string("Action"),
+            ]
+        ))
+        let list = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "listOf",
+            prototype: "([Ljava/lang/Object;)Ljava/util/List;",
+            isStatic: true,
+            args: [values]
+        )
+        let distinct = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "distinct",
+            prototype: "(Ljava/lang/Iterable;)Ljava/util/List;",
+            isStatic: true,
+            args: [list]
+        )
+
+        for (index, expected) in ["Manga", "Action", "Drama"].enumerated() {
+            let value = try invoke(
+                bridge, vm,
+                class: "Ljava/util/List;", "get",
+                prototype: "(I)Ljava/lang/Object;",
+                args: [distinct, .int(Int32(index))]
+            )
+            XCTAssertEqual(vmStringValue(value), expected)
+        }
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Ljava/util/List;", "get",
+            prototype: "(I)Ljava/lang/Object;",
+            args: [distinct, .int(3)]
+        ))
+    }
+
+    func testKotlinDistinctRejectsExcessiveQuadraticWork() throws {
+        let (vm, bridge) = try makeVM()
+        let values = RVal.arr(ArrInstance(
+            elemDescriptor: "Ljava/lang/Object;",
+            elements: (0...4_000).map { HostBridge.string("value-\($0)") }
+        ))
+        let list = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "listOf",
+            prototype: "([Ljava/lang/Object;)Ljava/util/List;",
+            isStatic: true,
+            args: [values]
+        )
+
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "distinct",
+            prototype: "(Ljava/lang/Iterable;)Ljava/util/List;",
+            isStatic: true,
+            args: [list]
+        ))
+    }
+
     func testKotlinSubstringDefaultHelpersMatchDelimiterSemantics() throws {
         let (vm, bridge) = try makeVM()
         let prototype = "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ljava/lang/String;"
@@ -335,6 +503,25 @@ final class CompatHTTPRequestTests: XCTestCase {
         )
         XCTAssertEqual(vmStringValue(before), "{\"id\":42}; suffix")
 
+        let charPrototype = "(Ljava/lang/String;CLjava/lang/String;ILjava/lang/Object;)Ljava/lang/String;"
+        let chapterPath = HostBridge.string("hero/7#chapter-7")
+        let afterLast = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "substringAfterLast$default",
+            prototype: charPrototype,
+            isStatic: true,
+            args: [chapterPath, .int(35), .null, .int(0x02), .null]
+        )
+        let beforeLast = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "substringBeforeLast$default",
+            prototype: charPrototype,
+            isStatic: true,
+            args: [chapterPath, .int(35), .null, .int(0x02), .null]
+        )
+        XCTAssertEqual(vmStringValue(afterLast), "chapter-7")
+        XCTAssertEqual(vmStringValue(beforeLast), "hero/7")
+
         let missing = try invoke(
             bridge, vm,
             class: "Lkotlin/text/StringsKt;", "substringAfter$default",
@@ -349,6 +536,38 @@ final class CompatHTTPRequestTests: XCTestCase {
             ]
         )
         XCTAssertEqual(vmStringValue(missing), "unchanged")
+    }
+
+    func testKotlinNullableStringEqualsHonorsIgnoreCase() throws {
+        let (vm, bridge) = try makeVM()
+        let prototype = "(Ljava/lang/String;Ljava/lang/String;Z)Z"
+
+        func equals(_ left: RVal, _ right: RVal, ignoreCase: Bool) throws -> Int32 {
+            let value = try invoke(
+                bridge, vm,
+                class: "Lkotlin/text/StringsKt;", "equals",
+                prototype: prototype,
+                isStatic: true,
+                args: [left, right, .int(ignoreCase ? 1 : 0)]
+            )
+            guard case let .int(result) = value else {
+                throw VMError.verify("expected Kotlin boolean result")
+            }
+            return result
+        }
+
+        XCTAssertEqual(try equals(.null, .null, ignoreCase: true), 1)
+        XCTAssertEqual(try equals(.null, HostBridge.string("manga"), ignoreCase: true), 0)
+        XCTAssertEqual(try equals(
+            HostBridge.string("MANGA"),
+            HostBridge.string("manga"),
+            ignoreCase: false
+        ), 0)
+        XCTAssertEqual(try equals(
+            HostBridge.string("MANGA"),
+            HostBridge.string("manga"),
+            ignoreCase: true
+        ), 1)
     }
 
     func testKotlinSplitRegexAndAffixHelpersMatchPagePathSemantics() throws {

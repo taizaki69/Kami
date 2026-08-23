@@ -21,6 +21,12 @@
       "sha256": "f5338a90f9b9b40c27a2106ceb1e0c94713c38208998fd735bfabda18934fab6"
     },
     {
+      "name": "kawiimanga",
+      "package": "eu.kanade.tachiyomi.extension.ar.kawiimanga",
+      "version": "1.6.1",
+      "sha256": "9e6110b8d1946180e948d3a890347529a5889e636ca6a001170cd206f74dd52a"
+    },
+    {
       "name": "aosp-v3-original",
       "sourceRevision": "platform/tools/apksig@184702d9d18877edf9e5296c4e191cf0aa2b5fbb",
       "license": "Apache-2.0",

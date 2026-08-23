@@ -84,6 +84,31 @@ public struct PinnedInterpretedSource: KamiSource {
         )
     }
 
+    /// Loads the exact current Kawii Manga 1.6.1 artifact through production transport.
+    public static func kawiiManga161(
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        let profile = PinnedInterpretedProfile.kawiiManga161
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: profile.networkIdentity,
+            policy: transportPolicy
+        )
+        return try Self(profile: profile, apkBytes: apkBytes, transport: transport)
+    }
+
+    /// Injection seam for deterministic Kawii Manga tests.
+    public static func kawiiManga161(
+        apkBytes: [UInt8],
+        transport: any CompatHTTPTransport
+    ) throws -> Self {
+        try Self(
+            profile: .kawiiManga161,
+            apkBytes: apkBytes,
+            transport: transport
+        )
+    }
+
     fileprivate init(
         profile: PinnedInterpretedProfile,
         apkBytes: [UInt8],
@@ -227,7 +252,7 @@ public enum InterpretedExtensionProfileCatalog {
         versionName: String,
         versionCode: Int64
     ) -> PinnedInterpretedProfile? {
-        let profiles: [PinnedInterpretedProfile] = [.batCave169]
+        let profiles: [PinnedInterpretedProfile] = [.batCave169, .kawiiManga161]
         return profiles.first {
             $0.packageName == packageName &&
                 $0.versionName == versionName &&
@@ -308,6 +333,44 @@ private struct PinnedInterpretedProfile: Sendable {
             prototype: "(Leu/kanade/tachiyomi/source/model/SChapter;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
         )
     )
+
+    static let kawiiManga161 = PinnedInterpretedProfile(
+        identifier: "kawii-manga-1.6.1",
+        networkIdentity: "eu.kanade.tachiyomi.extension.ar.kawiimanga@1.6.1",
+        sha256: "9e6110b8d1946180e948d3a890347529a5889e636ca6a001170cd206f74dd52a",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+        maximumAPKBytes: 64 * 1024 * 1024,
+        packageName: "eu.kanade.tachiyomi.extension.ar.kawiimanga",
+        versionName: "1.6.1",
+        versionCode: 1,
+        extensionLibVersion: "1.6",
+        entryClassName: "eu.kanade.tachiyomi.extension.ar.kawiimanga.ExtensionGenerated",
+        entryClassDescriptor: "Leu/kanade/tachiyomi/extension/ar/kawiimanga/ExtensionGenerated;",
+        expectedName: "Kawii Manga",
+        expectedLanguage: "ar",
+        expectedBaseURL: "https://kawaiimanga.org",
+        supportsLatest: true,
+        popular: ExactInterpretedMethod(
+            name: "getPopularManga",
+            prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+        ),
+        latest: ExactInterpretedMethod(
+            name: "getLatestUpdates",
+            prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+        ),
+        search: ExactInterpretedMethod(
+            name: "getSearchManga",
+            prototype: "(ILjava/lang/String;Leu/kanade/tachiyomi/source/model/FilterList;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+        ),
+        mangaUpdate: ExactInterpretedMethod(
+            name: "getMangaUpdate",
+            prototype: "(Leu/kanade/tachiyomi/source/model/SManga;Ljava/util/List;ZZLkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+        ),
+        pages: ExactInterpretedMethod(
+            name: "getPageList",
+            prototype: "(Leu/kanade/tachiyomi/source/model/SChapter;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+        )
+    )
 }
 
 private actor PinnedInterpretedRuntime {
@@ -360,7 +423,7 @@ private actor PinnedInterpretedRuntime {
         guard dex.classIndexByDescriptor[profile.entryClassDescriptor] != nil else {
             throw PinnedInterpretedSourceError.missingEntryClass(profile: profile.identifier)
         }
-        guard let sourceAPIWrapperDescriptor = Self.inheritedSourceAPIWrapper(
+        guard let sourceAPIWrapperDescriptor = Self.sourceAPIWrapper(
             dex: dex,
             entryClassDescriptor: profile.entryClassDescriptor,
             requiredMethods: [profile.search, profile.mangaUpdate]
@@ -583,10 +646,11 @@ private actor PinnedInterpretedRuntime {
     }
 
     /// R8 may rename a source's abstract implementation workers, but the
-    /// inherited app-facing `KeiSource` methods remain public and stable. Walk
-    /// only the entry class's local superclass chain and require one concrete,
-    /// public, non-static declaration of every measured wrapper method.
-    private static func inheritedSourceAPIWrapper(
+    /// app-facing `KeiSource` methods remain public and stable. R8 may keep the
+    /// wrapper in a superclass or vertically merge it into the generated entry
+    /// class, so walk only that local chain and require one concrete, public,
+    /// non-static declaration of every measured wrapper method.
+    private static func sourceAPIWrapper(
         dex: DexFile,
         entryClassDescriptor: String,
         requiredMethods: [ExactInterpretedMethod]
@@ -594,16 +658,13 @@ private actor PinnedInterpretedRuntime {
         guard let entryIndex = dex.classIndexByDescriptor[entryClassDescriptor] else {
             return nil
         }
-        var superclassIndex = dex.classDefs[entryIndex].superclassIndex
+        var classIndex: Int? = entryIndex
         var visited: Set<String> = []
 
-        while superclassIndex >= 0, superclassIndex < dex.typeDescriptors.count {
-            let descriptor = dex.typeDescriptors[superclassIndex]
-            guard visited.insert(descriptor).inserted,
-                  let classIndex = dex.classIndexByDescriptor[descriptor] else {
-                return nil
-            }
-            let definition = dex.classDefs[classIndex]
+        while let currentIndex = classIndex {
+            let definition = dex.classDefs[currentIndex]
+            let descriptor = definition.descriptor
+            guard visited.insert(descriptor).inserted else { return nil }
             let hasRequiredMethods = requiredMethods.allSatisfy { required in
                 let matches = definition.virtualMethods.filter { encoded in
                     let reference = dex.methodIds[encoded.methodIndex]
@@ -619,7 +680,10 @@ private actor PinnedInterpretedRuntime {
                 return isPublic && !isStatic && !isAbstract && method.codeOffset != 0
             }
             if hasRequiredMethods { return descriptor }
-            superclassIndex = definition.superclassIndex
+            let superclassIndex = definition.superclassIndex
+            guard superclassIndex >= 0,
+                  superclassIndex < dex.typeDescriptors.count else { return nil }
+            classIndex = dex.classIndexByDescriptor[dex.typeDescriptors[superclassIndex]]
         }
         return nil
     }

@@ -84,6 +84,11 @@ download \
   "https://github.com/keiyoushi/extensions/releases/download/a18924b/tachiyomi-en.batcave-v1.6.9.apk" \
   "f5338a90f9b9b40c27a2106ceb1e0c94713c38208998fd735bfabda18934fab6"
 
+download \
+  kawiimanga \
+  "https://github.com/keiyoushi/extensions/releases/download/a76c957-0/tachiyomi-ar.kawiimanga-v1.6.1.apk" \
+  "9e6110b8d1946180e948d3a890347529a5889e636ca6a001170cd206f74dd52a"
+
 # Small Apache-2.0 Android Open Source Project apksig conformance fixtures,
 # pinned to one source revision. They cover schemes absent from the extension
 # sample without checking generated binaries into Kami.

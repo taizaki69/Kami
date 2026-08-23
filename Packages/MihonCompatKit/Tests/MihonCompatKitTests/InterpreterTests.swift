@@ -1322,6 +1322,26 @@ final class InterpreterTests: XCTestCase {
         }
     }
 
+    func testVerifierAcceptsUnreachablePayloadAlignmentNOP() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "alignedPayload", registers: 1, ins: 0, outs: 0,
+            insns: [
+                0x1012,                   // pc 0: const/4 v0, 1
+                0x002b, 0x0005, 0x0000,   // pc 1: packed-switch v0, +5
+                0x000f,                   // pc 4: return v0
+                0x0000,                   // pc 5: unreachable alignment nop
+                0x0100, 0x0001,           // pc 6: packed payload, one case
+                0x0001, 0x0000,           // first key = 1
+                0x0003, 0x0000,           // target = switch pc + 3 = pc 4
+            ],
+            isStatic: true, returnType: "I"
+        ))
+
+        XCTAssertEqual(int(try run(builder, method: "alignedPayload")), 1)
+    }
+
     func testVerifierRejectsUnalignedPayload() throws {
         var builder = DexBuilder()
         builder.setClass("LTest;")

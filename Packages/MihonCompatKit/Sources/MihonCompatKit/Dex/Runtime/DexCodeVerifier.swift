@@ -129,30 +129,14 @@ enum DexCodeVerifier {
             )
         }
 
-        for instruction in instructions where hasFallthrough(instruction.opcode) {
-            let next = instruction.address + instruction.width
-            guard next < units.count, instructionStarts.contains(next) else {
-                let destination = next == units.count ? "end of code item" : "non-instruction pc \(next)"
-                throw VMError.verify(
-                    "opcode 0x\(String(instruction.opcode, radix: 16)) at pc \(instruction.address) "
-                        + "falls through to \(destination) in \(context)"
-                )
-            }
-            guard !moveExceptionEntries.contains(next) else {
-                throw VMError.verify(
-                    "opcode 0x\(String(instruction.opcode, radix: 16)) at pc \(instruction.address) "
-                        + "falls through into move-exception handler pc \(next) in \(context)"
-                )
-            }
-        }
-
+        var explicitControlFlowTargets = handlerEntries
         for branch in branches {
             guard branch.allowsZeroOffset || branch.offset != 0 else {
                 throw VMError.verify(
                     "\(branch.name) at pc \(branch.source) has forbidden zero offset in \(context)"
                 )
             }
-            _ = try executableTarget(
+            explicitControlFlowTargets.insert(try executableTarget(
                 source: branch.source,
                 offset: branch.offset,
                 name: branch.name,
@@ -161,7 +145,7 @@ enum DexCodeVerifier {
                 moveResultEntries: moveResultEntries,
                 codeUnitCount: units.count,
                 context: context
-            )
+            ))
         }
 
         for payloadReference in payloadReferences {
@@ -179,7 +163,7 @@ enum DexCodeVerifier {
                         + "does not reference a matching payload at pc \(payloadAddress) in \(context)"
                 )
             }
-            try verifyPayloadTargets(
+            explicitControlFlowTargets.formUnion(try verifyPayloadTargets(
                 payloadReference,
                 payloadAddress: payloadAddress,
                 units: units,
@@ -187,7 +171,39 @@ enum DexCodeVerifier {
                 moveExceptionEntries: moveExceptionEntries,
                 moveResultEntries: moveResultEntries,
                 context: context
-            )
+            ))
+        }
+
+        for instruction in instructions where hasFallthrough(instruction.opcode) {
+            let next = instruction.address + instruction.width
+            guard next < units.count, instructionStarts.contains(next) else {
+                // D8/R8 emits an unreachable nop after a terminal instruction
+                // when a following payload needs 32-bit alignment. It is an
+                // instruction in the DEX stream but cannot be entered by normal,
+                // branch, switch, or exception flow, so it is safe padding rather
+                // than an executable fallthrough into payload data.
+                let isUnreachablePayloadAlignmentNOP = instruction.opcode == 0
+                    && units[instruction.address] == 0
+                    && payloads[next] != nil
+                    && !explicitControlFlowTargets.contains(instruction.address)
+                    && instructionEndingAt[instruction.address].map {
+                        !hasFallthrough($0.opcode)
+                    } == true
+                if isUnreachablePayloadAlignmentNOP {
+                    continue
+                }
+                let destination = next == units.count ? "end of code item" : "non-instruction pc \(next)"
+                throw VMError.verify(
+                    "opcode 0x\(String(instruction.opcode, radix: 16)) at pc \(instruction.address) "
+                        + "falls through to \(destination) in \(context)"
+                )
+            }
+            guard !moveExceptionEntries.contains(next) else {
+                throw VMError.verify(
+                    "opcode 0x\(String(instruction.opcode, radix: 16)) at pc \(instruction.address) "
+                        + "falls through into move-exception handler pc \(next) in \(context)"
+                )
+            }
         }
         try DexRegisterVerifier.verify(
             code: code,
@@ -661,15 +677,16 @@ enum DexCodeVerifier {
         moveExceptionEntries: Set<Int>,
         moveResultEntries: Set<Int>,
         context: String
-    ) throws {
+    ) throws -> Set<Int> {
         switch reference.expectedKind {
         case .arrayData:
-            return
+            return []
         case .packedSwitch:
+            var targets: Set<Int> = []
             let size = Int(units[payloadAddress + 1])
             for index in 0..<size {
                 let offsetAddress = payloadAddress + 4 + index * 2
-                _ = try executableTarget(
+                targets.insert(try executableTarget(
                     source: reference.source,
                     offset: signed32(units[offsetAddress], units[offsetAddress + 1]),
                     name: "packed-switch case",
@@ -678,9 +695,11 @@ enum DexCodeVerifier {
                     moveResultEntries: moveResultEntries,
                     codeUnitCount: units.count,
                     context: context
-                )
+                ))
             }
+            return targets
         case .sparseSwitch:
+            var targets: Set<Int> = []
             let size = Int(units[payloadAddress + 1])
             var previousKey: Int32?
             for index in 0..<size {
@@ -695,7 +714,7 @@ enum DexCodeVerifier {
                 previousKey = key
 
                 let offsetAddress = payloadAddress + 2 + size * 2 + index * 2
-                _ = try executableTarget(
+                targets.insert(try executableTarget(
                     source: reference.source,
                     offset: signed32(units[offsetAddress], units[offsetAddress + 1]),
                     name: "sparse-switch case",
@@ -704,8 +723,9 @@ enum DexCodeVerifier {
                     moveResultEntries: moveResultEntries,
                     codeUnitCount: units.count,
                     context: context
-                )
+                ))
             }
+            return targets
         }
     }
 
