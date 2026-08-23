@@ -69,11 +69,14 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 ## Test evidence
 
-- 63/63 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 and in macOS
-  GitHub Actions with the corpus present.
+- 65/65 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+  corpus present. The last published macOS CI baseline passed 63/63 before the
+  receiver-dispatch regressions were added.
 - Seven real-extension constructor/getter tests require successful return
   values. The eighth requires the exact request value and `awaitSuccess`
   frontier; arbitrary VM failures are not accepted as progress.
+- Two focused receiver-dispatch tests prove virtual and interface invokes use
+  the runtime receiver's matching DEX implementation.
 - Two focused host-bridge tests verify the pure request model, Kotlin duration
   conversion, size bounds, scheme rejection, and CRLF-header rejection.
 - Parser hardening covers checksum/size/count limits and every truncated prefix

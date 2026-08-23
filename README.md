@@ -52,7 +52,7 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 63 tests run on Windows with Swift 6.3
+The compatibility kit and all 65 tests run on Windows with Swift 6.3
 (`scripts/windows_dev_test.bat`). GitHub Actions independently runs the pinned
 real-APK suite on macOS, compiles both Simulator and unsigned device targets,
 and publishes an unsigned IPA artifact. The `compat-audit` CLI produced the

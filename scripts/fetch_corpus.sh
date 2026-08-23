@@ -7,6 +7,17 @@ cd "$(dirname "$0")/.."
 CORPUS="Tests/corpus"
 mkdir -p "$CORPUS"
 
+sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    echo "No SHA-256 utility found (expected shasum or sha256sum)" >&2
+    return 1
+  fi
+}
+
 download() {
   local name="$1"
   local url="$2"
@@ -14,17 +25,16 @@ download() {
   local destination="$CORPUS/$name.apk"
   local temporary="$destination.tmp.$$"
 
-  if [[ -f "$destination" ]] &&
-      [[ "$(shasum -a 256 "$destination" | awk '{print $1}')" == "$expected" ]]; then
+  if [[ -f "$destination" ]] && [[ "$(sha256 "$destination")" == "$expected" ]]; then
     echo "==> $name.apk already matches the corpus lock"
     return
   fi
 
-  trap 'rm -f "$temporary"' EXIT
+  trap 'if [[ -n "${temporary:-}" ]]; then rm -f "$temporary"; fi' EXIT
   echo "==> Fetching $name.apk"
   curl --fail --location --silent --show-error --retry 3 \
     --proto '=https' --tlsv1.2 "$url" --output "$temporary"
-  echo "$expected  $temporary" | shasum -a 256 --check --status
+  [[ "$(sha256 "$temporary")" == "$expected" ]]
   mv "$temporary" "$destination"
   trap - EXIT
 }

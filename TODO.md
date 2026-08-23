@@ -33,8 +33,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 
 - [~] DEX interpreter core M1 — frames/registers, core opcode families,
       objects/arrays/fields/invokes/exceptions, exact prototype dispatch,
-      one-time class initialization, invoke validation, shared budgets,
-      cancellation, and real-APK execution to an HTTP boundary; full
+      receiver-directed virtual/interface selection across parsed DEX
+      superclasses, one-time class initialization, invoke validation, shared
+      budgets, cancellation, and real-APK execution to an HTTP boundary; full
       verifier/opcode conformance is tracked in
       [#1](https://github.com/taizaki69/Kami/issues/1)
 - [~] Kotlin/Java class library M2 — Object/String/StringBuilder, core Kotlin

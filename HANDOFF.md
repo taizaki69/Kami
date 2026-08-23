@@ -281,8 +281,9 @@ Known pre-existing hardening gaps that were not diff-introduced findings:
 - External-list/APK URL scheme, redirect, and destination policy is broad.
 - ZIP/DEX/string processing lacks a complete aggregate resource budget.
 - Catch-handler parsing retains unchecked large ULEB64-to-`Int` conversions.
-- Dynamic virtual/interface dispatch does not yet walk the receiver hierarchy;
-  exact prototype identity and static/instance kind are enforced.
+- Receiver-directed virtual/interface lookup walks parsed DEX superclasses;
+  complete interface-default and invoke-super resolution across hierarchy data
+  that leaves the parsed DEX remains open.
 - Instruction counts do not price expensive StringBuilder copying or every
   allocation/host-collection operation cost.
 
@@ -305,9 +306,10 @@ The rest of the product backlog is in `TODO.md`.
 1. Work only with the pinned local corpus while the signer gate is absent.
 2. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
    plus canonical unresolved diagnostics for every new bridge decision.
-3. Continue issue #1 with dynamic receiver-hierarchy dispatch and verifier
-   checks for code-item geometry, branch/payload targets, register types, and
-   exception-handler conversions. Invoke word-count checks are already in.
+3. Continue issue #1 with verifier checks for code-item geometry,
+   branch/payload targets, register types, and exception-handler conversions.
+   Receiver-directed virtual/interface lookup and invoke word-count checks are
+   already in; complete partially external hierarchy semantics remains open.
 4. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
 5. Continue issue #2 from the exact `OkHttpExtensionsKt.awaitSuccess` seam.

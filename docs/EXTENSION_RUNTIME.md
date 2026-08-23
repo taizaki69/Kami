@@ -59,9 +59,11 @@ Implemented slice:
   opcode families reached by the current fixtures.
 - Java-compatible integer divide/remainder edge cases, reference identity,
   exception handlers, recursion limit, cancellation, and trace callback.
-- Exact declaring-class/name/prototype dispatch for interpreted and host calls;
-  static/instance kind, invoke word count, caller `outs_size`, wide-register
-  pairing, logical argument categories, and return categories are checked.
+- Exact name/prototype dispatch for interpreted and host calls; virtual and
+  interface invokes select the most-specific matching method from the runtime
+  receiver's parsed DEX superclass chain. Static/instance kind, invoke word
+  count, caller `outs_size`, wide-register pairing, logical argument
+  categories, and return categories are checked.
 - One-time DEX class initialization, including DEX superclass initialization,
   before static use and allocation; failed initialization remains failed.
 - Precise unresolved-class/method/opcode failures instead of treating arbitrary
@@ -71,7 +73,8 @@ Implemented slice:
 Still required before M1 is complete:
 
 - Full instruction and payload coverage for the expanding corpus.
-- Dynamic virtual/interface target selection across the receiver hierarchy.
+- Complete interface-default and invoke-super resolution when hierarchy data
+  leaves the parsed DEX.
 - A pre-execution verifier for register types, targets, code-item layout, and
   exception tables.
 - Differential fixtures against AOSP-compatible reference execution.
@@ -133,7 +136,7 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 63 passing tests: 28 interpreter tests, 10 parser
+`MihonCompatKit` currently has 65 passing tests: 30 interpreter tests, 10 parser
 hardening tests (including every truncated prefix of generated DEX and ZIP
 fixtures), 8 pinned real-extension executions, 2 bounded request-model tests,
 and 15 reader/inflate/repository tests. GitHub Swift CI fetches the

@@ -12,6 +12,37 @@ struct FrameReturn: Error {
 /// Hard instruction budget + cancellation keep untrusted code from freezing
 /// the host; unresolved surface reports precisely (mission §21/§34).
 public final class DexInterpreter {
+    private enum InvocationKind {
+        case virtual
+        case superMethod
+        case direct
+        case staticMethod
+        case interface
+
+        init?(opcode: UInt8) {
+            switch opcode {
+            case 0x6e, 0x74: self = .virtual
+            case 0x6f, 0x75: self = .superMethod
+            case 0x70, 0x76: self = .direct
+            case 0x71, 0x77: self = .staticMethod
+            case 0x72, 0x78: self = .interface
+            default: return nil
+            }
+        }
+
+        var isStatic: Bool {
+            if case .staticMethod = self { return true }
+            return false
+        }
+
+        var usesReceiverDispatch: Bool {
+            switch self {
+            case .virtual, .interface: return true
+            case .superMethod, .direct, .staticMethod: return false
+            }
+        }
+    }
+
     public let dex: DexFile
     public let bridge: HostBridge
     public var maxInstructions: Int
@@ -673,6 +704,9 @@ public final class DexInterpreter {
 
         // ---- invoke (0x6e–0x72) ----
         case 0x6e...0x72: return try {
+            guard let invocationKind = InvocationKind(opcode: op) else {
+                throw VMError.verify("invalid invoke opcode 0x\(String(op, radix: 16))")
+            }
             let count = Int(u[0] >> 12)
             guard count <= 5 else { throw VMError.verify("invoke register count \(count)") }
             let g = Int(u[0] >> 8 & 0x0F)
@@ -683,7 +717,7 @@ public final class DexInterpreter {
                 methodIndex: Int(u[1]),
                 regs: regs,
                 indices: indices,
-                isStaticInvocation: op == 0x71,
+                kind: invocationKind,
                 callerOutsSize: Int(code.outsSize)
             )
             return pc + 3
@@ -691,6 +725,9 @@ public final class DexInterpreter {
 
         // ---- invoke/range (0x74–0x78) ----
         case 0x74...0x78: return try {
+            guard let invocationKind = InvocationKind(opcode: op) else {
+                throw VMError.verify("invalid invoke opcode 0x\(String(op, radix: 16))")
+            }
             // 3rc unit order: AA|op, method index, first register.
             let count = Int(u[0] >> 8)
             let start = Int(u[2])
@@ -699,7 +736,7 @@ public final class DexInterpreter {
                 methodIndex: Int(u[1]),
                 regs: regs,
                 indices: indices,
-                isStaticInvocation: op == 0x77,
+                kind: invocationKind,
                 callerOutsSize: Int(code.outsSize)
             )
             return pc + 3
@@ -841,9 +878,10 @@ public final class DexInterpreter {
     /// Invoke with explicit argument register words. The method prototype, not
     /// the runtime value tags, determines how those words are grouped.
     private func invokeRegs(methodIndex: Int, regs: [RVal], indices: [Int],
-                            isStaticInvocation: Bool, callerOutsSize: Int) throws {
+                            kind: InvocationKind, callerOutsSize: Int) throws {
         guard methodIndex >= 0, methodIndex < dex.methodIds.count else { throw VMError.verify("method index \(methodIndex)") }
         let ref = dex.methodIds[methodIndex]
+        let isStaticInvocation = kind.isStatic
         let hasReceiver = !isStaticInvocation
         let expectedWords = ref.prototype.parameterWordCount + (hasReceiver ? 1 : 0)
         guard indices.count == expectedWords else {
@@ -894,6 +932,40 @@ public final class DexInterpreter {
             word += descriptor == "J" || descriptor == "D" ? 2 : 1
         }
 
+        let receiverDescriptor = args.first.flatMap(Self.runtimeDescriptor)
+        if kind.usesReceiverDispatch, let receiverDescriptor,
+           let assignable = knownAssignable(receiverDescriptor, to: ref.declaringClass),
+           !assignable {
+            throw VMError.verify(
+                "\(ref.signature) receiver \(receiverDescriptor) is not assignable to \(ref.declaringClass)"
+            )
+        }
+
+        if kind.usesReceiverDispatch, let receiverDescriptor,
+           let (targetDef, targetMethod) = try resolveDexVirtualMethod(
+               receiverDescriptor: receiverDescriptor,
+               name: ref.name,
+               prototype: ref.prototype.descriptor
+           ) {
+            lastResult = try execute(def: targetDef, method: targetMethod, args: args)
+            return
+        }
+
+        if kind.usesReceiverDispatch, let receiverDescriptor,
+           let host = bridge.resolve(
+               class: receiverDescriptor,
+               ref.name,
+               prototype: ref.prototype.descriptor,
+               isStatic: false
+           ) {
+            lastResult = try validatedReturn(
+                try host(self, args),
+                prototype: ref.prototype,
+                context: ref.signature
+            )
+            return
+        }
+
         // Interpret only when the method's declaring class is actually
         // defined in this DEX; misparsed class_data indices must never
         // shadow host implementations (e.g. java.lang.Object.<init>).
@@ -920,6 +992,80 @@ public final class DexInterpreter {
             return
         }
         throw VMError.unresolvedMethod(class: ref.declaringClass, signature: ref.signature)
+    }
+
+    private static func runtimeDescriptor(_ value: RVal) -> String? {
+        switch value {
+        case let .obj(object): return object.dexType
+        case let .arr(array): return "[" + array.elemDescriptor
+        case let .host(box):
+            return "L" + box.className.replacingOccurrences(of: ".", with: "/") + ";"
+        case .null, .int, .long, .float, .double: return nil
+        }
+    }
+
+    /// Returns nil when the receiver's hierarchy leaves the parsed DEX and
+    /// assignability therefore cannot be proven locally.
+    private func knownAssignable(_ candidate: String, to expected: String) -> Bool? {
+        guard dex.classIndexByDescriptor[candidate] != nil else { return nil }
+        var pending = [candidate]
+        var visited: Set<String> = []
+        var reachedExternalType = false
+
+        while let descriptor = pending.popLast() {
+            if descriptor == expected { return true }
+            guard visited.insert(descriptor).inserted else { continue }
+            guard let classIndex = dex.classIndexByDescriptor[descriptor] else {
+                reachedExternalType = true
+                continue
+            }
+            let def = dex.classDefs[classIndex]
+            if def.superclassIndex >= 0,
+               def.superclassIndex < dex.typeDescriptors.count {
+                pending.append(dex.typeDescriptors[def.superclassIndex])
+            }
+            for interfaceIndex in def.interfaceIndices
+                where interfaceIndex >= 0 && interfaceIndex < dex.typeDescriptors.count {
+                pending.append(dex.typeDescriptors[interfaceIndex])
+            }
+        }
+        return reachedExternalType ? nil : false
+    }
+
+    /// Selects the most-specific DEX override for invoke-virtual/interface.
+    /// Exact name + prototype identity is retained at every hierarchy level.
+    private func resolveDexVirtualMethod(
+        receiverDescriptor: String,
+        name: String,
+        prototype: String
+    ) throws -> (DexFile.ClassDef, DexFile.EncodedMethod)? {
+        var current: String? = receiverDescriptor
+        var visited: Set<String> = []
+
+        while let descriptor = current {
+            guard visited.insert(descriptor).inserted else {
+                throw VMError.verify("cyclic class hierarchy while dispatching \(name)\(prototype)")
+            }
+            guard let classIndex = dex.classIndexByDescriptor[descriptor] else { return nil }
+            let def = dex.classDefs[classIndex]
+            let matches = def.virtualMethods.filter {
+                let candidate = dex.methodIds[$0.methodIndex]
+                return candidate.name == name && candidate.prototype.descriptor == prototype
+            }
+            guard matches.count <= 1 else {
+                throw VMError.verify("duplicate virtual method \(descriptor).\(name)\(prototype)")
+            }
+            if let method = matches.first {
+                guard method.accessFlags & 0x8 == 0 else {
+                    throw VMError.verify("static method encoded in virtual method list: \(descriptor).\(name)\(prototype)")
+                }
+                return (def, method)
+            }
+            guard def.superclassIndex >= 0,
+                  def.superclassIndex < dex.typeDescriptors.count else { return nil }
+            current = dex.typeDescriptors[def.superclassIndex]
+        }
+        return nil
     }
 
     // MARK: - arithmetic

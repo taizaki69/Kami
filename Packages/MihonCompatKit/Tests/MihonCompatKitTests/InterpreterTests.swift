@@ -416,6 +416,64 @@ final class InterpreterTests: XCTestCase {
 
     // MARK: invocation
 
+    func testInvokeVirtualSelectsOverrideFromRuntimeReceiver() throws {
+        var builder = DexBuilder()
+        let baseValue = builder.method(
+            classDescriptor: "LBase;", name: "value", shorty: "I", ret: "I"
+        )
+        builder.setClass("LChild;", superclass: "LBase;")
+        let childType = builder.typeIdx("LChild;")
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 7) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: Insn.newInstance(0, childType)
+                + Insn.invokeVirtual(baseValue, [0])
+                + Insn.moveResult(0)
+                + Insn.returnReg(0),
+            isStatic: true, returnType: "I"
+        ))
+
+        let dex = try DexFile(builder.build())
+        let vm = DexInterpreter(dex: dex)
+        XCTAssertEqual(
+            int(try vm.call(classDescriptor: "LChild;", method: "run")),
+            7
+        )
+    }
+
+    func testInvokeInterfaceSelectsImplementationFromRuntimeReceiver() throws {
+        var builder = DexBuilder()
+        let interfaceValue = builder.method(
+            classDescriptor: "LValue;", name: "value", shorty: "I", ret: "I"
+        )
+        builder.setClass("LImplementation;", interfaces: ["LValue;"])
+        let implementationType = builder.typeIdx("LImplementation;")
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const16Units(0, 9) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: Insn.newInstance(0, implementationType)
+                + Insn.invokeInterface(interfaceValue, [0])
+                + Insn.moveResult(0)
+                + Insn.returnReg(0),
+            isStatic: true, returnType: "I"
+        ))
+
+        let dex = try DexFile(builder.build())
+        let vm = DexInterpreter(dex: dex)
+        XCTAssertEqual(
+            int(try vm.call(classDescriptor: "LImplementation;", method: "run")),
+            9
+        )
+    }
+
     func testInstanceMethodAndField() throws {
         var b = DexBuilder()
         b.setClass("LTest;", fields: [("value", "I")])

@@ -12,19 +12,22 @@ struct DexBuilder {
         let outs: Int
         let insns: [UInt16]
         let isStatic: Bool
+        let isVirtual: Bool
         let returnType: String
         let parameters: [String]
         let tryItems: [UInt8]   // tries appended raw after insns (advanced tests)
 
         init(name: String, registers: Int, ins: Int, outs: Int,
              insns: [UInt16], isStatic: Bool, returnType: String = "V",
-             parameters: [String] = [], tryItems: [UInt8] = []) {
+             parameters: [String] = [], tryItems: [UInt8] = [],
+             isVirtual: Bool? = nil) {
             self.name = name
             self.registers = registers
             self.ins = ins
             self.outs = outs
             self.insns = insns
             self.isStatic = isStatic
+            self.isVirtual = isVirtual ?? (!isStatic && name != "<init>")
             self.returnType = returnType
             self.parameters = parameters
             self.tryItems = tryItems
@@ -37,6 +40,8 @@ struct DexBuilder {
     private var fieldIds: [(classIdx: UInt16, typeIdx: UInt16, nameIdx: Int)] = []
     private var methodIds: [(classIdx: UInt16, protoIdx: UInt16, nameIdx: Int)] = []
     private var classDescriptorIdx: Int = -1
+    private var superclassIdx: Int = -1
+    private var interfaceTypeIndices: [Int] = []
     private var methods: [MethodSpec] = []
     private var staticFields: [(name: String, type: String)] = []
     private var fields: [(name: String, type: String)] = []
@@ -84,9 +89,20 @@ struct DexBuilder {
     }
 
     mutating func setClass(_ descriptor: String,
+                           superclass: String? = nil,
+                           interfaces: [String] = [],
                            staticFields: [(String, String)] = [],
                            fields: [(String, String)] = []) {
         classDescriptorIdx = type(descriptor)
+        if let superclass {
+            superclassIdx = type(superclass)
+        } else {
+            superclassIdx = -1
+        }
+        interfaceTypeIndices = []
+        for interface in interfaces {
+            interfaceTypeIndices.append(type(interface))
+        }
         self.staticFields = []
         self.fields = []
         for field in staticFields {
@@ -171,6 +187,24 @@ struct DexBuilder {
             }
         }
 
+        var interfacesOff = 0
+        if !interfaceTypeIndices.isEmpty {
+            while (stringDataOff + stringData.count + protoData.count) % 4 != 0 {
+                protoData.append(0)
+            }
+            interfacesOff = stringDataOff + stringData.count + protoData.count
+            let count = UInt32(interfaceTypeIndices.count)
+            protoData.append(UInt8(count & 0xFF))
+            protoData.append(UInt8((count >> 8) & 0xFF))
+            protoData.append(UInt8((count >> 16) & 0xFF))
+            protoData.append(UInt8(count >> 24))
+            for interface in interfaceTypeIndices {
+                let value = UInt16(interface)
+                protoData.append(UInt8(value & 0xFF))
+                protoData.append(UInt8(value >> 8))
+            }
+        }
+
         struct CodeItemLayout {
             let offset: Int
             let headerSize: Int
@@ -185,13 +219,15 @@ struct DexBuilder {
             if m.insns.count % 2 == 1 { codeCursor += 2 } // u32-align next
         }
 
-        // class_data: S static fields, N instance fields, M direct methods,
-        // 0 virtual methods. Each field list has its own index-delta stream.
+        let directLayouts = codeLayouts.enumerated().filter { !$0.element.spec.isVirtual }
+        let virtualLayouts = codeLayouts.enumerated().filter { $0.element.spec.isVirtual }
+
+        // class_data: each field and method list has its own index-delta stream.
         var classDataHeader: [UInt8] = []
         classDataHeader.append(contentsOf: ULEB.encode(UInt64(staticFields.count)))
         classDataHeader.append(contentsOf: ULEB.encode(UInt64(fields.count)))   // instance fields
-        classDataHeader.append(contentsOf: ULEB.encode(UInt64(methods.count)))  // direct methods
-        classDataHeader.append(contentsOf: ULEB.encode(0))                      // virtual methods
+        classDataHeader.append(contentsOf: ULEB.encode(UInt64(directLayouts.count)))
+        classDataHeader.append(contentsOf: ULEB.encode(UInt64(virtualLayouts.count)))
         var classData: [UInt8] = []
 
         // class_data must encode ABSOLUTE code offsets; uleb width depends on
@@ -208,14 +244,27 @@ struct DexBuilder {
         }
         func buildClassData(codeBaseGuess: Int) -> [UInt8] {
             var out = classDataHeader + fieldEntries
-            var prevMethodIdx: UInt64 = 0
-            for (i, layout) in codeLayouts.enumerated() {
-                let methodIdx = UInt64(methodBase + i)
-                out.append(contentsOf: ULEB.encode(methodIdx - (i == 0 ? 0 : prevMethodIdx)))
-                prevMethodIdx = methodIdx
-                out.append(contentsOf: ULEB.encode(layout.spec.isStatic ? 0x8 : 0))
-                out.append(contentsOf: ULEB.encode(UInt64(codeBaseGuess + layout.offset)))
+            func appendMethods(
+                _ layouts: [(offset: Int, element: CodeItemLayout)],
+                to output: inout [UInt8]
+            ) {
+                var previousMethodIndex: UInt64 = 0
+                for (listIndex, item) in layouts.enumerated() {
+                    let methodIndex = UInt64(methodBase + item.offset)
+                    output.append(contentsOf: ULEB.encode(
+                        methodIndex - (listIndex == 0 ? 0 : previousMethodIndex)
+                    ))
+                    previousMethodIndex = methodIndex
+                    let flags: UInt64 = item.element.spec.isStatic ? 0x8 :
+                        (item.element.spec.isVirtual ? 0x1 : 0)
+                    output.append(contentsOf: ULEB.encode(flags))
+                    output.append(contentsOf: ULEB.encode(
+                        UInt64(codeBaseGuess + item.element.offset)
+                    ))
+                }
             }
+            appendMethods(directLayouts, to: &out)
+            appendMethods(virtualLayouts, to: &out)
             return out
         }
         var guessedCodeBase = 0
@@ -269,12 +318,12 @@ struct DexBuilder {
         for f in fieldIds { u16(f.classIdx); u16(f.typeIdx); u32(UInt32(f.nameIdx)) }
         // method_ids
         for m in methodIds { u16(m.classIdx); u16(m.protoIdx); u32(UInt32(m.nameIdx)) }
-        // class_def: class, access, super(-1), ifaces(0), source(-1), ann(0),
+        // class_def: class, access, super, interfaces, source(-1), ann(0),
         //             class_data_off, static_values(0)
         u32(UInt32(classDescriptorIdx))
         u32(1)                     // PUBLIC
-        u32(0xFFFF_FFFF)
-        u32(0)
+        u32(superclassIdx >= 0 ? UInt32(superclassIdx) : 0xFFFF_FFFF)
+        u32(UInt32(interfacesOff))
         u32(0xFFFF_FFFF)
         u32(0)
         u32(UInt32(classDataOff))
@@ -374,6 +423,9 @@ enum Insn {
     }
     static func invokeVirtual(_ methodIdx: Int, _ regs: [Int]) -> [UInt16] {
         invokeKind(0x6e, methodIdx, regs)
+    }
+    static func invokeInterface(_ methodIdx: Int, _ regs: [Int]) -> [UInt16] {
+        invokeKind(0x72, methodIdx, regs)
     }
     static func invokeKind(_ opcode: UInt8, _ methodIdx: Int, _ regs: [Int]) -> [UInt16] {
         let a = regs.count
