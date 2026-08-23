@@ -6,8 +6,9 @@ import Foundation
 /// Dalvik registers do not carry runtime tags. The verifier must therefore
 /// prove that every reachable read has a compatible category before execution;
 /// otherwise malformed bytecode could exploit the interpreter's defensive
-/// zero/null fallbacks. This pass tracks category-1 primitives, wide pairs,
-/// references, the verifier-polymorphic zero constant, undefined values, and
+/// zero/null fallbacks. This pass tracks exact primitive families, narrow
+/// integral types, polymorphic constants, typed wide pairs, initialized and
+/// allocation-site-specific uninitialized references, undefined values, and
 /// merge conflicts. Exact resolved-class assignability is deliberately left to
 /// the reference-hierarchy verifier milestone.
 enum DexRegisterVerifier {
@@ -15,33 +16,72 @@ enum DexRegisterVerifier {
     static let maximumDataflowCells = 8_000_000
     static let maximumDataflowMerges = 8_000_000
 
+    private enum IntegralType: String {
+        case boolean
+        case byte
+        case char
+        case short
+        case integer = "int"
+    }
+
+    /// ART keeps bounded constant kinds so literals can be consumed as either
+    /// integral values or floats, while retaining legal narrow conversions.
+    private enum Constant32Type: String {
+        case zero
+        case boolean
+        case positiveByte = "positive-byte"
+        case positiveShort = "positive-short"
+        case char
+        case byte
+        case short
+        case integer = "int"
+    }
+
     private enum RegisterType: Equatable, CustomStringConvertible {
         case undefined
         case conflict
-        case zero
-        case category1
-        case wideLow
-        case wideHigh
+        case integral(IntegralType)
+        case constant32(Constant32Type)
+        case float
+        case longLow
+        case longHigh
+        case doubleLow
+        case doubleHigh
+        case constantWideLow
+        case constantWideHigh
         case reference(String?)
+        case uninitializedReference(descriptor: String, allocationPC: Int)
+        case uninitializedThis(String)
 
         var description: String {
             switch self {
             case .undefined: return "undefined"
             case .conflict: return "conflict"
-            case .zero: return "zero"
-            case .category1: return "category-1"
-            case .wideLow: return "wide-low"
-            case .wideHigh: return "wide-high"
+            case let .integral(type): return type.rawValue
+            case let .constant32(type): return "constant-\(type.rawValue)"
+            case .float: return "float"
+            case .longLow: return "long-low"
+            case .longHigh: return "long-high"
+            case .doubleLow: return "double-low"
+            case .doubleHigh: return "double-high"
+            case .constantWideLow: return "constant-wide-low"
+            case .constantWideHigh: return "constant-wide-high"
             case let .reference(descriptor): return descriptor ?? "reference"
+            case let .uninitializedReference(descriptor, allocationPC):
+                return "uninitialized \(descriptor)@\(allocationPC)"
+            case let .uninitializedThis(descriptor):
+                return "uninitialized-this \(descriptor)"
             }
         }
     }
 
     private struct RegisterLine: Equatable {
         var values: [RegisterType]
+        var thisInitialized: Bool
 
-        init(count: Int) {
+        init(count: Int, thisInitialized: Bool = true) {
             values = [RegisterType](repeating: .undefined, count: count)
+            self.thisInitialized = thisInitialized
         }
 
         mutating func write(_ type: RegisterType, to register: Int) {
@@ -49,22 +89,42 @@ enum DexRegisterVerifier {
             values[register] = type
         }
 
-        mutating func writeWide(to register: Int) {
+        mutating func writeWide(_ low: RegisterType, to register: Int) {
             invalidateWidePair(containing: register)
             invalidateWidePair(containing: register + 1)
-            values[register] = .wideLow
-            values[register + 1] = .wideHigh
+            values[register] = low
+            values[register + 1] = DexRegisterVerifier.highHalf(for: low)
+        }
+
+        mutating func copyWide(from source: Int, to destination: Int) {
+            writeWide(values[source], to: destination)
+        }
+
+        mutating func markInitialized(_ uninitialized: RegisterType) {
+            let descriptor: String
+            switch uninitialized {
+            case let .uninitializedReference(value, _), let .uninitializedThis(value):
+                descriptor = value
+            default:
+                preconditionFailure("markInitialized requires an uninitialized reference")
+            }
+            for index in values.indices where values[index] == uninitialized {
+                values[index] = .reference(descriptor)
+            }
+            if case .uninitializedThis = uninitialized {
+                thisInitialized = true
+            }
         }
 
         private mutating func invalidateWidePair(containing register: Int) {
             guard register >= 0, register < values.count else { return }
-            if values[register] == .wideLow,
+            if DexRegisterVerifier.isWideLow(values[register]),
                register + 1 < values.count,
-               values[register + 1] == .wideHigh {
+               DexRegisterVerifier.isWidePair(values[register], values[register + 1]) {
                 values[register + 1] = .undefined
-            } else if values[register] == .wideHigh,
+            } else if DexRegisterVerifier.isWideHigh(values[register]),
                       register > 0,
-                      values[register - 1] == .wideLow {
+                      DexRegisterVerifier.isWidePair(values[register - 1], values[register]) {
                 values[register - 1] = .undefined
             }
         }
@@ -79,16 +139,22 @@ enum DexRegisterVerifier {
                 }
             }
             for index in values.indices {
-                switch values[index] {
-                case .wideLow where index + 1 >= values.count || values[index + 1] != .wideHigh:
+                if DexRegisterVerifier.isWideLow(values[index]),
+                   index + 1 >= values.count
+                    || !DexRegisterVerifier.isWidePair(values[index], values[index + 1]) {
                     values[index] = .conflict
                     changed = true
-                case .wideHigh where index == 0 || values[index - 1] != .wideLow:
+                } else if DexRegisterVerifier.isWideHigh(values[index]),
+                          index == 0
+                            || !DexRegisterVerifier.isWidePair(values[index - 1], values[index]) {
                     values[index] = .conflict
                     changed = true
-                default:
-                    break
                 }
+            }
+            let mergedThisInitialized = thisInitialized && incoming.thisInitialized
+            if mergedThisInitialized != thisInitialized {
+                thisInitialized = mergedThisInitialized
+                changed = true
             }
             return changed
         }
@@ -264,7 +330,12 @@ enum DexRegisterVerifier {
 
         var register = line.values.count - expectedWords
         if hasReceiver {
-            line.write(.reference(reference.declaringClass), to: register)
+            if reference.name == "<init>" && reference.declaringClass != "Ljava/lang/Object;" {
+                line.thisInitialized = false
+                line.write(.uninitializedThis(reference.declaringClass), to: register)
+            } else {
+                line.write(.reference(reference.declaringClass), to: register)
+            }
             register += 1
         }
         for descriptor in reference.prototype.parameters {
@@ -275,11 +346,26 @@ enum DexRegisterVerifier {
 
     private static func merge(_ lhs: RegisterType, _ rhs: RegisterType) -> RegisterType {
         if lhs == rhs { return lhs }
+        if lhs == .undefined || rhs == .undefined { return .undefined }
         if lhs == .conflict || rhs == .conflict { return .conflict }
         switch (lhs, rhs) {
-        case (.zero, .category1), (.category1, .zero):
-            return .category1
-        case let (.zero, .reference(descriptor)), let (.reference(descriptor), .zero):
+        case let (.constant32(left), .constant32(right)):
+            return .constant32(merge(left, right))
+        case (.constant32, .integral), (.integral, .constant32),
+             (.integral, .integral):
+            return mergeIntegral(lhs, rhs)
+        case (.constant32, .float), (.float, .constant32):
+            return .float
+        case (.constantWideLow, .longLow), (.longLow, .constantWideLow):
+            return .longLow
+        case (.constantWideHigh, .longHigh), (.longHigh, .constantWideHigh):
+            return .longHigh
+        case (.constantWideLow, .doubleLow), (.doubleLow, .constantWideLow):
+            return .doubleLow
+        case (.constantWideHigh, .doubleHigh), (.doubleHigh, .constantWideHigh):
+            return .doubleHigh
+        case let (.constant32(.zero), .reference(descriptor)),
+             let (.reference(descriptor), .constant32(.zero)):
             return .reference(descriptor)
         case (.reference, .reference):
             return .reference(nil)
@@ -288,14 +374,66 @@ enum DexRegisterVerifier {
         }
     }
 
+    private static func merge(_ lhs: Constant32Type, _ rhs: Constant32Type) -> Constant32Type {
+        let left = constantRange(lhs)
+        let right = constantRange(rhs)
+        return constantType(minimum: min(left.lowerBound, right.lowerBound),
+                            maximum: max(left.upperBound, right.upperBound))
+    }
+
+    private static func constantRange(_ type: Constant32Type) -> ClosedRange<Int64> {
+        switch type {
+        case .zero: return 0...0
+        case .boolean: return 0...1
+        case .positiveByte: return 0...127
+        case .positiveShort: return 0...32_767
+        case .char: return 0...65_535
+        case .byte: return -128...127
+        case .short: return -32_768...32_767
+        case .integer: return Int64(Int32.min)...Int64(Int32.max)
+        }
+    }
+
+    private static func constantType(minimum: Int64, maximum: Int64) -> Constant32Type {
+        if minimum >= 0 {
+            if maximum == 0 { return .zero }
+            if maximum <= 1 { return .boolean }
+            if maximum <= 127 { return .positiveByte }
+            if maximum <= 32_767 { return .positiveShort }
+            if maximum <= 65_535 { return .char }
+        } else {
+            if minimum >= -128, maximum <= 127 { return .byte }
+            if minimum >= -32_768, maximum <= 32_767 { return .short }
+        }
+        return .integer
+    }
+
+    private static func constantType(for value: Int32) -> Constant32Type {
+        constantType(minimum: Int64(value), maximum: Int64(value))
+    }
+
+    private static func mergeIntegral(_ lhs: RegisterType, _ rhs: RegisterType) -> RegisterType {
+        if isBoolean(lhs), isBoolean(rhs) { return .integral(.boolean) }
+        if isByte(lhs), isByte(rhs) { return .integral(.byte) }
+        if isShort(lhs), isShort(rhs) { return .integral(.short) }
+        if isChar(lhs), isChar(rhs) { return .integral(.char) }
+        return .integral(.integer)
+    }
+
     private static func wordCount(for descriptor: String) -> Int {
         descriptor == "J" || descriptor == "D" ? 2 : 1
     }
 
     private static func descriptorType(_ descriptor: String, context: String) throws -> RegisterType {
         switch descriptor {
-        case "Z", "B", "C", "S", "I", "F": return .category1
-        case "J", "D": return .wideLow
+        case "Z": return .integral(.boolean)
+        case "B": return .integral(.byte)
+        case "C": return .integral(.char)
+        case "S": return .integral(.short)
+        case "I": return .integral(.integer)
+        case "F": return .float
+        case "J": return .longLow
+        case "D": return .doubleLow
         case let value where isReferenceDescriptor(value): return .reference(value)
         default: throw VMError.verify("invalid value descriptor \(descriptor) in \(context)")
         }
@@ -308,11 +446,32 @@ enum DexRegisterVerifier {
         context: String
     ) throws {
         let type = try descriptorType(descriptor, context: context)
-        if type == .wideLow {
-            line.writeWide(to: register)
+        if isWideLow(type) {
+            line.writeWide(type, to: register)
         } else {
             line.write(type, to: register)
         }
+    }
+
+    private static func highHalf(for low: RegisterType) -> RegisterType {
+        switch low {
+        case .longLow: return .longHigh
+        case .doubleLow: return .doubleHigh
+        case .constantWideLow: return .constantWideHigh
+        default: preconditionFailure("invalid wide low half \(low)")
+        }
+    }
+
+    private static func isWideLow(_ type: RegisterType) -> Bool {
+        type == .longLow || type == .doubleLow || type == .constantWideLow
+    }
+
+    private static func isWideHigh(_ type: RegisterType) -> Bool {
+        type == .longHigh || type == .doubleHigh || type == .constantWideHigh
+    }
+
+    private static func isWidePair(_ low: RegisterType, _ high: RegisterType) -> Bool {
+        isWideLow(low) && high == highHalf(for: low)
     }
 
     private static func isReferenceDescriptor(_ descriptor: String) -> Bool {
@@ -519,32 +678,37 @@ enum DexRegisterVerifier {
         let first = units[pc]
 
         func category1(_ register: Int, _ label: String) throws {
-            guard line.values[register] == .category1 || line.values[register] == .zero else {
-                throw typeError(register, expected: "category-1", actual: line.values[register], label: label, pc: pc, context: context)
-            }
+            try requireCategory1(line: line, register: register, label: label, pc: pc, context: context)
         }
-        func wide(_ register: Int, _ label: String) throws {
-            guard register + 1 < line.values.count,
-                  line.values[register] == .wideLow,
-                  line.values[register + 1] == .wideHigh else {
-                throw typeError(register, expected: "wide pair", actual: line.values[register], label: label, pc: pc, context: context)
-            }
+        func integral(_ register: Int, _ label: String) throws {
+            try requireIntegral(line: line, register: register, label: label, pc: pc, context: context)
+        }
+        func floating(_ register: Int, _ label: String) throws {
+            try requireFloat(line: line, register: register, label: label, pc: pc, context: context)
+        }
+        func wide(_ register: Int, _ label: String, expected: RegisterType? = nil) throws {
+            try requireWide(
+                line: line, register: register, expectedLow: expected,
+                label: label, pc: pc, context: context
+            )
         }
         func reference(_ register: Int, _ label: String) throws {
-            switch line.values[register] {
-            case .reference, .zero: return
-            default:
-                throw typeError(register, expected: "reference", actual: line.values[register], label: label, pc: pc, context: context)
-            }
+            try requireReference(
+                line: line, register: register, allowUninitialized: false,
+                label: label, pc: pc, context: context
+            )
+        }
+        func copyableReference(_ register: Int, _ label: String) throws {
+            try requireReference(
+                line: line, register: register, allowUninitialized: true,
+                label: label, pc: pc, context: context
+            )
         }
         func compatible(_ register: Int, descriptor: String, label: String) throws {
-            let expected = try descriptorType(descriptor, context: context)
-            switch expected {
-            case .category1: try category1(register, label)
-            case .wideLow: try wide(register, label)
-            case .reference: try reference(register, label)
-            default: preconditionFailure("descriptorType returned non-value type")
-            }
+            try require(
+                line: line, register: register, descriptor: descriptor,
+                label: label, pc: pc, context: context
+            )
         }
 
         switch op {
@@ -557,10 +721,10 @@ enum DexRegisterVerifier {
         case 0x04, 0x05, 0x06:
             let (destination, source) = moveRegisters(op: op, first: first, units: units, pc: pc)
             try wide(source, "move-wide source")
-            line.writeWide(to: destination)
+            line.copyWide(from: source, to: destination)
         case 0x07, 0x08, 0x09:
             let (destination, source) = moveRegisters(op: op, first: first, units: units, pc: pc)
-            try reference(source, "move-object source")
+            try copyableReference(source, "move-object source")
             line.write(line.values[source], to: destination)
         case 0x0a...0x0c:
             guard let producer = instructionEndingAt[pc] else {
@@ -577,8 +741,8 @@ enum DexRegisterVerifier {
             }
             let destination = Int(first >> 8)
             let producedType = try descriptorType(produced, context: context)
-            let matches = (op == 0x0a && producedType == .category1)
-                || (op == 0x0b && producedType == .wideLow)
+            let matches = (op == 0x0a && isCategory1(producedType))
+                || (op == 0x0b && isWideLow(producedType))
                 || (op == 0x0c && {
                     if case .reference = producedType { return true }
                     return false
@@ -592,17 +756,19 @@ enum DexRegisterVerifier {
         case 0x0d:
             line.write(.reference("Ljava/lang/Throwable;"), to: Int(first >> 8))
         case 0x0e:
+            try verifyConstructorReturn(line: line, method: method, dex: dex, pc: pc, context: context)
             guard dex.methodIds[method.methodIndex].prototype.returnType == "V" else {
                 throw VMError.verify("return-void at pc \(pc) in non-void \(context)")
             }
         case 0x0f, 0x10, 0x11:
+            try verifyConstructorReturn(line: line, method: method, dex: dex, pc: pc, context: context)
             let descriptor = dex.methodIds[method.methodIndex].prototype.returnType
             guard descriptor != "V" else {
                 throw VMError.verify("value return at pc \(pc) in void \(context)")
             }
             let expected = try descriptorType(descriptor, context: context)
-            let opcodeMatches = (op == 0x0f && expected == .category1)
-                || (op == 0x10 && expected == .wideLow)
+            let opcodeMatches = (op == 0x0f && isCategory1(expected))
+                || (op == 0x10 && isWideLow(expected))
                 || (op == 0x11 && {
                     if case .reference = expected { return true }
                     return false
@@ -616,15 +782,19 @@ enum DexRegisterVerifier {
         case 0x12:
             let nibble = Int8(bitPattern: UInt8(first >> 12 & 0x0f))
             let literal = (nibble << 4) >> 4
-            line.write(literal == 0 ? .zero : .category1, to: Int(first >> 8 & 0x0f))
+            line.write(.constant32(constantType(for: Int32(literal))), to: Int(first >> 8 & 0x0f))
         case 0x13...0x15:
-            let isZero: Bool
-            if op == 0x13 { isZero = units[pc + 1] == 0 }
-            else if op == 0x14 { isZero = units[pc + 1] == 0 && units[pc + 2] == 0 }
-            else { isZero = units[pc + 1] == 0 }
-            line.write(isZero ? .zero : .category1, to: Int(first >> 8))
+            let literal: Int32
+            if op == 0x13 {
+                literal = Int32(Int16(bitPattern: units[pc + 1]))
+            } else if op == 0x14 {
+                literal = signed32(units[pc + 1], units[pc + 2])
+            } else {
+                literal = Int32(bitPattern: UInt32(units[pc + 1]) << 16)
+            }
+            line.write(.constant32(constantType(for: literal)), to: Int(first >> 8))
         case 0x16...0x19:
-            line.writeWide(to: Int(first >> 8))
+            line.writeWide(.constantWideLow, to: Int(first >> 8))
         case 0x1a, 0x1b:
             line.write(.reference("Ljava/lang/String;"), to: Int(first >> 8))
         case 0x1c:
@@ -646,19 +816,25 @@ enum DexRegisterVerifier {
             guard isReferenceDescriptor(descriptor) else {
                 throw VMError.verify("instance-of at pc \(pc) targets non-reference \(descriptor) in \(context)")
             }
-            line.write(.category1, to: Int(first >> 8 & 0x0f))
+            line.write(.integral(.boolean), to: Int(first >> 8 & 0x0f))
         case 0x21:
             let source = Int(first >> 12)
             try arrayReference(source, line: line, label: "array-length operand", pc: pc, context: context)
-            line.write(.category1, to: Int(first >> 8 & 0x0f))
+            line.write(.integral(.integer), to: Int(first >> 8 & 0x0f))
         case 0x22:
             let descriptor = dex.typeDescriptors[Int(units[pc + 1])]
             guard descriptor.hasPrefix("L"), descriptor.hasSuffix(";") else {
                 throw VMError.verify("new-instance at pc \(pc) targets non-class \(descriptor) in \(context)")
             }
-            line.write(.reference(descriptor), to: Int(first >> 8))
+            let allocation = RegisterType.uninitializedReference(descriptor: descriptor, allocationPC: pc)
+            guard !line.values.contains(allocation) else {
+                throw VMError.verify(
+                    "new-instance at pc \(pc) reuses an outstanding uninitialized allocation in \(context)"
+                )
+            }
+            line.write(allocation, to: Int(first >> 8))
         case 0x23:
-            try category1(Int(first >> 12), "new-array size")
+            try integral(Int(first >> 12), "new-array size")
             let descriptor = dex.typeDescriptors[Int(units[pc + 1])]
             guard descriptor.hasPrefix("[") else {
                 throw VMError.verify("new-array at pc \(pc) targets non-array \(descriptor) in \(context)")
@@ -696,15 +872,19 @@ enum DexRegisterVerifier {
         case 0x28...0x2a:
             break
         case 0x2b, 0x2c:
-            try category1(Int(first >> 8), "switch key")
+            try integral(Int(first >> 8), "switch key")
         case 0x2d, 0x2e:
-            try category1(Int(units[pc + 1] & 0xff), "float compare lhs")
-            try category1(Int(units[pc + 1] >> 8), "float compare rhs")
-            line.write(.category1, to: Int(first >> 8))
-        case 0x2f...0x31:
-            try wide(Int(units[pc + 1] & 0xff), "wide compare lhs")
-            try wide(Int(units[pc + 1] >> 8), "wide compare rhs")
-            line.write(.category1, to: Int(first >> 8))
+            try floating(Int(units[pc + 1] & 0xff), "float compare lhs")
+            try floating(Int(units[pc + 1] >> 8), "float compare rhs")
+            line.write(.integral(.integer), to: Int(first >> 8))
+        case 0x2f, 0x30:
+            try wide(Int(units[pc + 1] & 0xff), "double compare lhs", expected: .doubleLow)
+            try wide(Int(units[pc + 1] >> 8), "double compare rhs", expected: .doubleLow)
+            line.write(.integral(.integer), to: Int(first >> 8))
+        case 0x31:
+            try wide(Int(units[pc + 1] & 0xff), "long compare lhs", expected: .longLow)
+            try wide(Int(units[pc + 1] >> 8), "long compare rhs", expected: .longLow)
+            line.write(.integral(.integer), to: Int(first >> 8))
         case 0x32, 0x33:
             let lhs = Int(first >> 8 & 0x0f)
             let rhs = Int(first >> 12)
@@ -714,21 +894,27 @@ enum DexRegisterVerifier {
                 )
             }
         case 0x34...0x37:
-            try category1(Int(first >> 8 & 0x0f), "if lhs")
-            try category1(Int(first >> 12), "if rhs")
+            try integral(Int(first >> 8 & 0x0f), "if lhs")
+            try integral(Int(first >> 12), "if rhs")
         case 0x38, 0x39:
             let register = Int(first >> 8)
-            guard isCategory1(line.values[register]) || isReference(line.values[register]) else {
-                throw typeError(register, expected: "category-1 or reference", actual: line.values[register], label: "if operand", pc: pc, context: context)
+            guard isIntegral(line.values[register]) || isReference(line.values[register]) else {
+                throw typeError(register, expected: "integral or reference", actual: line.values[register], label: "if operand", pc: pc, context: context)
             }
         case 0x3a...0x3d:
-            try category1(Int(first >> 8), "if operand")
+            try integral(Int(first >> 8), "if operand")
         case 0x44...0x51:
             try transferArrayAccess(op: op, first: first, units: units, pc: pc, line: &line, context: context)
         case 0x52...0x6d:
-            try transferFieldAccess(op: op, first: first, units: units, pc: pc, line: &line, dex: dex, context: context)
+            try transferFieldAccess(
+                op: op, first: first, units: units, pc: pc, line: &line,
+                method: method, dex: dex, context: context
+            )
         case 0x6e...0x72, 0x74...0x78:
-            try verifyInvocation(op: op, first: first, units: units, pc: pc, line: line, dex: dex, context: context)
+            try verifyInvocation(
+                op: op, first: first, units: units, pc: pc, line: &line,
+                dex: dex, context: context
+            )
         case 0x7b...0x8f:
             try transferUnary(op: op, first: first, line: &line, pc: pc, context: context)
         case 0x90...0xcf:
@@ -743,8 +929,8 @@ enum DexRegisterVerifier {
                 destination = Int(first >> 8)
                 source = Int(units[pc + 1] & 0xff)
             }
-            try category1(source, "literal operation source")
-            line.write(.category1, to: destination)
+            try integral(source, "literal operation source")
+            line.write(.integral(.integer), to: destination)
         case 0xfa...0xfd:
             // These formats are structurally/register-bounds checked, but the
             // interpreter does not execute them yet. Keep any eventual
@@ -843,7 +1029,7 @@ enum DexRegisterVerifier {
         first: UInt16,
         units: [UInt16],
         pc: Int,
-        line: RegisterLine,
+        line: inout RegisterLine,
         dex: DexFile,
         context: String
     ) throws {
@@ -851,6 +1037,18 @@ enum DexRegisterVerifier {
         let reference = dex.methodIds[methodIndex]
         let registers = registerList(op: op, first: first, units: units, pc: pc)
         let isStatic = op == 0x71 || op == 0x77
+        let isDirect = op == 0x70 || op == 0x76
+        let isConstructor = reference.name == "<init>"
+        if isConstructor, !isDirect {
+            throw VMError.verify(
+                "constructor \(reference.signature) at pc \(pc) must use invoke-direct in \(context)"
+            )
+        }
+        if reference.name.hasPrefix("<"), !isConstructor {
+            throw VMError.verify(
+                "special method \(reference.signature) cannot be explicitly invoked at pc \(pc) in \(context)"
+            )
+        }
         let expectedWords = reference.prototype.parameterWordCount + (isStatic ? 0 : 1)
         guard registers.count == expectedWords else {
             throw VMError.verify(
@@ -859,39 +1057,45 @@ enum DexRegisterVerifier {
             )
         }
 
-        func requireReference(_ register: Int, label: String) throws {
-            guard isReference(line.values[register]) else {
-                throw typeError(register, expected: "reference", actual: line.values[register], label: label, pc: pc, context: context)
-            }
-        }
-        func requireDescriptor(_ register: Int, descriptor: String, label: String) throws {
-            let expected = try descriptorType(descriptor, context: context)
-            switch expected {
-            case .category1:
-                guard isCategory1(line.values[register]) else {
-                    throw typeError(register, expected: "category-1", actual: line.values[register], label: label, pc: pc, context: context)
-                }
-            case .wideLow:
-                guard register + 1 < line.values.count,
-                      line.values[register] == .wideLow,
-                      line.values[register + 1] == .wideHigh else {
-                    throw typeError(register, expected: "wide pair", actual: line.values[register], label: label, pc: pc, context: context)
-                }
-            case .reference:
-                try requireReference(register, label: label)
-            default:
-                preconditionFailure("non-value descriptor")
-            }
-        }
-
         var word = 0
+        var constructorReceiver: RegisterType?
         if !isStatic {
-            try requireReference(registers[0], label: "invoke receiver")
+            let register = registers[0]
+            let receiver = line.values[register]
+            if isConstructor {
+                guard isUninitializedReference(receiver) else {
+                    throw typeError(
+                        register,
+                        expected: "uninitialized constructor receiver",
+                        actual: receiver,
+                        label: "invoke receiver",
+                        pc: pc,
+                        context: context
+                    )
+                }
+                constructorReceiver = receiver
+            } else {
+                try requireReference(
+                    line: line,
+                    register: register,
+                    allowUninitialized: false,
+                    label: "invoke receiver",
+                    pc: pc,
+                    context: context
+                )
+            }
             word = 1
         }
         for (argument, descriptor) in reference.prototype.parameters.enumerated() {
             let register = registers[word]
-            try requireDescriptor(register, descriptor: descriptor, label: "invoke argument \(argument)")
+            try require(
+                line: line,
+                register: register,
+                descriptor: descriptor,
+                label: "invoke argument \(argument)",
+                pc: pc,
+                context: context
+            )
             if wordCount(for: descriptor) == 2 {
                 guard word + 1 < registers.count, registers[word + 1] == register + 1 else {
                     throw VMError.verify(
@@ -901,6 +1105,9 @@ enum DexRegisterVerifier {
             }
             word += wordCount(for: descriptor)
         }
+        if let constructorReceiver {
+            line.markInitialized(constructorReceiver)
+        }
     }
 
     private static func transferFieldAccess(
@@ -909,6 +1116,7 @@ enum DexRegisterVerifier {
         units: [UInt16],
         pc: Int,
         line: inout RegisterLine,
+        method: DexFile.EncodedMethod,
         dex: DexFile,
         context: String
     ) throws {
@@ -918,13 +1126,30 @@ enum DexRegisterVerifier {
         let register = isInstance ? Int(first >> 8 & 0x0f) : Int(first >> 8)
         if isInstance {
             let receiver = Int(first >> 12)
-            guard isReference(line.values[receiver]) else {
-                throw typeError(receiver, expected: "reference", actual: line.values[receiver], label: "field receiver", pc: pc, context: context)
+            let receiverType = line.values[receiver]
+            if !isReference(receiverType) {
+                let enclosing = dex.methodIds[method.methodIndex]
+                let ownUninitializedThis: Bool
+                if case let .uninitializedThis(descriptor) = receiverType {
+                    ownUninitializedThis = enclosing.name == "<init>"
+                        && enclosing.declaringClass == descriptor
+                        && field.declaringClass == descriptor
+                } else {
+                    ownUninitializedThis = false
+                }
+                guard ownUninitializedThis else {
+                    throw typeError(
+                        receiver,
+                        expected: "initialized reference or own uninitialized-this",
+                        actual: receiverType,
+                        label: "field receiver",
+                        pc: pc,
+                        context: context
+                    )
+                }
             }
         }
-        let opcodeCategory = fieldCategory(for: op)
-        let descriptorCategory = try descriptorType(field.type, context: context)
-        guard sameStorageCategory(opcodeCategory, descriptorCategory) else {
+        guard fieldOpcode(op, matches: field.type) else {
             throw VMError.verify(
                 "field opcode 0x\(String(op, radix: 16)) at pc \(pc) does not match \(field.type) in \(context)"
             )
@@ -936,17 +1161,23 @@ enum DexRegisterVerifier {
         }
     }
 
-    private static func fieldCategory(for opcode: UInt8) -> RegisterType {
+    private static func fieldOpcode(_ opcode: UInt8, matches descriptor: String) -> Bool {
+        let normalized: UInt8
         switch opcode {
-        case 0x53, 0x5a, 0x61, 0x68: return .wideLow
-        case 0x54, 0x5b, 0x62, 0x69: return .reference(nil)
-        default: return .category1
+        case 0x52...0x58: normalized = opcode
+        case 0x59...0x5f: normalized = opcode - 7
+        case 0x60...0x66: normalized = opcode - 14
+        case 0x67...0x6d: normalized = opcode - 21
+        default: return false
         }
-    }
-
-    private static func sameStorageCategory(_ lhs: RegisterType, _ rhs: RegisterType) -> Bool {
-        switch (lhs, rhs) {
-        case (.category1, .category1), (.wideLow, .wideLow), (.reference, .reference): return true
+        switch normalized {
+        case 0x52: return descriptor == "I" || descriptor == "F"
+        case 0x53: return descriptor == "J" || descriptor == "D"
+        case 0x54: return isReferenceDescriptor(descriptor)
+        case 0x55: return descriptor == "Z"
+        case 0x56: return descriptor == "B"
+        case 0x57: return descriptor == "C"
+        case 0x58: return descriptor == "S"
         default: return false
         }
     }
@@ -963,7 +1194,7 @@ enum DexRegisterVerifier {
         let arrayRegister = Int(units[pc + 1] & 0xff)
         let indexRegister = Int(units[pc + 1] >> 8)
         try arrayReference(arrayRegister, line: line, label: "array operand", pc: pc, context: context)
-        try requireCategory1(line: line, register: indexRegister, label: "array index", pc: pc, context: context)
+        try requireIntegral(line: line, register: indexRegister, label: "array index", pc: pc, context: context)
 
         let descriptor: String?
         if case let .reference(value) = line.values[arrayRegister] { descriptor = value }
@@ -979,32 +1210,62 @@ enum DexRegisterVerifier {
         }
 
         if op <= 0x4a {
-            let output = arrayOpcodeCategory(op)
-            if output == .wideLow { line.writeWide(to: valueRegister) }
-            else if output == .reference(nil) {
-                line.write(.reference(component), to: valueRegister)
-            } else { line.write(.category1, to: valueRegister) }
+            let output = arrayGetType(op, component: component)
+            if isWideLow(output) { line.writeWide(output, to: valueRegister) }
+            else { line.write(output, to: valueRegister) }
         } else {
-            let expected = arrayOpcodeCategory(UInt8(op - 7))
-            switch expected {
-            case .category1:
-                try requireCategory1(line: line, register: valueRegister, label: "array value", pc: pc, context: context)
-            case .wideLow:
-                try requireWide(line: line, register: valueRegister, label: "array value", pc: pc, context: context)
-            case .reference:
-                guard isReference(line.values[valueRegister]) else {
-                    throw typeError(valueRegister, expected: "reference", actual: line.values[valueRegister], label: "array value", pc: pc, context: context)
-                }
-            default: break
+            if let component {
+                try require(
+                    line: line,
+                    register: valueRegister,
+                    descriptor: component,
+                    label: "array value",
+                    pc: pc,
+                    context: context
+                )
+            } else {
+                try requireArrayOpcodeValue(
+                    UInt8(op - 7),
+                    line: line,
+                    register: valueRegister,
+                    pc: pc,
+                    context: context
+                )
             }
         }
     }
 
-    private static func arrayOpcodeCategory(_ opcode: UInt8) -> RegisterType {
+    private static func arrayGetType(_ opcode: UInt8, component: String?) -> RegisterType {
         switch opcode {
-        case 0x45: return .wideLow
-        case 0x46: return .reference(nil)
-        default: return .category1
+        case 0x44: return component == "F" ? .float : .integral(.integer)
+        case 0x45: return component == "D" ? .doubleLow : .longLow
+        case 0x46: return .reference(component)
+        case 0x47: return .integral(.boolean)
+        case 0x48: return .integral(.byte)
+        case 0x49: return .integral(.char)
+        case 0x4a: return .integral(.short)
+        default: preconditionFailure("not an array-get opcode")
+        }
+    }
+
+    private static func requireArrayOpcodeValue(
+        _ opcode: UInt8,
+        line: RegisterLine,
+        register: Int,
+        pc: Int,
+        context: String
+    ) throws {
+        switch opcode {
+        case 0x44:
+            try requireCategory1(line: line, register: register, label: "array value", pc: pc, context: context)
+        case 0x45:
+            try requireWide(line: line, register: register, expectedLow: nil, label: "array value", pc: pc, context: context)
+        case 0x46:
+            try requireReference(line: line, register: register, allowUninitialized: false, label: "array value", pc: pc, context: context)
+        case 0x47...0x4a:
+            try requireIntegral(line: line, register: register, label: "array value", pc: pc, context: context)
+        default:
+            preconditionFailure("not an array-put opcode family")
         }
     }
 
@@ -1031,15 +1292,67 @@ enum DexRegisterVerifier {
     ) throws {
         let destination = Int(first >> 8 & 0x0f)
         let source = Int(first >> 12)
-        let sourceWide = [0x7d, 0x7e, 0x80, 0x84, 0x85, 0x86, 0x8a, 0x8b, 0x8c].contains(op)
-        let destinationWide = [0x7d, 0x7e, 0x80, 0x81, 0x83, 0x86, 0x88, 0x89, 0x8b].contains(op)
-        if sourceWide {
-            try requireWide(line: line, register: source, label: "unary source", pc: pc, context: context)
-        } else {
-            try requireCategory1(line: line, register: source, label: "unary source", pc: pc, context: context)
+        switch op {
+        case 0x7b, 0x7c:
+            try requireIntegral(line: line, register: source, label: "unary source", pc: pc, context: context)
+            line.write(.integral(.integer), to: destination)
+        case 0x7d, 0x7e:
+            try requireWide(line: line, register: source, expectedLow: .longLow, label: "unary source", pc: pc, context: context)
+            line.writeWide(.longLow, to: destination)
+        case 0x7f:
+            try requireFloat(line: line, register: source, label: "unary source", pc: pc, context: context)
+            line.write(.float, to: destination)
+        case 0x80:
+            try requireWide(line: line, register: source, expectedLow: .doubleLow, label: "unary source", pc: pc, context: context)
+            line.writeWide(.doubleLow, to: destination)
+        case 0x81:
+            try requireIntegral(line: line, register: source, label: "conversion source", pc: pc, context: context)
+            line.writeWide(.longLow, to: destination)
+        case 0x82:
+            try requireIntegral(line: line, register: source, label: "conversion source", pc: pc, context: context)
+            line.write(.float, to: destination)
+        case 0x83:
+            try requireIntegral(line: line, register: source, label: "conversion source", pc: pc, context: context)
+            line.writeWide(.doubleLow, to: destination)
+        case 0x84:
+            try requireWide(line: line, register: source, expectedLow: .longLow, label: "conversion source", pc: pc, context: context)
+            line.write(.integral(.integer), to: destination)
+        case 0x85:
+            try requireWide(line: line, register: source, expectedLow: .longLow, label: "conversion source", pc: pc, context: context)
+            line.write(.float, to: destination)
+        case 0x86:
+            try requireWide(line: line, register: source, expectedLow: .longLow, label: "conversion source", pc: pc, context: context)
+            line.writeWide(.doubleLow, to: destination)
+        case 0x87:
+            try requireFloat(line: line, register: source, label: "conversion source", pc: pc, context: context)
+            line.write(.integral(.integer), to: destination)
+        case 0x88:
+            try requireFloat(line: line, register: source, label: "conversion source", pc: pc, context: context)
+            line.writeWide(.longLow, to: destination)
+        case 0x89:
+            try requireFloat(line: line, register: source, label: "conversion source", pc: pc, context: context)
+            line.writeWide(.doubleLow, to: destination)
+        case 0x8a:
+            try requireWide(line: line, register: source, expectedLow: .doubleLow, label: "conversion source", pc: pc, context: context)
+            line.write(.integral(.integer), to: destination)
+        case 0x8b:
+            try requireWide(line: line, register: source, expectedLow: .doubleLow, label: "conversion source", pc: pc, context: context)
+            line.writeWide(.longLow, to: destination)
+        case 0x8c:
+            try requireWide(line: line, register: source, expectedLow: .doubleLow, label: "conversion source", pc: pc, context: context)
+            line.write(.float, to: destination)
+        case 0x8d:
+            try requireIntegral(line: line, register: source, label: "conversion source", pc: pc, context: context)
+            line.write(.integral(.byte), to: destination)
+        case 0x8e:
+            try requireIntegral(line: line, register: source, label: "conversion source", pc: pc, context: context)
+            line.write(.integral(.char), to: destination)
+        case 0x8f:
+            try requireIntegral(line: line, register: source, label: "conversion source", pc: pc, context: context)
+            line.write(.integral(.short), to: destination)
+        default:
+            preconditionFailure("not a unary opcode")
         }
-        if destinationWide { line.writeWide(to: destination) }
-        else { line.write(.category1, to: destination) }
     }
 
     private static func transferBinary(
@@ -1063,25 +1376,39 @@ enum DexRegisterVerifier {
             lhs = Int(units[pc + 1] & 0xff)
             rhs = Int(units[pc + 1] >> 8)
         }
-        if isWideBinaryOpcode(base) {
-            let opcodeLabel = "binary lhs for opcode 0x\(String(op, radix: 16))"
-            try requireWide(line: line, register: lhs, label: opcodeLabel, pc: pc, context: context)
+        if (0x90...0x9a).contains(base) {
+            try requireIntegral(line: line, register: lhs, label: "binary lhs", pc: pc, context: context)
+            try requireIntegral(line: line, register: rhs, label: "binary rhs", pc: pc, context: context)
+            if (0x95...0x97).contains(base), isBoolean(line.values[lhs]), isBoolean(line.values[rhs]) {
+                line.write(.integral(.boolean), to: destination)
+            } else {
+                line.write(.integral(.integer), to: destination)
+            }
+        } else if (0x9b...0xa5).contains(base) {
+            try requireWide(line: line, register: lhs, expectedLow: .longLow, label: "binary lhs", pc: pc, context: context)
             if isWideShiftOpcode(base) {
-                try requireCategory1(line: line, register: rhs, label: "shift distance", pc: pc, context: context)
+                try requireIntegral(line: line, register: rhs, label: "shift distance", pc: pc, context: context)
             } else {
                 try requireWide(
                     line: line,
                     register: rhs,
+                    expectedLow: .longLow,
                     label: "binary rhs for opcode 0x\(String(op, radix: 16))",
                     pc: pc,
                     context: context
                 )
             }
-            line.writeWide(to: destination)
+            line.writeWide(.longLow, to: destination)
+        } else if (0xa6...0xaa).contains(base) {
+            try requireFloat(line: line, register: lhs, label: "binary lhs", pc: pc, context: context)
+            try requireFloat(line: line, register: rhs, label: "binary rhs", pc: pc, context: context)
+            line.write(.float, to: destination)
+        } else if (0xab...0xaf).contains(base) {
+            try requireWide(line: line, register: lhs, expectedLow: .doubleLow, label: "binary lhs", pc: pc, context: context)
+            try requireWide(line: line, register: rhs, expectedLow: .doubleLow, label: "binary rhs", pc: pc, context: context)
+            line.writeWide(.doubleLow, to: destination)
         } else {
-            try requireCategory1(line: line, register: lhs, label: "binary lhs", pc: pc, context: context)
-            try requireCategory1(line: line, register: rhs, label: "binary rhs", pc: pc, context: context)
-            line.write(.category1, to: destination)
+            preconditionFailure("not a binary opcode")
         }
     }
 
@@ -1096,17 +1423,79 @@ enum DexRegisterVerifier {
     // MARK: - Shared type checks
 
     private static func isCategory1(_ type: RegisterType) -> Bool {
-        type == .category1 || type == .zero
+        if case .integral = type { return true }
+        if case .constant32 = type { return true }
+        return type == .float
+    }
+
+    private static func isIntegral(_ type: RegisterType) -> Bool {
+        if case .integral = type { return true }
+        if case .constant32 = type { return true }
+        return false
+    }
+
+    private static func isFloat(_ type: RegisterType) -> Bool {
+        type == .float || {
+            if case .constant32 = type { return true }
+            return false
+        }()
+    }
+
+    private static func isBoolean(_ type: RegisterType) -> Bool {
+        switch type {
+        case .integral(.boolean): return true
+        case let .constant32(kind):
+            let range = constantRange(kind)
+            return range.lowerBound >= 0 && range.upperBound <= 1
+        default: return false
+        }
+    }
+
+    private static func isByte(_ type: RegisterType) -> Bool {
+        switch type {
+        case .integral(.boolean), .integral(.byte): return true
+        case let .constant32(kind):
+            let range = constantRange(kind)
+            return range.lowerBound >= -128 && range.upperBound <= 127
+        default: return false
+        }
+    }
+
+    private static func isShort(_ type: RegisterType) -> Bool {
+        switch type {
+        case .integral(.boolean), .integral(.byte), .integral(.short): return true
+        case let .constant32(kind):
+            let range = constantRange(kind)
+            return range.lowerBound >= -32_768 && range.upperBound <= 32_767
+        default: return false
+        }
+    }
+
+    private static func isChar(_ type: RegisterType) -> Bool {
+        switch type {
+        case .integral(.boolean), .integral(.char): return true
+        case let .constant32(kind):
+            let range = constantRange(kind)
+            return range.lowerBound >= 0 && range.upperBound <= 65_535
+        default: return false
+        }
     }
 
     private static func isReference(_ type: RegisterType) -> Bool {
-        if type == .zero { return true }
+        if type == .constant32(.zero) { return true }
         if case .reference = type { return true }
         return false
     }
 
+    private static func isUninitializedReference(_ type: RegisterType) -> Bool {
+        switch type {
+        case .uninitializedReference, .uninitializedThis: return true
+        default: return false
+        }
+    }
+
     private static func equalityComparable(_ lhs: RegisterType, _ rhs: RegisterType) -> Bool {
-        (isCategory1(lhs) && isCategory1(rhs)) || (isReference(lhs) && isReference(rhs))
+        (isIntegral(lhs) && isIntegral(rhs)) || (isReference(lhs) && isReference(rhs))
     }
 
     private static func requireCategory1(
@@ -1121,17 +1510,84 @@ enum DexRegisterVerifier {
         }
     }
 
-    private static func requireWide(
+    private static func requireIntegral(
         line: RegisterLine,
         register: Int,
         label: String,
         pc: Int,
         context: String
     ) throws {
+        guard isIntegral(line.values[register]) else {
+            throw typeError(register, expected: "integral", actual: line.values[register], label: label, pc: pc, context: context)
+        }
+    }
+
+    private static func requireFloat(
+        line: RegisterLine,
+        register: Int,
+        label: String,
+        pc: Int,
+        context: String
+    ) throws {
+        guard isFloat(line.values[register]) else {
+            throw typeError(register, expected: "float", actual: line.values[register], label: label, pc: pc, context: context)
+        }
+    }
+
+    private static func requireWide(
+        line: RegisterLine,
+        register: Int,
+        expectedLow: RegisterType?,
+        label: String,
+        pc: Int,
+        context: String
+    ) throws {
         guard register + 1 < line.values.count,
-              line.values[register] == .wideLow,
-              line.values[register + 1] == .wideHigh else {
+              isWidePair(line.values[register], line.values[register + 1]) else {
             throw typeError(register, expected: "wide pair", actual: line.values[register], label: label, pc: pc, context: context)
+        }
+        let actual = line.values[register]
+        let matches: Bool
+        switch expectedLow {
+        case nil:
+            matches = true
+        case .longLow?:
+            matches = actual == .longLow || actual == .constantWideLow
+        case .doubleLow?:
+            matches = actual == .doubleLow || actual == .constantWideLow
+        default:
+            preconditionFailure("invalid expected wide type \(String(describing: expectedLow))")
+        }
+        guard matches else {
+            throw typeError(
+                register,
+                expected: expectedLow == .longLow ? "long pair" : "double pair",
+                actual: actual,
+                label: label,
+                pc: pc,
+                context: context
+            )
+        }
+    }
+
+    private static func requireReference(
+        line: RegisterLine,
+        register: Int,
+        allowUninitialized: Bool,
+        label: String,
+        pc: Int,
+        context: String
+    ) throws {
+        let actual = line.values[register]
+        guard isReference(actual) || (allowUninitialized && isUninitializedReference(actual)) else {
+            throw typeError(
+                register,
+                expected: allowUninitialized ? "reference" : "initialized reference",
+                actual: actual,
+                label: label,
+                pc: pc,
+                context: context
+            )
         }
     }
 
@@ -1145,14 +1601,19 @@ enum DexRegisterVerifier {
     ) throws {
         let expected = try descriptorType(descriptor, context: context)
         switch expected {
-        case .category1:
-            try requireCategory1(line: line, register: register, label: label, pc: pc, context: context)
-        case .wideLow:
-            try requireWide(line: line, register: register, label: label, pc: pc, context: context)
+        case .integral:
+            // ART intentionally treats invocation/field/return integral
+            // descriptors as one assignability family. The narrower kinds
+            // remain useful for merges and typed opcode results.
+            try requireIntegral(line: line, register: register, label: label, pc: pc, context: context)
+        case .float:
+            try requireFloat(line: line, register: register, label: label, pc: pc, context: context)
+        case .longLow:
+            try requireWide(line: line, register: register, expectedLow: .longLow, label: label, pc: pc, context: context)
+        case .doubleLow:
+            try requireWide(line: line, register: register, expectedLow: .doubleLow, label: label, pc: pc, context: context)
         case .reference:
-            guard isReference(line.values[register]) else {
-                throw typeError(register, expected: "reference", actual: line.values[register], label: label, pc: pc, context: context)
-            }
+            try requireReference(line: line, register: register, allowUninitialized: false, label: label, pc: pc, context: context)
         default:
             preconditionFailure("non-value descriptor")
         }
@@ -1165,11 +1626,34 @@ enum DexRegisterVerifier {
         pc: Int,
         context: String
     ) throws {
-        guard isReference(line.values[register]) else {
-            throw typeError(register, expected: "array reference", actual: line.values[register], label: label, pc: pc, context: context)
-        }
+        try requireReference(
+            line: line,
+            register: register,
+            allowUninitialized: false,
+            label: label,
+            pc: pc,
+            context: context
+        )
         if case let .reference(descriptor?) = line.values[register], !descriptor.hasPrefix("[") {
             throw typeError(register, expected: "array reference", actual: line.values[register], label: label, pc: pc, context: context)
+        }
+    }
+
+    private static func verifyConstructorReturn(
+        line: RegisterLine,
+        method: DexFile.EncodedMethod,
+        dex: DexFile,
+        pc: Int,
+        context: String
+    ) throws {
+        let reference = dex.methodIds[method.methodIndex]
+        guard reference.name == "<init>", reference.declaringClass != "Ljava/lang/Object;" else {
+            return
+        }
+        guard line.thisInitialized else {
+            throw VMError.verify(
+                "constructor returns at pc \(pc) before initializing this in \(context)"
+            )
         }
     }
 

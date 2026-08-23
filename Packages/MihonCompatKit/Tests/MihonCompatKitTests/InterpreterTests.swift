@@ -205,6 +205,9 @@ final class InterpreterTests: XCTestCase {
 
     func testInvokeRejectsStaticInstanceMismatchForDefinedMethod() throws {
         var builder = DexBuilder()
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
         builder.setClass("LTest;")
         builder.addMethod(.init(
             name: "target", registers: 1, ins: 0, outs: 0,
@@ -215,7 +218,8 @@ final class InterpreterTests: XCTestCase {
         builder.addMethod(.init(
             name: "run", registers: 1, ins: 0, outs: 1,
             insns: Insn.newInstance(0, testType)
-                + Insn.invokeVirtual(0, [0])
+                + Insn.invokeDirect(objectInit, [0])
+                + Insn.invokeVirtual(1, [0])
                 + Insn.returnVoid(),
             isStatic: true
         ))
@@ -592,7 +596,7 @@ final class InterpreterTests: XCTestCase {
                 return XCTFail("expected verification error, got \(error)")
             }
             XCTAssertTrue(message.contains("invoke argument 0 v0"), message)
-            XCTAssertTrue(message.contains("expected reference"), message)
+            XCTAssertTrue(message.contains("expected initialized reference"), message)
         }
     }
 
@@ -615,6 +619,200 @@ final class InterpreterTests: XCTestCase {
             }
             XCTAssertTrue(message.contains("return value v0"), message)
             XCTAssertTrue(message.contains("expected wide pair"), message)
+        }
+    }
+
+    func testRegisterVerifierRejectsFloatInIntegerOpcode() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "floatAsInt", registers: 2, ins: 0, outs: 0,
+            insns: Insn.const4Units(0, 1)
+                + [0x0082] // int-to-float v0, v0
+                + Insn.const4Units(1, 2)
+                + Insn.binop(0x90, 0, 0, 1) // add-int v0, v0, v1
+                + Insn.returnReg(0),
+            isStatic: true, returnType: "I"
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "floatAsInt")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("binary lhs v0"), message)
+            XCTAssertTrue(message.contains("has float, expected integral"), message)
+        }
+    }
+
+    func testRegisterVerifierDistinguishesLongAndDoublePairs() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "longAsDouble", registers: 3, ins: 0, outs: 0,
+            insns: Insn.const4Units(0, 1)
+                + [0x0181] // int-to-long v1, v0
+                + [0x0110], // return-wide v1
+            isStatic: true, returnType: "D"
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "longAsDouble")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("return value v1"), message)
+            XCTAssertTrue(message.contains("has long-low, expected double pair"), message)
+        }
+    }
+
+    func testRegisterVerifierAllowsPolymorphicNumericConstants() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "floatConstants", registers: 2, ins: 0, outs: 0,
+            insns: Insn.const4Units(0, 0)
+                + Insn.const4Units(1, 0)
+                + Insn.binop(0xa6, 0, 0, 1) // add-float
+                + Insn.returnReg(0),
+            isStatic: true, returnType: "F"
+        ))
+        builder.addMethod(.init(
+            name: "doubleConstants", registers: 4, ins: 0, outs: 0,
+            insns: [
+                0x0016, 0x0000, // const-wide/16 v0, 0
+                0x0216, 0x0000, // const-wide/16 v2, 0
+                0x00ab, 0x0200, // add-double v0, v0, v2
+                0x0010,         // return-wide v0
+            ],
+            isStatic: true, returnType: "D"
+        ))
+
+        XCTAssertEqual(float(try run(builder, method: "floatConstants")), 0)
+        XCTAssertEqual(double(try run(builder, method: "doubleConstants")), 0)
+    }
+
+    func testRegisterVerifierTracksConversionOutputType() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "convertedDouble", registers: 3, ins: 0, outs: 0,
+            insns: Insn.const4Units(0, 1)
+                + [0x0183] // int-to-double v1, v0
+                + [0x0110], // return-wide v1
+            isStatic: true, returnType: "D"
+        ))
+
+        XCTAssertEqual(double(try run(builder, method: "convertedDouble")), 1)
+    }
+
+    func testRegisterVerifierRejectsUninitializedReturn() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        let testType = builder.typeIdx("LTest;")
+        builder.addMethod(.init(
+            name: "uninitializedReturn", registers: 1, ins: 0, outs: 0,
+            insns: Insn.newInstance(0, testType) + Insn.returnObjectReg(0),
+            isStatic: true, returnType: "LTest;"
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "uninitializedReturn")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("return value v0"), message)
+            XCTAssertTrue(message.contains("uninitialized LTest;@0"), message)
+        }
+    }
+
+    func testRegisterVerifierConstructorInitializesEveryAlias() throws {
+        var builder = DexBuilder()
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass("LTest;")
+        let testType = builder.typeIdx("LTest;")
+        builder.addMethod(.init(
+            name: "initializedAlias", registers: 2, ins: 0, outs: 1,
+            insns: Insn.newInstance(0, testType)
+                + [0x0107] // move-object v1, v0
+                + Insn.invokeDirect(objectInit, [1])
+                + Insn.returnObjectReg(0),
+            isStatic: true, returnType: "LTest;"
+        ))
+
+        guard case let .obj(object) = try run(builder, method: "initializedAlias") else {
+            return XCTFail("expected object result")
+        }
+        XCTAssertEqual(object.dexType, "LTest;")
+    }
+
+    func testRegisterVerifierRejectsConstructorOnInitializedReference() throws {
+        var builder = DexBuilder()
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        let text = builder.string("already initialized")
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "doubleInit", registers: 1, ins: 0, outs: 1,
+            insns: Insn.constString(0, text)
+                + Insn.invokeDirect(objectInit, [0])
+                + Insn.returnVoid(),
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "doubleInit")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("expected uninitialized constructor receiver"), message)
+        }
+    }
+
+    func testRegisterVerifierRejectsConstructorReturnBeforeSuperCall() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;", superclass: "Ljava/lang/Object;")
+        builder.addMethod(.init(
+            name: "<init>", registers: 1, ins: 1, outs: 0,
+            insns: Insn.returnVoid(),
+            isStatic: false
+        ))
+        let dex = try DexFile(builder.build())
+        let vm = DexInterpreter(dex: dex)
+
+        XCTAssertThrowsError(try vm.instantiate(classDescriptor: "LTest;")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("before initializing this"), message)
+        }
+    }
+
+    func testRegisterVerifierRejectsInitializedUninitializedMerge() throws {
+        var builder = DexBuilder()
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass("LTest;")
+        let testType = builder.typeIdx("LTest;")
+        builder.addMethod(.init(
+            name: "partialInit", registers: 2, ins: 0, outs: 1,
+            insns: Insn.newInstance(0, testType) // pc 0...1
+                + Insn.const4Units(1, 0)         // pc 2
+                + Insn.ifEqz(1, 5)              // pc 3...4 -> pc 8
+                + Insn.invokeDirect(objectInit, [0]) // pc 5...7
+                + Insn.returnObjectReg(0),       // pc 8
+            isStatic: true, returnType: "LTest;"
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "partialInit")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("return value v0"), message)
+            XCTAssertTrue(
+                message.contains("uninitialized") || message.contains("conflict"),
+                message
+            )
         }
     }
 
@@ -874,24 +1072,26 @@ final class InterpreterTests: XCTestCase {
     func testVerifiedTypedExceptionHandlerExecutes() throws {
         var builder = DexBuilder()
         let exceptionType = builder.type("Ljava/lang/RuntimeException;")
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
         builder.setClass("LTest;")
         let handlers = [UInt8(1), UInt8(1)]
             + DexBuilder.ULEB.encode(UInt64(exceptionType))
-            + DexBuilder.ULEB.encode(5)
+            + DexBuilder.ULEB.encode(8)
         builder.addMethod(.init(
-            name: "typedCatch", registers: 2, ins: 0, outs: 0,
-            insns: [
-                0x0022, UInt16(exceptionType), // pc 0: new-instance v0
-                0x0027,                       // pc 2: throw v0
-                0x0012,                       // pc 3: normal result 0
-                0x000f,                       // pc 4: return v0
-                0x010d,                       // pc 5: move-exception v1
-                0x7012,                       // pc 6: caught result 7
-                0x000f,                       // pc 7: return v0
-            ],
+            name: "typedCatch", registers: 2, ins: 0, outs: 1,
+            insns: Insn.newInstance(0, exceptionType) // pc 0...1
+                + Insn.invokeDirect(objectInit, [0])  // pc 2...4
+                + Insn.throwReg(0)                    // pc 5
+                + Insn.const4Units(0, 0)              // pc 6
+                + Insn.returnReg(0)                   // pc 7
+                + [0x010d]                            // pc 8: move-exception v1
+                + Insn.const4Units(0, 7)              // pc 9
+                + Insn.returnReg(0),                  // pc 10
             isStatic: true, returnType: "I",
             triesCount: 1,
-            tryItems: tryItem(start: 2, count: 1, handlerOffset: 1) + handlers
+            tryItems: tryItem(start: 5, count: 1, handlerOffset: 1) + handlers
         ))
 
         XCTAssertEqual(int(try run(builder, method: "typedCatch")), 7)
@@ -1285,6 +1485,9 @@ final class InterpreterTests: XCTestCase {
         let baseValue = builder.method(
             classDescriptor: "LBase;", name: "value", shorty: "I", ret: "I"
         )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
         builder.setClass("LChild;", superclass: "LBase;")
         let childType = builder.typeIdx("LChild;")
         builder.addMethod(.init(
@@ -1295,6 +1498,7 @@ final class InterpreterTests: XCTestCase {
         builder.addMethod(.init(
             name: "run", registers: 1, ins: 0, outs: 1,
             insns: Insn.newInstance(0, childType)
+                + Insn.invokeDirect(objectInit, [0])
                 + Insn.invokeVirtual(baseValue, [0])
                 + Insn.moveResult(0)
                 + Insn.returnReg(0),
@@ -1314,6 +1518,9 @@ final class InterpreterTests: XCTestCase {
         let interfaceValue = builder.method(
             classDescriptor: "LValue;", name: "value", shorty: "I", ret: "I"
         )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
         builder.setClass("LImplementation;", interfaces: ["LValue;"])
         let implementationType = builder.typeIdx("LImplementation;")
         builder.addMethod(.init(
@@ -1324,6 +1531,7 @@ final class InterpreterTests: XCTestCase {
         builder.addMethod(.init(
             name: "run", registers: 1, ins: 0, outs: 1,
             insns: Insn.newInstance(0, implementationType)
+                + Insn.invokeDirect(objectInit, [0])
                 + Insn.invokeInterface(interfaceValue, [0])
                 + Insn.moveResult(0)
                 + Insn.returnReg(0),
@@ -1340,6 +1548,9 @@ final class InterpreterTests: XCTestCase {
 
     func testInstanceMethodAndField() throws {
         var b = DexBuilder()
+        let objectInit = b.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
         b.setClass("LTest;", fields: [("value", "I")])
         b.addMethod(.init(name: "getValue", registers: 2, ins: 1, outs: 0,
                           insns: Insn.iget(0, 1, 0) + Insn.returnReg(0), isStatic: false,
@@ -1347,9 +1558,10 @@ final class InterpreterTests: XCTestCase {
         let testTypeIdx = b.typeIdx("LTest;")
         b.addMethod(.init(name: "run", registers: 3, ins: 0, outs: 1,
                           insns: Insn.newInstance(0, testTypeIdx)
+                              + Insn.invokeDirect(objectInit, [0])
                               + Insn.const16Units(1, 42)
                               + Insn.iput(1, 0, 0)
-                              + Insn.invokeVirtual(0, [0])
+                              + Insn.invokeVirtual(1, [0])
                               + Insn.moveResult(1)
                               + Insn.returnReg(1),
                           isStatic: true, returnType: "I"))
@@ -1447,8 +1659,12 @@ final class InterpreterTests: XCTestCase {
         )
         let appendIdx = 0
         let toStringIdx = 1
+        let constructorIdx = b.method(
+            classDescriptor: "Ljava/lang/StringBuilder;", name: "<init>"
+        )
         b.addMethod(.init(name: "greet", registers: 2, ins: 0, outs: 2,
                           insns: Insn.newInstance(0, sbType)
+                              + Insn.invokeDirect(constructorIdx, [0])
                               + Insn.constString(1, b.string("Kami"))
                               + Insn.invokeVirtual(appendIdx, [0, 1])
                               + Insn.moveResultObject(0)
@@ -1526,10 +1742,14 @@ final class InterpreterTests: XCTestCase {
         b.setClass("LTest;", fields: [("x", "I")])
         b.method(classDescriptor: "LTest;", name: "<init>", shorty: "V", ret: "V")
         b.method(classDescriptor: "LTest;", name: "get", shorty: "I", ret: "I")
+        let objectInit = b.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
         // Incoming arguments occupy the final ins_size register words: v1=this.
-        b.addMethod(.init(name: "<init>", registers: 2, ins: 1, outs: 0,
+        b.addMethod(.init(name: "<init>", registers: 2, ins: 1, outs: 1,
                           insns: Insn.const4Units(0, 7)
                               + Insn.iput(0, 1, 0)
+                              + Insn.invokeDirect(objectInit, [1])
                               + Insn.returnVoid(),
                           isStatic: false))
         b.addMethod(.init(name: "get", registers: 2, ins: 1, outs: 0,
