@@ -89,6 +89,7 @@ public enum VMError: Error, CustomStringConvertible {
     case budgetExceeded(limit: Int)
     case cancelled
     case unresolvedMethod(class: String, signature: String)
+    case asyncExecutionRequired(class: String, signature: String)
     case ambiguousMethod(class: String, name: String, candidates: [String])
     case unresolvedClass(String)
     case unresolvedField(class: String, name: String)
@@ -99,6 +100,8 @@ public enum VMError: Error, CustomStringConvertible {
         case let .budgetExceeded(limit): return "instruction budget exceeded (\(limit)); possible runaway extension code"
         case .cancelled: return "execution cancelled"
         case let .unresolvedMethod(c, s): return "UNRESOLVED HOST METHOD: \(c).\(s)"
+        case let .asyncExecutionRequired(c, s):
+            return "ASYNC HOST METHOD REQUIRES callAsync: \(c).\(s)"
         case let .ambiguousMethod(c, name, candidates):
             return "AMBIGUOUS METHOD: \(c).\(name); specify one of \(candidates.joined(separator: ", "))"
         case let .unresolvedClass(c): return "UNRESOLVED CLASS: \(c)"

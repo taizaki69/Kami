@@ -5,6 +5,26 @@ import XCTest
 /// The corpus is fetched by `scripts/fetch_corpus.sh` (CI does this too);
 /// tests skip when the corpus is absent so unit runs stay deterministic.
 final class RealExtensionExecutionTests: XCTestCase {
+    private actor StaticTransport: CompatHTTPTransport {
+        nonisolated let sourceID = "batcave-test"
+        private let response: CompatHTTPResponse
+        private var recordedRequests: [CompatHTTPRequest] = []
+
+        init(response: CompatHTTPResponse) {
+            self.response = response
+        }
+
+        func execute(_ request: CompatHTTPRequest) async throws -> CompatHTTPResponse {
+            recordedRequests.append(request)
+            await Task.yield()
+            return response
+        }
+
+        func requests() -> [CompatHTTPRequest] {
+            recordedRequests
+        }
+    }
+
     private func corpusAPK(_ name: String) throws -> [UInt8] {
         let path = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // …/MihonCompatKitTests
@@ -19,12 +39,18 @@ final class RealExtensionExecutionTests: XCTestCase {
         return [UInt8](try Data(contentsOf: path))
     }
 
-    private func loadVM(_ apk: String) throws -> (DexInterpreter, ExtensionManifest) {
+    private func loadVM(
+        _ apk: String,
+        transport: (any CompatHTTPTransport)? = nil
+    ) throws -> (DexInterpreter, ExtensionManifest) {
         let bytes = try corpusAPK(apk)
         let manifest = try ExtensionManifest(apkBytes: bytes)
         let zip = try ZipArchive(bytes)
         let dex = try DexFile(try zip.data(named: "classes.dex"))
-        return (DexInterpreter(dex: dex), manifest)
+        return (
+            DexInterpreter(dex: dex, bridge: HostBridge.minimal(transport: transport)),
+            manifest
+        )
     }
 
     /// BatCave 1.6.9 (lib 1.6): getBaseUrl() = const-string/return-object —
@@ -129,6 +155,83 @@ final class RealExtensionExecutionTests: XCTestCase {
                 CompatHTTPFormField(name: "set_direction_sort", value: "dle_direction_cat_1"),
             ])
         ))
+    }
+
+    /// A deterministic fake response proves that the real suspend call crosses
+    /// the injected transport, resumes its complete DEX call stack, and reaches
+    /// the next honest compatibility boundary without live network traffic.
+    func testBatCavePopularResumesAfterTransportAndStopsAtJsoup() async throws {
+        let transport = StaticTransport(response: CompatHTTPResponse(
+            finalURL: "https://batcave.biz/comix/",
+            statusCode: 200,
+            headers: [CompatHTTPHeader(name: "Content-Type", value: "text/html; charset=utf-8")],
+            body: Array("<html><body></body></html>".utf8)
+        ))
+        let (vm, _) = try loadVM("batcave", transport: transport)
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = try vm.instantiate(classDescriptor: cls)
+
+        do {
+            _ = try await vm.callAsync(
+                classDescriptor: cls,
+                method: "getPopularManga",
+                prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+                args: [receiver, .int(1), .null]
+            )
+            XCTFail("expected the next exact parser boundary")
+        } catch let VMError.unresolvedMethod(classDescriptor, signature) {
+            XCTAssertEqual(classDescriptor, "Leu/kanade/tachiyomi/util/JsoupExtensionsKt;")
+            XCTAssertEqual(
+                signature,
+                "asJsoup$default(Lokhttp3/Response;Ljava/lang/String;ILjava/lang/Object;)Lorg/jsoup/nodes/Document;"
+            )
+        }
+
+        let expected = CompatHTTPRequest(
+            url: "https://batcave.biz/comix/",
+            method: "POST",
+            body: .form(fields: [
+                CompatHTTPFormField(name: "dlenewssortby", value: "rating"),
+                CompatHTTPFormField(name: "dledirection", value: "desc"),
+                CompatHTTPFormField(name: "set_new_sort", value: "dle_sort_cat_1"),
+                CompatHTTPFormField(name: "set_direction_sort", value: "dle_direction_cat_1"),
+            ])
+        )
+        let requests = await transport.requests()
+        XCTAssertEqual(requests, [expected])
+        XCTAssertEqual(vm.bridge.lastPreparedRequest, expected)
+    }
+
+    func testBatCaveAwaitSuccessRejectsNonSuccessfulHTTPStatus() async throws {
+        let transport = StaticTransport(response: CompatHTTPResponse(
+            finalURL: "https://batcave.biz/comix/",
+            statusCode: 503,
+            body: Array("unavailable".utf8)
+        ))
+        let (vm, _) = try loadVM("batcave", transport: transport)
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = try vm.instantiate(classDescriptor: cls)
+
+        do {
+            _ = try await vm.callAsync(
+                classDescriptor: cls,
+                method: "getPopularManga",
+                prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+                args: [receiver, .int(1), .null]
+            )
+            XCTFail("expected HttpException")
+        } catch let thrown as DEXThrowable {
+            guard case let .obj(object) = thrown.value else {
+                return XCTFail("expected host HttpException, got \(thrown)")
+            }
+            XCTAssertEqual(object.dexType, "Leu/kanade/tachiyomi/network/HttpException;")
+            guard case let .int(code)? = object.fields["code"] else {
+                return XCTFail("expected HttpException status code")
+            }
+            XCTAssertEqual(code, 503)
+        }
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.count, 1)
     }
 
     /// MangaDex 1.4.212: the factory entry class's REAL constructor executes

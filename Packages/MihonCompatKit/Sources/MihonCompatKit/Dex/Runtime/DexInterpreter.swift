@@ -5,6 +5,29 @@ struct FrameReturn: Error {
     let value: RVal
 }
 
+struct SuspendedDexFrame {
+    let definition: DexFile.ClassDef
+    let method: DexFile.EncodedMethod
+    let code: DexFile.CodeItem
+    let registers: [RVal]
+    let pendingException: RVal?
+    let tryBlocks: [DexTryBlock]
+    let suspensionPC: Int
+    let resumePC: Int
+}
+
+/// Internal control flow for a host capability that must await without
+/// blocking a thread. Each interpreted frame appends its exact continuation
+/// while the error unwinds; `callAsync` later resumes that chain inside-out.
+final class DexAsyncSuspension: Error {
+    let operation: () async throws -> RVal
+    var frames: [SuspendedDexFrame] = []
+
+    init(operation: @escaping () async throws -> RVal) {
+        self.operation = operation
+    }
+}
+
 /// Register-based Dalvik interpreter (M1).
 ///
 /// Executes `code_item` instruction streams from a parsed `DexFile`,
@@ -42,6 +65,10 @@ public final class DexInterpreter {
     /// Public entry points can perform class initialization before the first
     /// frame. Keep that work in the same instruction-budget session.
     private var entryDepth = 0
+    /// True only during the synchronous portions of an async VM entry. A plain
+    /// `call` reports a typed error instead of leaking internal suspension
+    /// control flow when it reaches an async host capability.
+    private var allowsAsyncHostInvocation = false
     /// Conservative default: interpreted frames are large in debug builds and
     /// unbounded recursion (obfuscated/mis-resolved super calls) must not
     /// overflow the host stack. The production runtime raises this by
@@ -132,6 +159,40 @@ public final class DexInterpreter {
         }
     }
 
+    /// Executes a DEX method while allowing explicitly registered async host
+    /// capabilities to suspend the Swift task. The interpreter retains exact
+    /// register, exception, call-tree, and instruction-budget state across
+    /// every suspension; no worker thread is blocked.
+    @discardableResult
+    public func callAsync(classDescriptor: String, method: String,
+                          args: [RVal] = []) async throws -> RVal {
+        do {
+            return try allowingAsyncHostInvocation {
+                try call(classDescriptor: classDescriptor, method: method, args: args)
+            }
+        } catch let suspension as DexAsyncSuspension {
+            return try await resolve(suspension)
+        }
+    }
+
+    /// Async counterpart of the exact-overload entry point.
+    @discardableResult
+    public func callAsync(classDescriptor: String, method: String, prototype: String,
+                          args: [RVal] = []) async throws -> RVal {
+        do {
+            return try allowingAsyncHostInvocation {
+                try call(
+                    classDescriptor: classDescriptor,
+                    method: method,
+                    prototype: prototype,
+                    args: args
+                )
+            }
+        } catch let suspension as DexAsyncSuspension {
+            return try await resolve(suspension)
+        }
+    }
+
     /// Allocates a DEX class instance and runs `<init>` (constructor).
     @discardableResult
     public func instantiate(classDescriptor: String) throws -> RVal {
@@ -167,6 +228,13 @@ public final class DexInterpreter {
         if startsSession { remainingInstructions = maxInstructions }
         entryDepth += 1
         defer { entryDepth -= 1 }
+        return try operation()
+    }
+
+    private func allowingAsyncHostInvocation<T>(_ operation: () throws -> T) throws -> T {
+        let previous = allowsAsyncHostInvocation
+        allowsAsyncHostInvocation = true
+        defer { allowsAsyncHostInvocation = previous }
         return try operation()
     }
 
@@ -317,8 +385,13 @@ public final class DexInterpreter {
             guard method.codeOffset == 0 else {
                 throw VMError.verify("malformed code item for \(ref.declaringClass).\(ref.signature)")
             }
-            if let host = bridge.resolve(ref, isStatic: !hasReceiver) {
-                return try validatedReturn(try host(self, args), prototype: ref.prototype, context: ref.signature)
+            if let result = try hostResult(
+                classDescriptor: ref.declaringClass,
+                reference: ref,
+                isStatic: !hasReceiver,
+                args: args
+            ) {
+                return result
             }
             throw VMError.unresolvedMethod(class: ref.declaringClass, signature: ref.signature)
         }
@@ -357,8 +430,30 @@ public final class DexInterpreter {
             cursor += value.isWide ? 2 : 1
         }
 
-        var pc = 0
-        var pendingException: RVal?
+        return try runFrame(
+            definition: def,
+            method: method,
+            code: code,
+            registers: regs,
+            pendingException: nil,
+            tryBlocks: tries,
+            startPC: 0
+        )
+    }
+
+    private func runFrame(
+        definition: DexFile.ClassDef,
+        method: DexFile.EncodedMethod,
+        code: DexFile.CodeItem,
+        registers initialRegisters: [RVal],
+        pendingException initialException: RVal?,
+        tryBlocks: [DexTryBlock],
+        startPC: Int
+    ) throws -> RVal {
+        let reference = dex.methodIds[method.methodIndex]
+        var registers = initialRegisters
+        var pendingException = initialException
+        var pc = startPC
 
         while pc < code.insnsCount {
             guard remainingInstructions > 0 else { throw VMError.budgetExceeded(limit: maxInstructions) }
@@ -366,19 +461,143 @@ public final class DexInterpreter {
             if remainingInstructions & 0x3FF == 0, cancelled() { throw VMError.cancelled }
 
             do {
-                pc = try step(pc, &regs, &pendingException, def, method, code)
+                pc = try step(pc, &registers, &pendingException, definition, method, code)
             } catch let ret as FrameReturn {
-                return try validatedReturn(ret.value, prototype: ref.prototype, context: ref.signature)
+                return try validatedReturn(
+                    ret.value,
+                    prototype: reference.prototype,
+                    context: reference.signature
+                )
+            } catch let suspension as DexAsyncSuspension {
+                guard reference.name != "<clinit>" else {
+                    throw VMError.verify("async host invocation from a class initializer is unsupported")
+                }
+                suspension.frames.append(SuspendedDexFrame(
+                    definition: definition,
+                    method: method,
+                    code: code,
+                    registers: registers,
+                    pendingException: pendingException,
+                    tryBlocks: tryBlocks,
+                    suspensionPC: pc,
+                    resumePC: pc + 3
+                ))
+                throw suspension
             } catch let thrown as DEXThrowable {
                 let value = typeHierarchy.normalizedThrowable(thrown.value)
-                guard let handler = handler(for: value, at: pc, in: tries) else {
+                guard let handler = handler(for: value, at: pc, in: tryBlocks) else {
                     throw DEXThrowable(value)
                 }
                 pendingException = value
                 pc = handler
             }
         }
-        throw VMError.verify("method \(dex.methodIds[method.methodIndex].name) fell off the end of its code item")
+        throw VMError.verify("method \(reference.name) fell off the end of its code item")
+    }
+
+    private func resolve(_ initialSuspension: DexAsyncSuspension) async throws -> RVal {
+        var suspension = initialSuspension
+        while true {
+            let outcome: Result<RVal, DEXThrowable>
+            do {
+                try Task.checkCancellation()
+                let value = try await suspension.operation()
+                try Task.checkCancellation()
+                outcome = .success(value)
+            } catch is CancellationError {
+                throw VMError.cancelled
+            } catch let error as VMError {
+                throw error
+            } catch let thrown as DEXThrowable {
+                outcome = .failure(thrown)
+            } catch {
+                throw error
+            }
+
+            if suspension.frames.isEmpty {
+                switch outcome {
+                case let .success(value): return value
+                case let .failure(thrown): throw thrown
+                }
+            }
+
+            do {
+                return try allowingAsyncHostInvocation {
+                    try resume(suspension.frames, with: outcome)
+                }
+            } catch let next as DexAsyncSuspension {
+                suspension = next
+            }
+        }
+    }
+
+    private func resume(
+        _ frames: [SuspendedDexFrame],
+        with initialOutcome: Result<RVal, DEXThrowable>
+    ) throws -> RVal {
+        guard !frames.isEmpty else {
+            throw VMError.verify("async host invocation escaped without a DEX continuation")
+        }
+        var outcome = initialOutcome
+
+        for (index, frame) in frames.enumerated() {
+            depth = frames.count - index
+            do {
+                let value = try resume(frame, with: outcome)
+                depth = 0
+                outcome = .success(value)
+            } catch let next as DexAsyncSuspension {
+                depth = 0
+                if index + 1 < frames.count {
+                    next.frames.append(contentsOf: frames[(index + 1)...])
+                }
+                throw next
+            } catch let thrown as DEXThrowable {
+                depth = 0
+                outcome = .failure(thrown)
+            } catch {
+                depth = 0
+                throw error
+            }
+        }
+
+        switch outcome {
+        case let .success(value): return value
+        case let .failure(thrown): throw thrown
+        }
+    }
+
+    private func resume(
+        _ frame: SuspendedDexFrame,
+        with outcome: Result<RVal, DEXThrowable>
+    ) throws -> RVal {
+        var pendingException = frame.pendingException
+        let startPC: Int
+        switch outcome {
+        case let .success(value):
+            lastResult = value
+            startPC = frame.resumePC
+        case let .failure(thrown):
+            let value = typeHierarchy.normalizedThrowable(thrown.value)
+            guard let handler = handler(
+                for: value,
+                at: frame.suspensionPC,
+                in: frame.tryBlocks
+            ) else {
+                throw DEXThrowable(value)
+            }
+            pendingException = value
+            startPC = handler
+        }
+        return try runFrame(
+            definition: frame.definition,
+            method: frame.method,
+            code: frame.code,
+            registers: frame.registers,
+            pendingException: pendingException,
+            tryBlocks: frame.tryBlocks,
+            startPC: startPC
+        )
     }
 
     private func handler(for value: RVal, at pc: Int, in tries: [DexTryBlock]) -> Int? {
@@ -869,6 +1088,47 @@ public final class DexInterpreter {
 
     // MARK: - invocation
 
+    private func hostResult(
+        classDescriptor: String,
+        reference: DexFile.MethodRef,
+        isStatic: Bool,
+        args: [RVal]
+    ) throws -> RVal? {
+        if let host = bridge.resolve(
+            class: classDescriptor,
+            reference.name,
+            prototype: reference.prototype.descriptor,
+            isStatic: isStatic
+        ) {
+            return try validatedReturn(
+                try host(self, args),
+                prototype: reference.prototype,
+                context: reference.signature
+            )
+        }
+        if let host = bridge.resolveAsync(
+            class: classDescriptor,
+            reference.name,
+            prototype: reference.prototype.descriptor,
+            isStatic: isStatic
+        ) {
+            guard allowsAsyncHostInvocation else {
+                throw VMError.asyncExecutionRequired(
+                    class: classDescriptor,
+                    signature: reference.signature
+                )
+            }
+            throw DexAsyncSuspension { [self] in
+                try validatedReturn(
+                    try await host(self, args),
+                    prototype: reference.prototype,
+                    context: reference.signature
+                )
+            }
+        }
+        return nil
+    }
+
     /// Invoke with explicit argument register words. The method prototype, not
     /// the runtime value tags, determines how those words are grouped.
     private func invokeRegs(methodIndex: Int, regs: [RVal], indices: [Int],
@@ -997,27 +1257,24 @@ public final class DexInterpreter {
         }
 
         if kind.usesRuntimeReceiver, let receiverDescriptor,
-           let host = bridge.resolve(
-               class: receiverDescriptor,
-               ref.name,
-               prototype: ref.prototype.descriptor,
-               isStatic: false
+           let result = try hostResult(
+               classDescriptor: receiverDescriptor,
+               reference: ref,
+               isStatic: false,
+               args: args
            ) {
-            lastResult = try validatedReturn(
-                try host(self, args),
-                prototype: ref.prototype,
-                context: ref.signature
-            )
+            lastResult = result
             return
         }
 
         if kind == .superMethod,
-           let host = bridge.resolve(ref, isStatic: false) {
-            lastResult = try validatedReturn(
-                try host(self, args),
-                prototype: ref.prototype,
-                context: ref.signature
-            )
+           let result = try hostResult(
+               classDescriptor: ref.declaringClass,
+               reference: ref,
+               isStatic: false,
+               args: args
+           ) {
+            lastResult = result
             return
         }
 
@@ -1039,12 +1296,13 @@ public final class DexInterpreter {
             lastResult = try execute(def: def, method: encoded, args: args)
             return
         }
-        if let host = bridge.resolve(ref, isStatic: isStaticInvocation) {
-            lastResult = try validatedReturn(
-                try host(self, args),
-                prototype: ref.prototype,
-                context: ref.signature
-            )
+        if let result = try hostResult(
+            classDescriptor: ref.declaringClass,
+            reference: ref,
+            isStatic: isStaticInvocation,
+            args: args
+        ) {
+            lastResult = result
             return
         }
         if let dispatchFailure {

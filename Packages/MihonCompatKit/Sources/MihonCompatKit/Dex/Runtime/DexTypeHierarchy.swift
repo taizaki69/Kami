@@ -331,6 +331,10 @@ struct DexTypeHierarchy {
         classType("Ljava/util/concurrent/CancellationException;", superclass: "Ljava/lang/IllegalStateException;")
         classType("Ljava/util/regex/PatternSyntaxException;", superclass: "Ljava/lang/IllegalArgumentException;")
         classType("Lkotlin/UninitializedPropertyAccessException;", superclass: "Ljava/lang/RuntimeException;")
+        classType(
+            "Leu/kanade/tachiyomi/network/HttpException;",
+            superclass: "Ljava/lang/IllegalStateException;"
+        )
 
         classType("Ljava/lang/ReflectiveOperationException;", superclass: "Ljava/lang/Exception;")
         for descriptor in [

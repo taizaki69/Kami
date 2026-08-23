@@ -4,10 +4,16 @@ import Foundation
 /// (mission §23). Registrations are explicit; the VM never hardcodes classes.
 public final class HostBridge {
     public typealias Method = (_ vm: DexInterpreter, _ args: [RVal]) throws -> RVal
+    public typealias AsyncMethod = (_ vm: DexInterpreter, _ args: [RVal]) async throws -> RVal
 
     struct Registration {
         let isStatic: Bool
         let method: Method
+    }
+
+    struct AsyncRegistration {
+        let isStatic: Bool
+        let method: AsyncMethod
     }
 
     private struct MethodKey: Hashable {
@@ -162,6 +168,30 @@ public final class HostBridge {
         }
     }
 
+    private final class ResponseBodyBox {
+        let bytes: [UInt8]
+        let contentType: String?
+        var offset = 0
+        var isClosed = false
+
+        init(bytes: [UInt8], contentType: String?) {
+            self.bytes = bytes
+            self.contentType = contentType
+        }
+    }
+
+    private final class ResponseBox {
+        let value: CompatHTTPResponse
+        let request: CompatHTTPRequest
+        let body: RVal
+
+        init(value: CompatHTTPResponse, request: CompatHTTPRequest, body: RVal) {
+            self.value = value
+            self.request = request
+            self.body = body
+        }
+    }
+
     private final class OkHttpClientBox {
         let interceptors: [RVal]
         let networkInterceptors: [RVal]
@@ -189,9 +219,11 @@ public final class HostBridge {
     /// Exact `(declaring class, name, prototype)` registrations. Ignoring the
     /// prototype would let an untrusted overload reach the wrong native body.
     private var methods: [MethodKey: Registration] = [:]
+    private var asyncMethods: [MethodKey: AsyncRegistration] = [:]
     /// Per-source network identities. They hold only pure request-building
-    /// state until an explicit transport adapter is added.
+    /// state and share only this bridge's explicitly injected transport.
     private var sourceNetworks: [ObjectIdentifier: RVal] = [:]
+    private let transport: (any CompatHTTPTransport)?
 
     /// Most recent request handed to OkHttpClient.newCall. This is an inert,
     /// transport-neutral value: reaching it never performs network I/O.
@@ -203,13 +235,26 @@ public final class HostBridge {
     /// new-instance factories for host classes (StringBuilder, …).
     public var objectFactories: [String: (DexInterpreter) throws -> RVal] = [:]
 
-    public init() {}
+    public init(transport: (any CompatHTTPTransport)? = nil) {
+        self.transport = transport
+    }
 
     public func register(class descriptor: String, _ methodName: String,
                          prototype: String, isStatic: Bool = false,
                          _ body: @escaping Method) {
-        methods[MethodKey(classDescriptor: descriptor, name: methodName, prototype: prototype)] =
-            Registration(isStatic: isStatic, method: body)
+        let key = MethodKey(classDescriptor: descriptor, name: methodName, prototype: prototype)
+        asyncMethods.removeValue(forKey: key)
+        methods[key] = Registration(isStatic: isStatic, method: body)
+    }
+
+    /// Registers a host capability that suspends without blocking the
+    /// interpreter thread. It is executed only through a VM async entry point.
+    public func registerAsync(class descriptor: String, _ methodName: String,
+                              prototype: String, isStatic: Bool = false,
+                              _ body: @escaping AsyncMethod) {
+        let key = MethodKey(classDescriptor: descriptor, name: methodName, prototype: prototype)
+        methods.removeValue(forKey: key)
+        asyncMethods[key] = AsyncRegistration(isStatic: isStatic, method: body)
     }
 
     public func resolve(class descriptor: String, _ methodName: String,
@@ -222,6 +267,23 @@ public final class HostBridge {
 
     public func resolve(_ reference: DexFile.MethodRef, isStatic: Bool) -> Method? {
         resolve(
+            class: reference.declaringClass,
+            reference.name,
+            prototype: reference.prototype.descriptor,
+            isStatic: isStatic
+        )
+    }
+
+    func resolveAsync(class descriptor: String, _ methodName: String,
+                      prototype: String, isStatic: Bool) -> AsyncMethod? {
+        guard let registration = asyncMethods[
+            MethodKey(classDescriptor: descriptor, name: methodName, prototype: prototype)
+        ], registration.isStatic == isStatic else { return nil }
+        return registration.method
+    }
+
+    func resolveAsync(_ reference: DexFile.MethodRef, isStatic: Bool) -> AsyncMethod? {
+        resolveAsync(
             class: reference.declaringClass,
             reference.name,
             prototype: reference.prototype.descriptor,
@@ -246,8 +308,8 @@ public final class HostBridge {
 
     /// Registers the minimal M1 host surface: Intrinsics null-checks and the
     /// object/String basics that real extension methods hit immediately.
-    public static func minimal() -> HostBridge {
-        let bridge = HostBridge()
+    public static func minimal(transport: (any CompatHTTPTransport)? = nil) -> HostBridge {
+        let bridge = HostBridge(transport: transport)
 
         // Kotlin null checks are common in generated extension bytecode. They
         // return void for non-null values and surface a DEX exception for null.
@@ -727,6 +789,7 @@ public final class HostBridge {
         Self.registerFilterSurface(bridge)
         Self.registerKotlinDurationSurface(bridge)
         Self.registerOkHttpRequestSurface(bridge)
+        Self.registerOkHttpResponseSurface(bridge)
         bridge.register(
             class: "Ljava/time/format/DateTimeFormatter;",
             "ofPattern",
@@ -1757,6 +1820,37 @@ public final class HostBridge {
             }
             return .int(call.isCancelled ? 1 : 0)
         }
+        bridge.register(class: "Lokhttp3/Call;", "cancel", prototype: "()V") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Call.cancel"),
+                  let call = object.payload as? CallBox else {
+                throw VMError.verify("Call.cancel receiver")
+            }
+            call.isCancelled = true
+            return .null
+        }
+        if let transport = bridge.transport {
+            for (name, requiresSuccess) in [("await", false), ("awaitSuccess", true)] {
+                bridge.registerAsync(
+                    class: "Leu/kanade/tachiyomi/network/OkHttpExtensionsKt;",
+                    name,
+                    prototype: "(Lokhttp3/Call;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+                    isStatic: true
+                ) { _, args in
+                    guard case let .obj(object) = try argument(
+                        args,
+                        0,
+                        "OkHttpExtensions.\(name)"
+                    ), let call = object.payload as? CallBox else {
+                        throw VMError.verify("OkHttpExtensions.\(name) call argument")
+                    }
+                    return try await execute(
+                        call,
+                        transport: transport,
+                        requiresSuccess: requiresSuccess
+                    )
+                }
+            }
+        }
         bridge.register(
             class: okHttpClientBuilder,
             "interceptors",
@@ -2246,6 +2340,343 @@ public final class HostBridge {
                 isHost: true
             ))
         }
+    }
+
+    private static func registerOkHttpResponseSurface(_ bridge: HostBridge) {
+        let response = "Lokhttp3/Response;"
+        let responseBody = "Lokhttp3/ResponseBody;"
+        let bufferedSource = "Lokio/BufferedSource;"
+        let httpException = "Leu/kanade/tachiyomi/network/HttpException;"
+
+        func responseBox(_ args: [RVal], _ method: String) throws -> ResponseBox {
+            guard case let .obj(object) = try argument(args, 0, method),
+                  let box = object.payload as? ResponseBox else {
+                throw VMError.verify("\(method) receiver")
+            }
+            return box
+        }
+
+        func bodyBox(_ args: [RVal], _ method: String) throws -> ResponseBodyBox {
+            guard case let .obj(object) = try argument(args, 0, method),
+                  let box = object.payload as? ResponseBodyBox else {
+                throw VMError.verify("\(method) receiver")
+            }
+            return box
+        }
+
+        func read(_ box: ResponseBodyBox, count: Int?, close: Bool,
+                  method: String) throws -> [UInt8] {
+            guard !box.isClosed else {
+                throw DEXThrowable(string("IllegalStateException: \(method) on closed body"))
+            }
+            let remaining = box.bytes.count - box.offset
+            let requested = count ?? remaining
+            guard requested >= 0 else {
+                throw DEXThrowable(string("IllegalArgumentException: negative byte count"))
+            }
+            let length = min(requested, remaining)
+            let result = Array(box.bytes[box.offset..<(box.offset + length)])
+            box.offset += length
+            if close { box.isClosed = true }
+            return result
+        }
+
+        bridge.register(class: response, "code", prototype: "()I") { _, args in
+            .int(Int32(clamping: try responseBox(args, "Response.code").value.statusCode))
+        }
+        bridge.register(class: response, "isSuccessful", prototype: "()Z") { _, args in
+            let code = try responseBox(args, "Response.isSuccessful").value.statusCode
+            return .int((200..<300).contains(code) ? 1 : 0)
+        }
+        bridge.register(class: response, "body", prototype: "()Lokhttp3/ResponseBody;") { _, args in
+            try responseBox(args, "Response.body").body
+        }
+        bridge.register(class: response, "headers", prototype: "()Lokhttp3/Headers;") { _, args in
+            let headers = try responseBox(args, "Response.headers").value.headers
+            return .obj(ObjInstance(
+                dexType: "Lokhttp3/Headers;",
+                payload: HeadersBox(headers: headers),
+                isHost: true
+            ))
+        }
+        bridge.register(class: response, "request", prototype: "()Lokhttp3/Request;") { _, args in
+            let request = try responseBox(args, "Response.request").request
+            return .obj(ObjInstance(
+                dexType: "Lokhttp3/Request;",
+                payload: request,
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: response,
+            "header",
+            prototype: "(Ljava/lang/String;)Ljava/lang/String;"
+        ) { _, args in
+            let box = try responseBox(args, "Response.header")
+            let name = try requiredString(args, 1, "Response.header")
+            guard let value = box.value.headers.reversed().first(where: {
+                $0.name.caseInsensitiveCompare(name) == .orderedSame
+            }) else { return .null }
+            return string(value.value)
+        }
+        bridge.register(class: response, "close", prototype: "()V") { _, args in
+            let box = try responseBox(args, "Response.close")
+            guard case let .obj(bodyObject) = box.body,
+                  let body = bodyObject.payload as? ResponseBodyBox else {
+                throw VMError.verify("Response.close body")
+            }
+            body.isClosed = true
+            return .null
+        }
+        bridge.register(
+            class: response,
+            "peekBody",
+            prototype: "(J)Lokhttp3/ResponseBody;"
+        ) { _, args in
+            let box = try responseBox(args, "Response.peekBody")
+            guard case let .long(rawCount) = try argument(args, 1, "Response.peekBody"),
+                  rawCount >= 0 else {
+                throw DEXThrowable(string("IllegalArgumentException: negative byte count"))
+            }
+            guard case let .obj(bodyObject) = box.body,
+                  let body = bodyObject.payload as? ResponseBodyBox else {
+                throw VMError.verify("Response.peekBody body")
+            }
+            let count = min(Int(clamping: rawCount), body.bytes.count - body.offset)
+            return responseBodyValue(
+                Array(body.bytes[body.offset..<(body.offset + count)]),
+                contentType: body.contentType
+            )
+        }
+
+        bridge.register(class: responseBody, "contentLength", prototype: "()J") { _, args in
+            .long(Int64(try bodyBox(args, "ResponseBody.contentLength").bytes.count))
+        }
+        bridge.register(class: responseBody, "contentType", prototype: "()Lokhttp3/MediaType;") { _, args in
+            guard let value = try bodyBox(args, "ResponseBody.contentType").contentType else {
+                return .null
+            }
+            return .obj(ObjInstance(
+                dexType: "Lokhttp3/MediaType;",
+                payload: MediaTypeBox(value: value),
+                isHost: true
+            ))
+        }
+        bridge.register(class: responseBody, "string", prototype: "()Ljava/lang/String;") { _, args in
+            let box = try bodyBox(args, "ResponseBody.string")
+            return string(decodeResponseBody(
+                try read(box, count: nil, close: true, method: "ResponseBody.string"),
+                contentType: box.contentType
+            ))
+        }
+        bridge.register(class: responseBody, "bytes", prototype: "()[B") { _, args in
+            let bytes = try read(
+                try bodyBox(args, "ResponseBody.bytes"),
+                count: nil,
+                close: true,
+                method: "ResponseBody.bytes"
+            )
+            return byteArray(bytes)
+        }
+        bridge.register(class: responseBody, "source", prototype: "()Lokio/BufferedSource;") { _, args in
+            let box = try bodyBox(args, "ResponseBody.source")
+            guard !box.isClosed else {
+                throw DEXThrowable(string("IllegalStateException: ResponseBody.source on closed body"))
+            }
+            return .obj(ObjInstance(
+                dexType: bufferedSource,
+                payload: box,
+                isHost: true
+            ))
+        }
+        bridge.register(class: responseBody, "close", prototype: "()V") { _, args in
+            let box = try bodyBox(args, "ResponseBody.close")
+            box.isClosed = true
+            return .null
+        }
+
+        bridge.register(class: bufferedSource, "readUtf8", prototype: "()Ljava/lang/String;") { _, args in
+            string(String(decoding: try read(
+                try bodyBox(args, "BufferedSource.readUtf8"),
+                count: nil,
+                close: false,
+                method: "BufferedSource.readUtf8"
+            ), as: UTF8.self))
+        }
+        bridge.register(
+            class: bufferedSource,
+            "readUtf8",
+            prototype: "(J)Ljava/lang/String;"
+        ) { _, args in
+            guard case let .long(count) = try argument(args, 1, "BufferedSource.readUtf8") else {
+                throw VMError.verify("BufferedSource.readUtf8 byte count")
+            }
+            return string(String(decoding: try read(
+                try bodyBox(args, "BufferedSource.readUtf8"),
+                count: Int(clamping: count),
+                close: false,
+                method: "BufferedSource.readUtf8"
+            ), as: UTF8.self))
+        }
+        bridge.register(class: bufferedSource, "readByteArray", prototype: "()[B") { _, args in
+            byteArray(try read(
+                try bodyBox(args, "BufferedSource.readByteArray"),
+                count: nil,
+                close: false,
+                method: "BufferedSource.readByteArray"
+            ))
+        }
+        bridge.register(class: bufferedSource, "readByteArray", prototype: "(J)[B") { _, args in
+            guard case let .long(count) = try argument(args, 1, "BufferedSource.readByteArray") else {
+                throw VMError.verify("BufferedSource.readByteArray byte count")
+            }
+            return byteArray(try read(
+                try bodyBox(args, "BufferedSource.readByteArray"),
+                count: Int(clamping: count),
+                close: false,
+                method: "BufferedSource.readByteArray"
+            ))
+        }
+        bridge.register(class: bufferedSource, "exhausted", prototype: "()Z") { _, args in
+            let box = try bodyBox(args, "BufferedSource.exhausted")
+            guard !box.isClosed else {
+                throw DEXThrowable(string("IllegalStateException: BufferedSource.exhausted on closed body"))
+            }
+            return .int(box.offset == box.bytes.count ? 1 : 0)
+        }
+        bridge.register(class: bufferedSource, "close", prototype: "()V") { _, args in
+            let box = try bodyBox(args, "BufferedSource.close")
+            box.isClosed = true
+            return .null
+        }
+
+        bridge.register(
+            class: "Lokhttp3/Headers;",
+            "get",
+            prototype: "(Ljava/lang/String;)Ljava/lang/String;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Headers.get"),
+                  let box = object.payload as? HeadersBox else {
+                throw VMError.verify("Headers.get receiver")
+            }
+            let name = try requiredString(args, 1, "Headers.get")
+            guard let value = box.headers.reversed().first(where: {
+                $0.name.caseInsensitiveCompare(name) == .orderedSame
+            }) else { return .null }
+            return string(value.value)
+        }
+        bridge.register(class: "Lokhttp3/Headers;", "size", prototype: "()I") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Headers.size"),
+                  let box = object.payload as? HeadersBox else {
+                throw VMError.verify("Headers.size receiver")
+            }
+            return .int(Int32(clamping: box.headers.count))
+        }
+        bridge.register(class: httpException, "getCode", prototype: "()I") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "HttpException.getCode"),
+                  case let .int(code)? = object.fields["code"] else {
+                throw VMError.verify("HttpException.getCode receiver")
+            }
+            return .int(code)
+        }
+    }
+
+    private static func execute(
+        _ call: CallBox,
+        transport: any CompatHTTPTransport,
+        requiresSuccess: Bool
+    ) async throws -> RVal {
+        guard !call.isCancelled else { throw VMError.cancelled }
+        do {
+            try Task.checkCancellation()
+            let response = try await transport.execute(call.request)
+            try Task.checkCancellation()
+            guard !call.isCancelled else { throw VMError.cancelled }
+            if requiresSuccess, !(200..<300).contains(response.statusCode) {
+                throw DEXThrowable(.obj(ObjInstance(
+                    dexType: "Leu/kanade/tachiyomi/network/HttpException;",
+                    fields: ["code": .int(Int32(clamping: response.statusCode))],
+                    payload: "HTTP error \(response.statusCode)",
+                    isHost: true
+                )))
+            }
+            return responseValue(response, request: call.request)
+        } catch is CancellationError {
+            call.isCancelled = true
+            throw VMError.cancelled
+        } catch let error as VMError {
+            throw error
+        } catch let thrown as DEXThrowable {
+            throw thrown
+        } catch let error as CompatHTTPTransportError {
+            if error == .cancelled {
+                call.isCancelled = true
+                throw VMError.cancelled
+            }
+            throw DEXThrowable(.obj(ObjInstance(
+                dexType: "Ljava/io/IOException;",
+                payload: error.description,
+                isHost: true
+            )))
+        } catch {
+            throw DEXThrowable(.obj(ObjInstance(
+                dexType: "Ljava/io/IOException;",
+                payload: "HTTP transport failed",
+                isHost: true
+            )))
+        }
+    }
+
+    private static func responseValue(
+        _ response: CompatHTTPResponse,
+        request: CompatHTTPRequest
+    ) -> RVal {
+        let contentType = response.headers.reversed().first {
+            $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame
+        }?.value
+        let body = responseBodyValue(response.body, contentType: contentType)
+        return .obj(ObjInstance(
+            dexType: "Lokhttp3/Response;",
+            payload: ResponseBox(value: response, request: request, body: body),
+            isHost: true
+        ))
+    }
+
+    private static func responseBodyValue(_ bytes: [UInt8], contentType: String?) -> RVal {
+        .obj(ObjInstance(
+            dexType: "Lokhttp3/ResponseBody;",
+            payload: ResponseBodyBox(bytes: bytes, contentType: contentType),
+            isHost: true
+        ))
+    }
+
+    private static func byteArray(_ bytes: [UInt8]) -> RVal {
+        .arr(ArrInstance(
+            elemDescriptor: "B",
+            elements: bytes.map { .int(Int32(Int8(bitPattern: $0))) }
+        ))
+    }
+
+    private static func decodeResponseBody(_ bytes: [UInt8], contentType: String?) -> String {
+        let charset = contentType?.split(separator: ";").dropFirst().compactMap { part -> String? in
+            let pieces = part.split(separator: "=", maxSplits: 1)
+            guard pieces.count == 2,
+                  pieces[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                    .caseInsensitiveCompare("charset") == .orderedSame else { return nil }
+            return pieces[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                .lowercased()
+        }.first
+        let encoding: String.Encoding
+        switch charset {
+        case "iso-8859-1", "latin1": encoding = .isoLatin1
+        case "utf-16", "utf-16le": encoding = .utf16LittleEndian
+        case "utf-16be": encoding = .utf16BigEndian
+        case "windows-1252", "cp1252": encoding = .windowsCP1252
+        default: encoding = .utf8
+        }
+        return String(data: Data(bytes), encoding: encoding)
+            ?? String(decoding: bytes, as: UTF8.self)
     }
 
     private func networkHelper(for source: ObjInstance) -> RVal {
