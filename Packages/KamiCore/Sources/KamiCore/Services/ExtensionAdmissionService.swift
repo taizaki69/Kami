@@ -23,7 +23,7 @@ public enum ExtensionTrustSource: Equatable, Sendable {
     }
 }
 
-public enum ExtensionAdmissionError: Swift.Error, Equatable, CustomStringConvertible {
+public enum ExtensionAdmissionError: Swift.Error, Equatable, CustomStringConvertible, LocalizedError {
     case untrustedSigner([String])
     case packageMismatch(expected: String, actual: String)
     case versionCodeMismatch(expected: Int64, actual: Int64?)
@@ -32,7 +32,14 @@ public enum ExtensionAdmissionError: Swift.Error, Equatable, CustomStringConvert
     case sameVersionContentMismatch
     case updateSignerMismatch
     case emptyAPKPath
+    case extensionNotInstalled(String)
+    case extensionDisabled(String)
+    case persistedAPKUnavailable
+    case persistedAPKTooLarge(limit: Int)
+    case persistedAPKContentMismatch
+    case persistedSignerMismatch
     case sourceNotDeclared(Int64)
+    case sourceIDCollision(Int64)
 
     public var description: String {
         switch self {
@@ -52,10 +59,26 @@ public enum ExtensionAdmissionError: Swift.Error, Equatable, CustomStringConvert
             return "extension update does not continue the initially trusted signing identity"
         case .emptyAPKPath:
             return "persisted extension APK path is empty"
+        case let .extensionNotInstalled(packageName):
+            return "extension is not installed: \(packageName)"
+        case let .extensionDisabled(packageName):
+            return "extension is disabled: \(packageName)"
+        case .persistedAPKUnavailable:
+            return "the installed extension APK is unavailable"
+        case let .persistedAPKTooLarge(limit):
+            return "the installed extension APK exceeds the \(limit)-byte safety limit"
+        case .persistedAPKContentMismatch:
+            return "the installed extension APK no longer matches its admitted bytes"
+        case .persistedSignerMismatch:
+            return "the installed extension signer no longer matches persisted trust"
         case let .sourceNotDeclared(id):
             return "source \(id) was not declared by the admitted extension"
+        case let .sourceIDCollision(id):
+            return "source \(id) conflicts with a protected built-in source"
         }
     }
+
+    public var errorDescription: String? { description }
 }
 
 /// Capability issued only after an APK's signer, package/version metadata,
@@ -104,6 +127,31 @@ public struct InstalledExtensionTrust: Equatable, Sendable {
     public let signerHistory: [String]
     public let trustSource: ExtensionTrustSource
     public let sourceIDs: Set<Int64>
+    public let repositoryURL: String?
+    public let installedAt: Int64
+    public let enabled: Bool
+}
+
+public struct ExtensionRepositoryRecord: Equatable, Sendable, Identifiable {
+    public var id: String { url }
+    public let url: String
+    public let name: String
+    public let signingKey: String?
+    public let addedAt: Int64
+}
+
+public enum ExtensionRepositoryRecordError: Error, Equatable, LocalizedError {
+    case emptyURL
+    case signingKeyChanged
+
+    public var errorDescription: String? {
+        switch self {
+        case .emptyURL:
+            return "The extension repository URL is empty."
+        case .signingKeyChanged:
+            return "The extension repository changed its declared signing key. Remove and re-trust it explicitly before using the new key."
+        }
+    }
 }
 
 #if canImport(SQLite3)
@@ -194,6 +242,95 @@ public actor ExtensionAdmissionService {
             sourceIDs: Set(expected.sources.map(\.id))
         )
         return try await store.commitExtensionAdmission(candidate)
+    }
+
+    /// Reissues an executable capability from persisted state only after the
+    /// on-disk bytes have been bounded, rehashed, signature-verified, and
+    /// matched back to the stored package/version/signer identity. The source
+    /// factory repeats the byte check on the exact buffer it will execute.
+    public func restore(packageName: String) async throws -> ExtensionAdmission {
+        guard let installed = try await store.installedExtensionTrust(
+            packageName: packageName
+        ) else {
+            throw ExtensionAdmissionError.extensionNotInstalled(packageName)
+        }
+        guard installed.enabled else {
+            throw ExtensionAdmissionError.extensionDisabled(packageName)
+        }
+
+        let apkBytes = try Self.readPersistedAPK(path: installed.apkPath)
+        guard APKSignatureVerifier.apkSHA256(apkBytes) == installed.apkSHA256 else {
+            throw ExtensionAdmissionError.persistedAPKContentMismatch
+        }
+
+        let identity = try verifier.verify(apkBytes: apkBytes)
+        let currentSigners = identity.signers.map(\.currentFingerprint).sorted()
+        let signerHistory = Array(identity.allFingerprints).sorted()
+        guard identity.scheme == installed.signatureScheme,
+              currentSigners == installed.currentSigners.sorted(),
+              signerHistory == installed.signerHistory.sorted() else {
+            throw ExtensionAdmissionError.persistedSignerMismatch
+        }
+
+        if case let .user(fingerprint) = installed.trustSource,
+           !identity.contains(fingerprint: fingerprint) {
+            throw ExtensionAdmissionError.persistedSignerMismatch
+        }
+
+        let manifest = try ExtensionManifest(apkBytes: apkBytes)
+        guard manifest.packageName == installed.packageName else {
+            throw ExtensionAdmissionError.packageMismatch(
+                expected: installed.packageName,
+                actual: manifest.packageName
+            )
+        }
+        guard manifest.versionCode == installed.versionCode else {
+            throw ExtensionAdmissionError.versionCodeMismatch(
+                expected: installed.versionCode,
+                actual: manifest.versionCode
+            )
+        }
+        guard manifest.versionName == installed.versionName else {
+            throw ExtensionAdmissionError.versionNameMismatch(
+                expected: installed.versionName,
+                actual: manifest.versionName
+            )
+        }
+
+        return ExtensionAdmission(
+            packageName: installed.packageName,
+            versionName: installed.versionName,
+            versionCode: installed.versionCode,
+            apkPath: installed.apkPath,
+            apkSHA256: installed.apkSHA256,
+            signingIdentity: identity,
+            trustSource: installed.trustSource,
+            sourceIDs: installed.sourceIDs
+        )
+    }
+
+    private static func readPersistedAPK(path: String) throws -> [UInt8] {
+        guard !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ExtensionAdmissionError.emptyAPKPath
+        }
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        guard let values = try? url.resourceValues(
+            forKeys: [.fileSizeKey, .isRegularFileKey]
+        ),
+        values.isRegularFile == true,
+        let fileSize = values.fileSize else {
+            throw ExtensionAdmissionError.persistedAPKUnavailable
+        }
+        guard fileSize <= APKSignatureVerifier.maximumAPKSize else {
+            throw ExtensionAdmissionError.persistedAPKTooLarge(
+                limit: APKSignatureVerifier.maximumAPKSize
+            )
+        }
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+              data.count == fileSize else {
+            throw ExtensionAdmissionError.persistedAPKUnavailable
+        }
+        return [UInt8](data)
     }
 
     static func updatePreservesIdentity(

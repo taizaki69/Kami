@@ -165,41 +165,92 @@ public actor LibraryStore {
         try db.run("UPDATE chapter SET last_page_read=? WHERE id=?", [.int(page), .int(chapterId)])
     }
 
+    // MARK: - Extension repositories
+
+    public func extensionRepositories() throws -> [ExtensionRepositoryRecord] {
+        try db.query(
+            "SELECT * FROM extension_repo ORDER BY added_at, url COLLATE NOCASE"
+        ).compactMap { row in
+            guard let url = row.string("url"),
+                  let name = row.string("name") else { return nil }
+            return ExtensionRepositoryRecord(
+                url: url,
+                name: name,
+                signingKey: row.string("signing_key"),
+                addedAt: row.int64("added_at") ?? 0
+            )
+        }
+    }
+
+    @discardableResult
+    public func upsertExtensionRepository(
+        url rawURL: String,
+        name: String,
+        signingKey rawSigningKey: String?
+    ) throws -> ExtensionRepositoryRecord {
+        let url = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else { throw ExtensionRepositoryRecordError.emptyURL }
+        let candidateKey: String?
+        if let rawSigningKey,
+           !rawSigningKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            candidateKey = try APKSignatureVerifier.normalizeFingerprint(rawSigningKey)
+        } else {
+            candidateKey = nil
+        }
+        let existing = try db.query(
+            "SELECT signing_key, added_at FROM extension_repo WHERE url=? LIMIT 1",
+            [.text(url)]
+        ).first
+        let existingKey = existing?.string("signing_key")
+        if let existingKey, let candidateKey, existingKey != candidateKey {
+            throw ExtensionRepositoryRecordError.signingKeyChanged
+        }
+        let signingKey = existingKey ?? candidateKey
+        let addedAt = existing?.int64("added_at") ?? Int64(Date().timeIntervalSince1970)
+        try db.run("""
+            INSERT INTO extension_repo (url, name, added_at, trusted, signing_key)
+            VALUES (?,?,?,1,?)
+            ON CONFLICT(url) DO UPDATE SET
+                name=excluded.name,
+                trusted=1,
+                signing_key=excluded.signing_key
+            """, [
+                .text(url),
+                .text(name),
+                .int(addedAt),
+                signingKey.map(SQLiteBindable.text) ?? .null,
+            ])
+        return ExtensionRepositoryRecord(
+            url: url,
+            name: name,
+            signingKey: signingKey,
+            addedAt: addedAt
+        )
+    }
+
+    public func removeExtensionRepository(url: String) throws {
+        try db.run("DELETE FROM extension_repo WHERE url=?", [.text(url)])
+    }
+
     // MARK: - Extension signer trust
 
     public func installedExtensionTrust(packageName: String) throws -> InstalledExtensionTrust? {
-        guard let row = try db.query(
+        try db.query(
             "SELECT * FROM installed_extension WHERE package_name=? LIMIT 1",
             [.text(packageName)]
-        ).first,
-        let versionName = row.string("version_name"),
-        let versionCode = row.int64("version_code"),
-        let apkPath = row.string("apk_path"),
-        let apkSHA256 = row.string("apk_sha256"), !apkSHA256.isEmpty,
-        let schemeText = row.string("signature_scheme"),
-        let scheme = APKSigningIdentity.Scheme(rawValue: schemeText),
-        let trustText = row.string("trust_source"),
-        let trustSource = ExtensionTrustSource(persistedValue: trustText) else {
-            // Rows created before signer admission are intentionally not
-            // executable until they are re-admitted and populated.
-            return nil
-        }
-        let currentSigners = Self.stringArray(row.string("current_signers"))
-        let signerHistory = Self.stringArray(row.string("signer_history"))
-        guard !currentSigners.isEmpty, !signerHistory.isEmpty else {
-            return nil
-        }
-        return InstalledExtensionTrust(
-            packageName: packageName,
-            versionName: versionName,
-            versionCode: versionCode,
-            apkPath: apkPath,
-            apkSHA256: apkSHA256,
-            signatureScheme: scheme,
-            currentSigners: currentSigners,
-            signerHistory: signerHistory,
-            trustSource: trustSource,
-            sourceIDs: Set(Self.int64Array(row.string("source_ids")))
+        ).first.flatMap { Self.installedExtensionTrust(from: $0) }
+    }
+
+    public func installedExtensionTrusts() throws -> [InstalledExtensionTrust] {
+        try db.query(
+            "SELECT * FROM installed_extension ORDER BY package_name COLLATE NOCASE"
+        ).compactMap { Self.installedExtensionTrust(from: $0) }
+    }
+
+    public func setExtensionEnabled(_ enabled: Bool, packageName: String) throws {
+        try db.run(
+            "UPDATE installed_extension SET enabled=? WHERE package_name=?",
+            [.bool(enabled), .text(packageName)]
         )
     }
 
@@ -257,7 +308,6 @@ public actor LibraryStore {
                 apk_path=excluded.apk_path,
                 repo_url=excluded.repo_url,
                 installed_at=excluded.installed_at,
-                enabled=1,
                 apk_sha256=excluded.apk_sha256,
                 signature_scheme=excluded.signature_scheme,
                 current_signers=excluded.current_signers,
@@ -306,6 +356,42 @@ public actor LibraryStore {
     private static func int64Array(_ value: String?) -> [Int64] {
         guard let data = value?.data(using: .utf8) else { return [] }
         return (try? JSONDecoder().decode([Int64].self, from: data)) ?? []
+    }
+
+    private static func installedExtensionTrust(
+        from row: SQLiteDatabase.Row
+    ) -> InstalledExtensionTrust? {
+        guard let packageName = row.string("package_name"),
+              let versionName = row.string("version_name"),
+              let versionCode = row.int64("version_code"),
+              let apkPath = row.string("apk_path"),
+              let apkSHA256 = row.string("apk_sha256"), !apkSHA256.isEmpty,
+              let schemeText = row.string("signature_scheme"),
+              let scheme = APKSigningIdentity.Scheme(rawValue: schemeText),
+              let trustText = row.string("trust_source"),
+              let trustSource = ExtensionTrustSource(persistedValue: trustText) else {
+            // Rows created before signer admission are intentionally not
+            // executable until they are re-admitted and populated.
+            return nil
+        }
+        let currentSigners = stringArray(row.string("current_signers"))
+        let signerHistory = stringArray(row.string("signer_history"))
+        guard !currentSigners.isEmpty, !signerHistory.isEmpty else { return nil }
+        return InstalledExtensionTrust(
+            packageName: packageName,
+            versionName: versionName,
+            versionCode: versionCode,
+            apkPath: apkPath,
+            apkSHA256: apkSHA256,
+            signatureScheme: scheme,
+            currentSigners: currentSigners,
+            signerHistory: signerHistory,
+            trustSource: trustSource,
+            sourceIDs: Set(int64Array(row.string("source_ids"))),
+            repositoryURL: row.string("repo_url"),
+            installedAt: row.int64("installed_at") ?? 0,
+            enabled: row.bool("enabled")
+        )
     }
 
     private static func manga(from row: SQLiteDatabase.Row) -> Manga? {

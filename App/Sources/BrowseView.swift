@@ -9,7 +9,7 @@ struct BrowseView: View {
         NavigationStack {
             List {
                 Section("Sources") {
-                    ForEach(model.registry.sources, id: \.id) { source in
+                    ForEach(model.sources, id: \.id) { source in
                         NavigationLink {
                             SourceBrowseView(source: source)
                         } label: {
@@ -18,7 +18,7 @@ struct BrowseView: View {
                                     .foregroundStyle(.tint)
                                 VStack(alignment: .leading) {
                                     Text(source.name)
-                                    Text("\(source.language) · native")
+                                    Text("\(source.language) · \(originLabel(source.id))")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -28,16 +28,25 @@ struct BrowseView: View {
                 }
                 Section {
                     Text("""
-                    Mihon extension compatibility is in progress. The extension \
-                    pipeline (store index, APK download, manifest/DEX analysis) is \
-                    implemented; source execution arrives with the DEX runtime \
-                    (see docs/EXTENSION_RUNTIME.md).
+                    Authenticated, enabled extensions with a measured runtime \
+                    profile appear beside native sources. Unsupported APKs stay \
+                    installed but disabled until their compatibility profile is \
+                    implemented.
                     """)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Browse")
+        }
+    }
+
+    private func originLabel(_ sourceID: Int64) -> String {
+        switch model.sourceOrigin(id: sourceID) {
+        case .native: return "native"
+        case .pinnedCompatibilityProfile: return "built-in extension profile"
+        case .downloadedExtension: return "installed extension"
+        case nil: return "source"
         }
     }
 }
@@ -119,6 +128,12 @@ struct SourceBrowseView: View {
             page = 1
             Task { await load(reset: true) }
         }
+        .onChange(of: query) { value in
+            if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                page = 1
+                Task { await load(reset: true) }
+            }
+        }
         .task {
             if items.isEmpty { await load(reset: true) }
         }
@@ -134,9 +149,18 @@ struct SourceBrowseView: View {
         errorText = nil
         do {
             let result: MangasPageCompat
-            switch mode {
-            case .popular: result = try await source.getPopularManga(page: page)
-            case .latest: result = try await source.getLatestUpdates(page: page)
+            let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedQuery.isEmpty {
+                result = try await source.getSearchManga(
+                    page: page,
+                    query: trimmedQuery,
+                    filters: []
+                )
+            } else {
+                switch mode {
+                case .popular: result = try await source.getPopularManga(page: page)
+                case .latest: result = try await source.getLatestUpdates(page: page)
+                }
             }
             items += result.mangas
             hasNext = result.hasNextPage

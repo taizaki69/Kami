@@ -86,7 +86,7 @@ public enum APKSignatureVerificationError: Swift.Error, Equatable, CustomStringC
 /// conservative JAR-signing (v1) fallback. No certificate fingerprint is
 /// returned until the signer signature and the APK's signed content digest
 /// have both verified.
-public struct APKSignatureVerifier {
+public struct APKSignatureVerifier: Sendable {
     public static let maximumAPKSize = 128 * 1024 * 1024
 
     private static let v2BlockID: UInt32 = 0x7109_871a

@@ -88,6 +88,9 @@ final class ExtensionAdmissionTests: XCTestCase {
         XCTAssertEqual(persisted?.currentSigners, [keiyoushiFingerprint])
         XCTAssertEqual(persisted?.apkSHA256, admission.apkSHA256)
         XCTAssertEqual(persisted?.trustSource, admission.trustSource)
+        XCTAssertEqual(persisted?.repositoryURL, repoURL)
+        XCTAssertEqual(persisted?.enabled, true)
+        XCTAssertGreaterThan(persisted?.installedAt ?? 0, 0)
 
         try await MainActor.run {
             let registry = SourceRegistry()
@@ -153,6 +156,7 @@ final class ExtensionAdmissionTests: XCTestCase {
             sourceIDs: [77]
         )
         _ = try await store.commitExtensionAdmission(first)
+        try await store.setExtensionEnabled(false, packageName: first.packageName)
 
         let update = ExtensionAdmissionCandidate(
             packageName: first.packageName,
@@ -170,6 +174,14 @@ final class ExtensionAdmissionTests: XCTestCase {
         XCTAssertEqual(
             admittedUpdate.trustSource,
             .user(fingerprint: aospFirstFingerprint)
+        )
+        let persistedUpdate = try await store.installedExtensionTrust(
+            packageName: first.packageName
+        )
+        XCTAssertEqual(
+            persistedUpdate?.enabled,
+            false,
+            "an update must preserve the user's disabled state"
         )
 
         let wrong = ExtensionAdmissionCandidate(
@@ -225,6 +237,85 @@ final class ExtensionAdmissionTests: XCTestCase {
         } catch let error as ExtensionAdmissionError {
             XCTAssertEqual(error, .sameVersionContentMismatch)
         }
+    }
+
+    func testRestoreReauthenticatesPersistedFileAndFailsClosedWhenDisabledOrReplaced() async throws {
+        let bytes = try corpus("batcave")
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Kami-ExtensionAdmissionTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let apkURL = directory.appendingPathComponent("batcave.apk")
+        try Data(bytes).write(to: apkURL, options: .atomic)
+
+        let store = try LibraryStore(inMemory: true)
+        let service = ExtensionAdmissionService(store: store)
+        let admission = try await service.admit(
+            apkBytes: bytes,
+            extension: batCaveExtension(sourceID: 7_422_099_479_605_463_706),
+            apkPath: apkURL.path,
+            repositoryURL: "https://example.invalid/index.pb",
+            repositorySigningKey: keiyoushiFingerprint
+        )
+        let restored = try await service.restore(packageName: admission.packageName)
+        XCTAssertEqual(restored, admission)
+        let installed = try await store.installedExtensionTrusts()
+        XCTAssertEqual(installed.count, 1)
+
+        try await store.setExtensionEnabled(false, packageName: admission.packageName)
+        do {
+            _ = try await service.restore(packageName: admission.packageName)
+            XCTFail("disabled extensions must not receive executable capabilities")
+        } catch let error as ExtensionAdmissionError {
+            XCTAssertEqual(error, .extensionDisabled(admission.packageName))
+        }
+
+        try await store.setExtensionEnabled(true, packageName: admission.packageName)
+        var replaced = bytes
+        replaced[replaced.count / 2] ^= 0x01
+        try Data(replaced).write(to: apkURL, options: .atomic)
+        do {
+            _ = try await service.restore(packageName: admission.packageName)
+            XCTFail("replaced bytes must not restore a persisted capability")
+        } catch let error as ExtensionAdmissionError {
+            XCTAssertEqual(error, .persistedAPKContentMismatch)
+        }
+    }
+
+    func testRepositoryRecordsPersistAndPinFirstDeclaredSigningKey() async throws {
+        let store = try LibraryStore(inMemory: true)
+        let url = "https://example.invalid/index.pb"
+        let first = try await store.upsertExtensionRepository(
+            url: url,
+            name: "Example Store",
+            signingKey: keiyoushiFingerprint.uppercased()
+        )
+        XCTAssertEqual(first.signingKey, keiyoushiFingerprint)
+
+        let refreshed = try await store.upsertExtensionRepository(
+            url: url,
+            name: "Renamed Store",
+            signingKey: nil
+        )
+        XCTAssertEqual(refreshed.name, "Renamed Store")
+        XCTAssertEqual(refreshed.signingKey, keiyoushiFingerprint)
+        let records = try await store.extensionRepositories()
+        XCTAssertEqual(records, [refreshed])
+
+        do {
+            _ = try await store.upsertExtensionRepository(
+                url: url,
+                name: "Compromised Store",
+                signingKey: aospFirstFingerprint
+            )
+            XCTFail("a repository signing-key change must fail closed")
+        } catch let error as ExtensionRepositoryRecordError {
+            XCTAssertEqual(error, .signingKeyChanged)
+        }
+
+        try await store.removeExtensionRepository(url: url)
+        let afterRemoval = try await store.extensionRepositories()
+        XCTAssertTrue(afterRemoval.isEmpty)
     }
 }
 

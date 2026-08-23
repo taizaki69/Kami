@@ -151,7 +151,7 @@ final class PinnedInterpretedSourceTests: XCTestCase {
             transport: transport
         )
 
-        XCTAssertGreaterThan(source.id, 0)
+        XCTAssertEqual(source.id, 7_422_099_479_605_463_706)
         XCTAssertEqual(source.name, "BatCave")
         XCTAssertEqual(source.language, "en")
         XCTAssertTrue(source.supportsLatest)

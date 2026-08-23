@@ -81,7 +81,7 @@ public struct PinnedInterpretedSource: KamiSource {
         )
     }
 
-    private init(
+    fileprivate init(
         profile: PinnedInterpretedProfile,
         apkBytes: [UInt8],
         transport: any CompatHTTPTransport
@@ -155,6 +155,84 @@ public struct PinnedInterpretedSource: KamiSource {
     public func getFilterList() -> [SourceFilter] { [] }
 }
 
+/// Exact runtime profiles currently proven against real APKs. This catalog is
+/// intentionally separate from signer trust: callers must authenticate and
+/// admit downloaded bytes before asking the catalog to construct a source.
+/// Returning an empty array is an honest unsupported-profile result, not a
+/// reason to attempt heuristic execution with unmeasured method mappings.
+public enum InterpretedExtensionProfileCatalog {
+    public static func makeSources(
+        packageName: String,
+        versionName: String,
+        versionCode: Int64,
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> [any KamiSource] {
+        guard let profile = profile(
+            packageName: packageName,
+            versionName: versionName,
+            versionCode: versionCode
+        ) else { return [] }
+
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: profile.networkIdentity,
+            policy: transportPolicy
+        )
+        return [try PinnedInterpretedSource(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport
+        )]
+    }
+
+    /// Deterministic transport seam used by the admission/factory integration
+    /// tests. One profile currently maps to one source and one scoped client.
+    public static func makeSources(
+        packageName: String,
+        versionName: String,
+        versionCode: Int64,
+        apkBytes: [UInt8],
+        transport: any CompatHTTPTransport
+    ) throws -> [any KamiSource] {
+        guard let profile = profile(
+            packageName: packageName,
+            versionName: versionName,
+            versionCode: versionCode
+        ) else { return [] }
+
+        return [try PinnedInterpretedSource(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport
+        )]
+    }
+
+    public static func supports(
+        packageName: String,
+        versionName: String,
+        versionCode: Int64
+    ) -> Bool {
+        profile(
+            packageName: packageName,
+            versionName: versionName,
+            versionCode: versionCode
+        ) != nil
+    }
+
+    private static func profile(
+        packageName: String,
+        versionName: String,
+        versionCode: Int64
+    ) -> PinnedInterpretedProfile? {
+        let profiles: [PinnedInterpretedProfile] = [.batCave169]
+        return profiles.first {
+            $0.packageName == packageName &&
+                $0.versionName == versionName &&
+                $0.versionCode == versionCode
+        }
+    }
+}
+
 private struct PinnedInterpretedMetadata: Sendable {
     let id: Int64
     let name: String
@@ -175,6 +253,8 @@ private struct PinnedInterpretedProfile: Sendable {
     let signerFingerprint: String
     let maximumAPKBytes: Int
     let packageName: String
+    let versionName: String
+    let versionCode: Int64
     let extensionLibVersion: String
     let entryClassName: String
     let entryClassDescriptor: String
@@ -195,6 +275,8 @@ private struct PinnedInterpretedProfile: Sendable {
         signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
         maximumAPKBytes: 64 * 1024 * 1024,
         packageName: "eu.kanade.tachiyomi.extension.en.batcave",
+        versionName: "1.6.9",
+        versionCode: 9,
         extensionLibVersion: "1.6",
         entryClassName: "eu.kanade.tachiyomi.extension.en.batcave.ExtensionGenerated",
         entryClassDescriptor: "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;",
