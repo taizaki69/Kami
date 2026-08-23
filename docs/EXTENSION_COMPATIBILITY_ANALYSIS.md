@@ -239,7 +239,10 @@ simplest `ParsedHttpSource` shapes; cannot be the general strategy.
    allocation-specific constructor/uninitialized-reference rules, resolved
    reference assignment and common-supertype joins, `Throwable` catch
    validation, and typed exception edges. Runtime casts and catch dispatch use
-   the same parsed-DEX plus bounded-host hierarchy. Broader external hierarchy,
+   the same parsed-DEX plus bounded-host hierarchy. Runtime method selection
+   now covers lexical class/interface `invoke-super` and maximally specific
+   interface defaults within the parsed graph, with conservative unresolved
+   outcomes at incomplete external boundaries. Broader external hierarchy,
    opcode, and host-API coverage remain driven by the audit corpus.
    This is the long-running engineering track; see
    `EXTENSION_RUNTIME.md` for the staged plan and honest status.
@@ -266,7 +269,7 @@ feasibility problem**. The blockers, honestly categorized:
 | DEX parsing/analysis | **Done** (this repo, pure Swift) |
 | APK/manifest parsing | **Done** (pure Swift, incl. binary AXML) |
 | Repo index compatibility | **Done** (JSON + proto) |
-| DEX execution | **Partial M1/M2 slice works**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual/interface selection across parsed DEX superclasses, class initialization, pinned constructors/getters, and BatCave's popular path execute through pure request construction to `awaitSuccess`; no end-to-end source yet |
+| DEX execution | **Partial M1/M2 slice works**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual selection, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, pinned constructors/getters, and BatCave's popular path execute through pure request construction to `awaitSuccess`; no end-to-end source yet |
 | Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI, bounded collections, atomics/reflection, source filters, source-base constructors, and a bounded transport-neutral OkHttp request model; transport, responses, and the long tail remain open |
 | Cloudflare/WebView | Native WKWebView bridge design (see NETWORKING.md) |
 | Backup import | Proto decoding done; zstd decompression pending |

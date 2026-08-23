@@ -12,7 +12,8 @@ work was recovered, completed, verified, and pushed.
 - Repository: <https://github.com/taizaki69/Kami>
 - Visibility: private
 - Default branch: `main`
-- Current verified runtime implementation baseline: `b079d6912fc08b89fab4d654b92ada6d07ff73f0`
+- Current verified runtime implementation baseline: `f36a07a0a423c39287ae4efe37376c1eab459a35`
+- Previous resolved-reference/typed-catch baseline: `b079d6912fc08b89fab4d654b92ada6d07ff73f0`
 - Previous exact primitive/constructor-state baseline: `10bf770d61ebe1f6bb5dd9d13ade63853cdbffd8`
 - Previous register-category baseline: `7ce3c812d5eca159a28d680591a45a72ff325956`
 - Previous exception-verifier baseline: `66d41261e4cfa70bea2fd9a89a2f0dcdb670eff6`
@@ -112,26 +113,62 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 113 Swift tests passed locally on Windows/Swift 6.3.3 and on the exact implementation baseline in macOS CI |
+| MihonCompatKit | 126 Swift tests passed locally on Windows/Swift 6.3.3 and on the exact implementation baseline in macOS CI |
 | Real APK constructors | Akuma, MangaDex, and BatCave passed |
 | Structural verifier | 9 focused regressions cover instruction geometry, branch/fallthrough boundaries, and aligned, bounded, correctly typed payloads and switch targets |
 | Exception/control verifier | 13 focused regressions cover strict try/catch decoding, resolved `Throwable` validation, typed handler state/execution, and AOSP branch/result/exception-entry rules |
 | Register dataflow verifier | 21 focused regressions cover dead-code bounds, parameter seeding, common-supertype joins, polymorphic constants, exact primitive/wide/reference assignments, array covariance, result/invoke types, wide-pair clobbering, exception edges, and constructor/uninitialized-object state |
 | Runtime reference semantics | 4 focused regressions cover resolved and unresolved typed-catch dispatch plus hierarchy-aware `check-cast` and `instance-of` |
 | Binary opcode semantics | 1 focused regression covers AOSP operation/type-major ordering across int, long, float, double, and `/2addr` forms |
-| Receiver dispatch | 2 focused regressions cover virtual override and interface implementation selection from the runtime receiver |
+| Method resolution and receiver dispatch | 15 focused regressions cover virtual/class override selection, lexical normal/range class-super dispatch, inherited/maximally-specific interface defaults, abstract masking, default conflicts, DEX 037 interface-super gating, strict interface receivers, typed linkage failures, and conservative unresolved boundaries |
 | Request-model regressions | 2 focused tests cover request construction, duration/cache conversion, URL scheme rejection, CRLF-header rejection, and body bounds |
 | BatCave execution | Exact metadata getters passed; popular path constructs the expected POST request and stops at the `awaitSuccess` transport seam |
-| Swift CI | [successful run 32615730043](https://github.com/taizaki69/Kami/actions/runs/32615730043) |
-| iOS Simulator and unsigned device builds | [successful run 32615730046](https://github.com/taizaki69/Kami/actions/runs/32615730046) |
-| Unsigned IPA packaging | [successful run 32615730055](https://github.com/taizaki69/Kami/actions/runs/32615730055) |
+| Swift CI | [successful run 32617590375](https://github.com/taizaki69/Kami/actions/runs/32617590375) |
+| iOS Simulator and unsigned device builds | [successful run 32617590377](https://github.com/taizaki69/Kami/actions/runs/32617590377) |
+| Unsigned IPA packaging | [successful run 32617590376](https://github.com/taizaki69/Kami/actions/runs/32617590376) |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
-The referenced runs validate the exact `b079d69` implementation baseline and
+The referenced runs validate the exact `f36a07a` implementation baseline and
 produced `compat-audit-macos` and `Kami-unsigned-ipa`. GitHub artifacts expire;
 rerun the corresponding workflow if they are no longer available.
 
 ## What the latest continuation completed
+
+Commit `f36a07a` completes parsed-DEX class-super and interface-default method
+resolution for the current DEX runtime milestone:
+
+- A shared method resolver now selects normal virtual methods from the runtime
+  class chain, lets class declarations override interface defaults, and applies
+  maximally specific interface-default rules across parsed interface graphs.
+  Abstract subinterfaces mask parent defaults, unrelated concrete defaults
+  conflict, and incomplete external relationships or native/no-code methods
+  remain unresolved instead of being guessed.
+- Class `invoke-super` and `invoke-super/range` dispatch relative to the lexical
+  caller's direct superclass, so a grandparent method reference correctly
+  reaches an override in the immediate parent. DEX 037+ interface
+  `invoke-super` searches only the referenced interface graph and ignores class
+  overrides and sibling interfaces.
+- The verifier now checks class/interface invoke kinds, static/direct/virtual
+  method-list placement, interface invoke version gates, locally resolvable
+  method references, and lexical supertype relationships. Unknown external
+  targets continue to soft-verify.
+- Resolved abstract, missing, conflicting-default, and known non-implementing
+  receiver failures surface as typed `AbstractMethodError`,
+  `NoSuchMethodError`, or `IncompatibleClassChangeError` values.
+- `DexFile` exposes its numeric format version. The controlled DEX builder now
+  emits multiple sorted class definitions, selectable 035/037-040 magic,
+  per-class interfaces/fields/methods, explicit access flags, and abstract or
+  native no-code declarations.
+- Thirteen new regressions bring MihonCompatKit to 126 passing tests, including
+  91 interpreter tests and all eight pinned real-extension paths. The debug and
+  release compatibility builds plus the KamiCore dependency build/test pass on
+  Windows/Swift 6.3.3; Swift CI, both iOS targets, and IPA packaging pass on the
+  exact SHA.
+
+Remaining issue #1 work is broader external class-graph and super/default
+resolution, remaining opcode coverage, and differential AOSP fixtures.
+
+## What the preceding resolved-reference continuation completed
 
 Commit `b079d69` completes the resolved-reference and typed-catch portion of the
 DEX verifier/runtime milestone:
@@ -162,9 +199,9 @@ DEX verifier/runtime milestone:
   compatibility build and KamiCore dependency build/test pass on Windows/Swift
   6.3.3; Swift CI, both iOS targets, and IPA packaging pass on the exact SHA.
 
-Remaining issue #1 work is broader external class-graph resolution, complete
-interface-default and invoke-super behavior, remaining opcode coverage, and
-differential AOSP fixtures.
+Commit `f36a07a` subsequently completed parsed-DEX interface-default and
+lexical class/interface `invoke-super` behavior. Broader resolution beyond the
+parsed graph remains open.
 
 ## What the preceding exact-type continuation completed
 
@@ -425,9 +462,10 @@ Not proven or implemented:
   the parsed DEX and bounded host graph. Structural
   code-item/control-flow/exception-table verification, exact
   primitive/constructor/reference register verification, resolved `Throwable`
-  catch validation, runtime cast/catch checks, and receiver-directed
-  virtual/interface selection across parsed DEX superclass chains are working;
-  interface-default and invoke-super resolution remain open.
+  catch validation, runtime cast/catch checks, receiver-directed virtual/class
+  dispatch, maximally specific interface defaults, and lexical class/interface
+  `invoke-super` across parsed DEX graphs are working. Equivalent resolution
+  across incomplete external hierarchy data remains open.
 - APK signer authentication and update identity binding.
 - A signed installation on a physical iPhone or iPad.
 - Production compatibility telemetry or a declared repository license.
@@ -465,9 +503,9 @@ Known pre-existing hardening gaps that were not diff-introduced findings:
 - External class relationships absent from both the APK and bounded host graph
   remain deliberately unresolved; wider runtime resolution is required for
   exact casts and narrower typed catches across that boundary.
-- Receiver-directed virtual/interface lookup walks parsed DEX superclasses;
-  complete interface-default and invoke-super resolution across hierarchy data
-  that leaves the parsed DEX remains open.
+- Receiver-directed virtual lookup, interface-default selection, and lexical
+  class/interface `invoke-super` are exact within parsed DEX graphs; complete
+  resolution across hierarchy data that leaves the parsed DEX remains open.
 - Instruction counts do not price expensive StringBuilder copying or every
   allocation/host-collection operation cost.
 
@@ -477,7 +515,7 @@ Address these before treating arbitrary downloaded extensions as safe.
 
 | Priority | Issue | Purpose |
 |---|---|---|
-| P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining external hierarchy, interface-default/invoke-super, opcode, and differential semantics work |
+| P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining external hierarchy and super/default resolution, opcode, and differential semantics work |
 | P0 | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | One real APK through search/popular, details, chapters, pages, and `KamiSource` |
 | Security gate | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | Required before downloaded APK execution |
 | Diagnostics | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Deterministic, redacted unresolved-surface reports |
@@ -490,13 +528,13 @@ The rest of the product backlog is in `TODO.md`.
 1. Work only with the pinned local corpus while the signer gate is absent.
 2. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
    plus canonical unresolved diagnostics for every new bridge decision.
-3. Continue issue #1 with broader external hierarchy resolution, complete
-   interface-default/invoke-super behavior, remaining opcodes, and differential
-   AOSP coverage. Code-item geometry, strict try/catch decoding and resolved
-   `Throwable` validation, branch/move-result/move-exception rules, bounded
-   exact primitive/constructor/reference dataflow, runtime casts/catches,
-   receiver-directed virtual/interface lookup, and invoke word-count checks are
-   already in.
+3. Continue issue #1 with broader external hierarchy and super/default
+   resolution, remaining opcodes, and differential AOSP coverage. Code-item
+   geometry, strict try/catch decoding and resolved `Throwable` validation,
+   branch/move-result/move-exception rules, bounded exact
+   primitive/constructor/reference dataflow, runtime casts/catches,
+   receiver-directed virtual/interface-default lookup, lexical parsed-DEX
+   `invoke-super`, and invoke word-count/kind checks are already in.
 4. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
 5. Continue issue #2 from the exact `OkHttpExtensionsKt.awaitSuccess` seam.
@@ -533,6 +571,8 @@ an exact real-APK assertion when reachable, and CI coverage.
 | APK and archive parsing | `Packages/MihonCompatKit/Sources/MihonCompatKit/APK/` |
 | DEX parser | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/DexFile.swift` |
 | Interpreter | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexInterpreter.swift` |
+| Method resolution | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexMethodResolver.swift` |
+| Register/invoke verifier | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexRegisterVerifier.swift` |
 | Native capability boundary | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/HostBridge.swift` |
 | Pure HTTP request values | `Packages/MihonCompatKit/Sources/MihonCompatKit/Networking/CompatHTTPRequest.swift` |
 | Request-model regressions | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/CompatHTTPRequestTests.swift` |

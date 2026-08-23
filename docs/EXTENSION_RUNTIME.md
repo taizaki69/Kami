@@ -90,11 +90,18 @@ Implemented slice:
 - Java-compatible integer divide/remainder edge cases, reference identity,
   hierarchy-aware `check-cast`, `instance-of`, and typed exception dispatch,
   `throw null` behavior, recursion limit, cancellation, and trace callback.
-- Exact name/prototype dispatch for interpreted and host calls; virtual and
-  interface invokes select the most-specific matching method from the runtime
-  receiver's parsed DEX superclass chain. Static/instance kind, invoke word
-  count, caller `outs_size`, wide-register pairing, logical argument
-  categories, and return categories are checked.
+- Exact name/prototype dispatch for interpreted and host calls. Virtual calls
+  walk the runtime receiver's parsed class chain; interface calls prefer class
+  declarations and then apply maximally specific default-method selection,
+  including abstract masking and conflict detection. Class `invoke-super`
+  starts at the lexical caller's direct superclass, and DEX 037+ interface
+  `invoke-super` searches only the referenced interface graph. Static/instance
+  and class/interface invoke kinds, local method-list placement, DEX version,
+  lexical supertype relationships, invoke word count, caller `outs_size`,
+  wide-register pairing, logical argument categories, and return categories
+  are checked. Missing, abstract, and conflicting resolved dispatches surface
+  as typed `NoSuchMethodError`, `AbstractMethodError`, and
+  `IncompatibleClassChangeError`; incomplete external graphs stay unresolved.
 - One-time DEX class initialization, including DEX superclass initialization,
   before static use and allocation; failed initialization remains failed.
 - Precise unresolved-class/method/opcode failures instead of treating arbitrary
@@ -170,12 +177,12 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 113 passing tests: 78 interpreter tests, 10 parser
+`MihonCompatKit` currently has 126 passing tests: 91 interpreter tests, 10 parser
 hardening tests (including every truncated prefix of generated DEX and ZIP
 fixtures), 8 pinned real-extension executions, 2 bounded request-model tests,
 and 15 reader/inflate/repository tests. GitHub Swift CI fetches the
-SHA-256-locked APK corpus before running them; the exact `b079d69` baseline
-passed on [macOS CI](https://github.com/taizaki69/Kami/actions/runs/32615730043).
+SHA-256-locked APK corpus before running them; the exact `f36a07a` baseline
+passed on [macOS CI](https://github.com/taizaki69/Kami/actions/runs/32617590375).
 
 The compatibility matrix records the exact versions, hashes, and methods. New
 runtime behavior is complete only when it has a focused regression test and,

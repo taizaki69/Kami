@@ -33,8 +33,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 
 - [~] DEX interpreter core M1 — frames/registers, core opcode families,
       objects/arrays/fields/invokes/exceptions, exact prototype dispatch,
-      receiver-directed virtual/interface selection across parsed DEX
-      superclasses, one-time class initialization, invoke validation, shared
+      receiver-directed virtual/interface selection, maximally specific
+      interface defaults, lexical class/interface `invoke-super` across parsed
+      DEX graphs, one-time class initialization, invoke-kind validation, shared
       budgets, cancellation, a bounded structural verifier for instruction and
       payload geometry/control flow plus strict try/catch table decoding,
       register bounds, bounded exact primitive/constructor/reference dataflow,

@@ -13,7 +13,9 @@ validated DEX parsing, compatibility analysis, and an initial interpreter with
 a bounded pre-execution geometry/control-flow, exception-table, register-bounds,
 and typed register-dataflow verifier. The verifier now covers exact primitive
 and constructor state, resolved reference assignability and joins, and resolved
-catch types.
+catch types. Runtime dispatch resolves virtual overrides, lexical
+`invoke-super`, and maximally specific interface defaults across the parsed DEX
+class graph while leaving incomplete external graphs explicitly unresolved.
 Pinned real-APK tests execute the Akuma, MangaDex, and BatCave entry
 constructors plus BatCave's `getBaseUrl`, `getLang`, `getName`, and `getId`
 methods. BatCave's real popular-manga path now runs through Kotlin class
@@ -56,7 +58,7 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 113 tests run on Windows with Swift 6.3
+The compatibility kit and all 126 tests run on Windows with Swift 6.3
 (`scripts/windows_dev_test.bat`). GitHub Actions independently runs the pinned
 real-APK suite on macOS, compiles both Simulator and unsigned device targets,
 and publishes an unsigned IPA artifact. The `compat-audit` CLI produced the
