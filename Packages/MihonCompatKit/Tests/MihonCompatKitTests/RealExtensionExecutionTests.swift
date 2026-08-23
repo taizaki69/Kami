@@ -219,6 +219,53 @@ final class RealExtensionExecutionTests: XCTestCase {
         XCTAssertEqual(vm.bridge.lastPreparedRequest, expected)
     }
 
+    /// BatCave's generated search worker is R8-renamed to `k`; calling that
+    /// exact pinned method drives the real nonblank-query branch without
+    /// fabricating an implementation of its external KeiSource superclass.
+    func testBatCaveTextSearchBuildsEncodedGETAndParsesPage() async throws {
+        let html = """
+        <div id="dle-content">
+          <article class="readed">
+            <div class="readed__title"><a href="/comic/search-hit">Search Hit</a></div>
+            <img data-src="/uploads/search-hit.jpg">
+          </article>
+        </div>
+        <div class="pagination__pages"><span>1</span></div>
+        """
+        let transport = StaticTransport(response: CompatHTTPResponse(
+            finalURL: "https://batcave.biz/search/alpha+beta/page/2/",
+            statusCode: 200,
+            headers: [CompatHTTPHeader(name: "Content-Type", value: "text/html; charset=utf-8")],
+            body: Array(html.utf8)
+        ))
+        let (vm, _) = try loadVM("batcave", transport: transport)
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = try vm.instantiate(classDescriptor: cls)
+
+        let result = try await vm.callAsync(
+            classDescriptor: cls,
+            method: "k",
+            prototype: "(Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;ILjava/lang/String;Leu/kanade/tachiyomi/source/model/FilterList;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+            args: [receiver, .int(2), HostBridge.string("  alpha beta  "), .null, .null]
+        )
+        guard let page = HostBridge.mangasPageCompat(from: result) else {
+            return XCTFail("expected a converted search MangasPage, got \(result)")
+        }
+        XCTAssertEqual(page.mangas.count, 1)
+        XCTAssertEqual(page.mangas[0].url, "/comic/search-hit")
+        XCTAssertEqual(page.mangas[0].title, "Search Hit")
+        XCTAssertEqual(page.mangas[0].thumbnailURL, "https://batcave.biz/uploads/search-hit.jpg")
+        XCTAssertFalse(page.hasNextPage)
+
+        let expected = CompatHTTPRequest(
+            url: "https://batcave.biz/search/alpha+beta/page/2/",
+            cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
+        )
+        let requests = await transport.requests()
+        XCTAssertEqual(requests, [expected])
+        XCTAssertEqual(vm.bridge.lastPreparedRequest, expected)
+    }
+
     func testBatCaveAwaitSuccessRejectsNonSuccessfulHTTPStatus() async throws {
         let transport = StaticTransport(response: CompatHTTPResponse(
             finalURL: "https://batcave.biz/comix/",

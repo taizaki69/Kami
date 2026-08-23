@@ -347,6 +347,10 @@ struct DexTypeHierarchy {
             classType(descriptor, superclass: "Ljava/lang/ReflectiveOperationException;")
         }
         classType("Ljava/io/IOException;", superclass: "Ljava/lang/Exception;")
+        classType(
+            "Ljava/io/UnsupportedEncodingException;",
+            superclass: "Ljava/io/IOException;"
+        )
 
         classType("Ljava/lang/String;", interfaces: [
             serializable, "Ljava/lang/Comparable;", "Ljava/lang/CharSequence;",

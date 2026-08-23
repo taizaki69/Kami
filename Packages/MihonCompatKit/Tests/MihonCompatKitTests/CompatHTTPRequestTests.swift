@@ -203,4 +203,31 @@ final class CompatHTTPRequestTests: XCTestCase {
         ))
         XCTAssertNil(bridge.lastPreparedRequest)
     }
+
+    func testURLFormEncoderMatchesJavaUTF8SemanticsAndIsBounded() throws {
+        let (vm, bridge) = try makeVM()
+        let encoded = try invoke(
+            bridge, vm,
+            class: "Ljava/net/URLEncoder;", "encode",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            isStatic: true,
+            args: [HostBridge.string("A b+c/é~*"), HostBridge.string("UTF-8")]
+        )
+        XCTAssertEqual(vmStringValue(encoded), "A+b%2Bc%2F%C3%A9%7E*")
+
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Ljava/net/URLEncoder;", "encode",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            isStatic: true,
+            args: [HostBridge.string("value"), HostBridge.string("UTF-16")]
+        ))
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Ljava/net/URLEncoder;", "encode",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            isStatic: true,
+            args: [HostBridge.string(String(repeating: "x", count: 8_193)), HostBridge.string("UTF-8")]
+        ))
+    }
 }

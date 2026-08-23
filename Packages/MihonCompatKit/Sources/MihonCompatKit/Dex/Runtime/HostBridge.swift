@@ -612,6 +612,38 @@ public final class HostBridge {
             return .int(value.unicodeScalars.allSatisfy { CharacterSet.whitespacesAndNewlines.contains($0) } ? 1 : 0)
         }
         bridge.register(
+            class: "Lkotlin/text/StringsKt;",
+            "trim",
+            prototype: "(Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+            isStatic: true
+        ) { _, args in
+            let value = vmStringValue(try argument(args, 0, "StringsKt.trim"))
+            return string(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        bridge.register(
+            class: "Ljava/net/URLEncoder;",
+            "encode",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            isStatic: true
+        ) { _, args in
+            let value = try requiredString(args, 0, "URLEncoder.encode")
+            let charset = try requiredString(args, 1, "URLEncoder.encode")
+            guard charset.caseInsensitiveCompare("UTF-8") == .orderedSame ||
+                    charset.caseInsensitiveCompare("UTF8") == .orderedSame else {
+                throw hostThrowable(
+                    "Ljava/io/UnsupportedEncodingException;",
+                    "unsupported URL-encoding charset"
+                )
+            }
+            guard value.utf8.count <= 8_192 else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "URL-encoding input is too long"
+                )
+            }
+            return string(formURLEncodeUTF8(value))
+        }
+        bridge.register(
             class: "Lkotlin/jvm/internal/Ref$BooleanRef;",
             "<init>",
             prototype: "()V"
@@ -3049,6 +3081,27 @@ public final class HostBridge {
         if let query = components.query { result += "?" + query }
         if let fragment = components.fragment { result += "#" + fragment }
         return result
+    }
+
+    /// Matches `java.net.URLEncoder`'s legacy HTML-form safe set. In
+    /// particular, spaces become `+`, `*` stays literal, and `~` is escaped.
+    private static func formURLEncodeUTF8(_ value: String) -> String {
+        let hex = Array("0123456789ABCDEF".utf8)
+        var result: [UInt8] = []
+        result.reserveCapacity(value.utf8.count * 3)
+        for byte in value.utf8 {
+            switch byte {
+            case 0x41...0x5A, 0x61...0x7A, 0x30...0x39, 0x2A, 0x2D, 0x2E, 0x5F:
+                result.append(byte)
+            case 0x20:
+                result.append(0x2B)
+            default:
+                result.append(0x25)
+                result.append(hex[Int(byte >> 4)])
+                result.append(hex[Int(byte & 0x0F)])
+            }
+        }
+        return String(decoding: result, as: UTF8.self)
     }
 
     private static func execute(
