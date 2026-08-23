@@ -274,102 +274,71 @@ private struct ExactInterpretedMethod: Sendable {
     let prototype: String
 }
 
+/// Stable lib 1.6 source entrypoints. These signatures are part of the public
+/// Keiyoushi/Mihon source API and are discovered on the authenticated APK's
+/// generated entry-class chain instead of copied into every artifact profile.
+private enum StableInterpretedSourceAPI {
+    static let popular = ExactInterpretedMethod(
+        name: "getPopularManga",
+        prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+    )
+    static let latest = ExactInterpretedMethod(
+        name: "getLatestUpdates",
+        prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+    )
+    static let search = ExactInterpretedMethod(
+        name: "getSearchManga",
+        prototype: "(ILjava/lang/String;Leu/kanade/tachiyomi/source/model/FilterList;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+    )
+    static let mangaUpdate = ExactInterpretedMethod(
+        name: "getMangaUpdate",
+        prototype: "(Leu/kanade/tachiyomi/source/model/SManga;Ljava/util/List;ZZLkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+    )
+    static let pages = ExactInterpretedMethod(
+        name: "getPageList",
+        prototype: "(Leu/kanade/tachiyomi/source/model/SChapter;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+    )
+    static let filterList = ExactInterpretedMethod(
+        name: "getFilterList",
+        prototype: "()Leu/kanade/tachiyomi/source/model/FilterList;"
+    )
+    static let supportsLatest = ExactInterpretedMethod(
+        name: "getSupportsLatest",
+        prototype: "()Z"
+    )
+
+    static let wrapperMethods = [search, mangaUpdate, filterList, supportsLatest]
+}
+
 private struct PinnedInterpretedProfile: Sendable {
     let identifier: String
-    let networkIdentity: String
     let sha256: String
     let signerFingerprint: String
     let maximumAPKBytes: Int
     let packageName: String
     let versionName: String
     let versionCode: Int64
-    let extensionLibVersion: String
-    let entryClassName: String
-    let entryClassDescriptor: String
-    let expectedName: String
-    let expectedLanguage: String
-    let expectedBaseURL: String
-    let supportsLatest: Bool
-    let popular: ExactInterpretedMethod
-    let latest: ExactInterpretedMethod
-    let search: ExactInterpretedMethod
-    let mangaUpdate: ExactInterpretedMethod
-    let pages: ExactInterpretedMethod
+
+    var networkIdentity: String { "\(packageName)@\(versionName)" }
 
     static let batCave169 = PinnedInterpretedProfile(
         identifier: "batcave-1.6.9",
-        networkIdentity: "eu.kanade.tachiyomi.extension.en.batcave@1.6.9",
         sha256: "f5338a90f9b9b40c27a2106ceb1e0c94713c38208998fd735bfabda18934fab6",
         signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
         maximumAPKBytes: 64 * 1024 * 1024,
         packageName: "eu.kanade.tachiyomi.extension.en.batcave",
         versionName: "1.6.9",
-        versionCode: 9,
-        extensionLibVersion: "1.6",
-        entryClassName: "eu.kanade.tachiyomi.extension.en.batcave.ExtensionGenerated",
-        entryClassDescriptor: "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;",
-        expectedName: "BatCave",
-        expectedLanguage: "en",
-        expectedBaseURL: "https://batcave.biz",
-        supportsLatest: true,
-        popular: ExactInterpretedMethod(
-            name: "getPopularManga",
-            prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-        ),
-        latest: ExactInterpretedMethod(
-            name: "getLatestUpdates",
-            prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-        ),
-        search: ExactInterpretedMethod(
-            name: "getSearchManga",
-            prototype: "(ILjava/lang/String;Leu/kanade/tachiyomi/source/model/FilterList;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-        ),
-        mangaUpdate: ExactInterpretedMethod(
-            name: "getMangaUpdate",
-            prototype: "(Leu/kanade/tachiyomi/source/model/SManga;Ljava/util/List;ZZLkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-        ),
-        pages: ExactInterpretedMethod(
-            name: "getPageList",
-            prototype: "(Leu/kanade/tachiyomi/source/model/SChapter;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-        )
+        versionCode: 9
     )
 
     static let kawiiManga161 = PinnedInterpretedProfile(
         identifier: "kawii-manga-1.6.1",
-        networkIdentity: "eu.kanade.tachiyomi.extension.ar.kawiimanga@1.6.1",
         sha256: "9e6110b8d1946180e948d3a890347529a5889e636ca6a001170cd206f74dd52a",
         signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
         maximumAPKBytes: 64 * 1024 * 1024,
         packageName: "eu.kanade.tachiyomi.extension.ar.kawiimanga",
         versionName: "1.6.1",
-        versionCode: 1,
-        extensionLibVersion: "1.6",
-        entryClassName: "eu.kanade.tachiyomi.extension.ar.kawiimanga.ExtensionGenerated",
-        entryClassDescriptor: "Leu/kanade/tachiyomi/extension/ar/kawiimanga/ExtensionGenerated;",
-        expectedName: "Kawii Manga",
-        expectedLanguage: "ar",
-        expectedBaseURL: "https://kawaiimanga.org",
-        supportsLatest: true,
-        popular: ExactInterpretedMethod(
-            name: "getPopularManga",
-            prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-        ),
-        latest: ExactInterpretedMethod(
-            name: "getLatestUpdates",
-            prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-        ),
-        search: ExactInterpretedMethod(
-            name: "getSearchManga",
-            prototype: "(ILjava/lang/String;Leu/kanade/tachiyomi/source/model/FilterList;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-        ),
-        mangaUpdate: ExactInterpretedMethod(
-            name: "getMangaUpdate",
-            prototype: "(Leu/kanade/tachiyomi/source/model/SManga;Ljava/util/List;ZZLkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-        ),
-        pages: ExactInterpretedMethod(
-            name: "getPageList",
-            prototype: "(Leu/kanade/tachiyomi/source/model/SChapter;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-        )
+        versionCode: 1
     )
 }
 
@@ -384,6 +353,7 @@ private actor PinnedInterpretedRuntime {
     private let profile: PinnedInterpretedProfile
     private let vm: DexInterpreter
     private let receiver: RVal
+    private let entryClassDescriptor: String
     private let sourceAPIWrapperDescriptor: String
     private var executing = false
     private var waiters: [Waiter] = []
@@ -413,20 +383,23 @@ private actor PinnedInterpretedRuntime {
         let manifest = try ExtensionManifest(apkBytes: apkBytes)
         guard manifest.declaresExtensionFeature,
               manifest.packageName == profile.packageName,
-              manifest.extensionLibVersion == profile.extensionLibVersion,
-              manifest.resolvedSourceClass == profile.entryClassName else {
+              manifest.versionName == profile.versionName,
+              manifest.versionCode == profile.versionCode,
+              manifest.extensionLibVersion == "1.6",
+              let entryClassName = manifest.resolvedSourceClass,
+              let entryClassDescriptor = Self.classDescriptor(from: entryClassName) else {
             throw PinnedInterpretedSourceError.manifestMismatch(profile: profile.identifier)
         }
 
         let archive = try ZipArchive(apkBytes)
         let dex = try DexFile(try archive.data(named: "classes.dex"))
-        guard dex.classIndexByDescriptor[profile.entryClassDescriptor] != nil else {
+        guard dex.classIndexByDescriptor[entryClassDescriptor] != nil else {
             throw PinnedInterpretedSourceError.missingEntryClass(profile: profile.identifier)
         }
         guard let sourceAPIWrapperDescriptor = Self.sourceAPIWrapper(
             dex: dex,
-            entryClassDescriptor: profile.entryClassDescriptor,
-            requiredMethods: [profile.search, profile.mangaUpdate]
+            entryClassDescriptor: entryClassDescriptor,
+            requiredMethods: StableInterpretedSourceAPI.wrapperMethods
         ) else {
             throw PinnedInterpretedSourceError.missingSourceAPIWrapper(
                 profile: profile.identifier
@@ -438,33 +411,58 @@ private actor PinnedInterpretedRuntime {
             bridge: HostBridge.minimal(transport: transport),
             cancelled: { Task.isCancelled }
         )
-        let receiver = try vm.instantiate(classDescriptor: profile.entryClassDescriptor)
-        let name = try Self.metadataString("getName", vm: vm, receiver: receiver, profile: profile)
-        let language = try Self.metadataString("getLang", vm: vm, receiver: receiver, profile: profile)
-        let baseURL = try Self.metadataString("getBaseUrl", vm: vm, receiver: receiver, profile: profile)
+        let receiver = try vm.instantiate(classDescriptor: entryClassDescriptor)
+        let name = try Self.metadataString(
+            "getName",
+            vm: vm,
+            receiver: receiver,
+            entryClassDescriptor: entryClassDescriptor,
+            profile: profile
+        )
+        let language = try Self.metadataString(
+            "getLang",
+            vm: vm,
+            receiver: receiver,
+            entryClassDescriptor: entryClassDescriptor,
+            profile: profile
+        )
+        let baseURL = try Self.metadataString(
+            "getBaseUrl",
+            vm: vm,
+            receiver: receiver,
+            entryClassDescriptor: entryClassDescriptor,
+            profile: profile
+        )
         let idValue = try vm.call(
-            classDescriptor: profile.entryClassDescriptor,
+            classDescriptor: entryClassDescriptor,
             method: "getId",
             prototype: "()J",
             args: [receiver]
         )
+        let supportsLatestValue = try vm.call(
+            classDescriptor: sourceAPIWrapperDescriptor,
+            method: StableInterpretedSourceAPI.supportsLatest.name,
+            prototype: StableInterpretedSourceAPI.supportsLatest.prototype,
+            args: [receiver]
+        )
         guard case let .long(id) = idValue,
               id > 0,
-              name == profile.expectedName,
-              language == profile.expectedLanguage,
-              baseURL == profile.expectedBaseURL else {
+              case let .int(rawSupportsLatest) = supportsLatestValue,
+              rawSupportsLatest == 0 || rawSupportsLatest == 1,
+              Self.validMetadata(name: name, language: language, baseURL: baseURL) else {
             throw PinnedInterpretedSourceError.invalidMetadata(profile: profile.identifier)
         }
 
         self.profile = profile
         self.vm = vm
         self.receiver = receiver
+        self.entryClassDescriptor = entryClassDescriptor
         self.sourceAPIWrapperDescriptor = sourceAPIWrapperDescriptor
         self.metadata = PinnedInterpretedMetadata(
             id: id,
             name: name,
             language: language,
-            supportsLatest: profile.supportsLatest,
+            supportsLatest: rawSupportsLatest != 0,
             baseURL: baseURL
         )
     }
@@ -475,9 +473,9 @@ private actor PinnedInterpretedRuntime {
         defer { release() }
         try Task.checkCancellation()
         let result = try await vm.callAsync(
-            classDescriptor: profile.entryClassDescriptor,
-            method: profile.popular.name,
-            prototype: profile.popular.prototype,
+            classDescriptor: entryClassDescriptor,
+            method: StableInterpretedSourceAPI.popular.name,
+            prototype: StableInterpretedSourceAPI.popular.prototype,
             args: [receiver, .int(page), .null]
         )
         guard let converted = HostBridge.mangasPageCompat(from: result) else {
@@ -492,9 +490,9 @@ private actor PinnedInterpretedRuntime {
         defer { release() }
         try Task.checkCancellation()
         let result = try await vm.callAsync(
-            classDescriptor: profile.entryClassDescriptor,
-            method: profile.latest.name,
-            prototype: profile.latest.prototype,
+            classDescriptor: entryClassDescriptor,
+            method: StableInterpretedSourceAPI.latest.name,
+            prototype: StableInterpretedSourceAPI.latest.prototype,
             args: [receiver, .int(page), .null]
         )
         guard let converted = HostBridge.mangasPageCompat(from: result) else {
@@ -512,8 +510,8 @@ private actor PinnedInterpretedRuntime {
             // Keiyoushi's stable public wrapper routes URL queries and then
             // virtually dispatches to the extension's R8-renamed worker.
             classDescriptor: sourceAPIWrapperDescriptor,
-            method: profile.search.name,
-            prototype: profile.search.prototype,
+            method: StableInterpretedSourceAPI.search.name,
+            prototype: StableInterpretedSourceAPI.search.prototype,
             args: [receiver, .int(page), HostBridge.string(query), .null, .null]
         )
         guard let converted = HostBridge.mangasPageCompat(from: result) else {
@@ -535,8 +533,8 @@ private actor PinnedInterpretedRuntime {
             // The inherited wrapper owns concurrency protection and initialized
             // state, then virtually dispatches to the extension implementation.
             classDescriptor: sourceAPIWrapperDescriptor,
-            method: profile.mangaUpdate.name,
-            prototype: profile.mangaUpdate.prototype,
+            method: StableInterpretedSourceAPI.mangaUpdate.name,
+            prototype: StableInterpretedSourceAPI.mangaUpdate.prototype,
             args: [
                 receiver,
                 HostBridge.mangaValue(from: manga),
@@ -562,9 +560,9 @@ private actor PinnedInterpretedRuntime {
         defer { release() }
         try Task.checkCancellation()
         let result = try await vm.callAsync(
-            classDescriptor: profile.entryClassDescriptor,
-            method: profile.pages.name,
-            prototype: profile.pages.prototype,
+            classDescriptor: entryClassDescriptor,
+            method: StableInterpretedSourceAPI.pages.name,
+            prototype: StableInterpretedSourceAPI.pages.prototype,
             args: [receiver, HostBridge.chapterValue(from: chapter), .null]
         )
         guard let converted = HostBridge.pagesCompat(from: result) else {
@@ -628,10 +626,11 @@ private actor PinnedInterpretedRuntime {
         _ method: String,
         vm: DexInterpreter,
         receiver: RVal,
+        entryClassDescriptor: String,
         profile: PinnedInterpretedProfile
     ) throws -> String {
         let result = try vm.call(
-            classDescriptor: profile.entryClassDescriptor,
+            classDescriptor: entryClassDescriptor,
             method: method,
             prototype: "()Ljava/lang/String;",
             args: [receiver]
@@ -643,6 +642,40 @@ private actor PinnedInterpretedRuntime {
             throw PinnedInterpretedSourceError.invalidMetadata(profile: profile.identifier)
         }
         return value
+    }
+
+    private static func classDescriptor(from className: String) -> String? {
+        guard !className.isEmpty,
+              className.utf8.count <= 1_024,
+              !className.hasPrefix("."),
+              !className.hasSuffix("."),
+              className.split(separator: ".").allSatisfy({ component in
+                  !component.isEmpty && component.utf8.allSatisfy {
+                      ($0 >= 0x30 && $0 <= 0x39) ||
+                          ($0 >= 0x41 && $0 <= 0x5a) ||
+                          ($0 >= 0x61 && $0 <= 0x7a) ||
+                          $0 == 0x24 || $0 == 0x5f
+                  }
+              }) else { return nil }
+        return "L" + className.replacingOccurrences(of: ".", with: "/") + ";"
+    }
+
+    private static func validMetadata(name: String, language: String, baseURL: String) -> Bool {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              name.utf8.count <= 4_096,
+              !language.isEmpty,
+              language.utf8.count <= 32,
+              language.utf8.allSatisfy({
+                  ($0 >= 0x61 && $0 <= 0x7a) || $0 == 0x2d
+              }),
+              baseURL.utf8.count <= 8_192,
+              let components = URLComponents(string: baseURL),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              components.host?.isEmpty == false,
+              components.user == nil,
+              components.password == nil else { return false }
+        return true
     }
 
     /// R8 may rename a source's abstract implementation workers, but the
