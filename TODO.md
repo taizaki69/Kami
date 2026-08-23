@@ -37,9 +37,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       superclasses, one-time class initialization, invoke validation, shared
       budgets, cancellation, a bounded structural verifier for instruction and
       payload geometry/control flow plus strict try/catch table decoding,
-      register bounds, bounded exact primitive and constructor-state dataflow,
-      and real-APK execution to an HTTP boundary; resolved hierarchy
-      assignability, catch-type validation, and full opcode conformance are
+      register bounds, bounded exact primitive/constructor/reference dataflow,
+      resolved `Throwable` catch validation, hierarchy-aware runtime casts and
+      catches, and real-APK execution to an HTTP boundary; broader external
+      hierarchy resolution, remaining opcodes, and differential conformance are
       tracked in
       [#1](https://github.com/taizaki69/Kami/issues/1)
 - [~] Kotlin/Java class library M2 — Object/String/StringBuilder, core Kotlin

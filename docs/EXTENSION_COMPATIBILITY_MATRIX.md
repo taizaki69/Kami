@@ -20,7 +20,7 @@ is no compatibility claim.
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
 | DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| DEX execution | Partial M1/M2 working | 68 interpreter tests plus eight exact assertions against pinned APK paths; method/exception geometry, exact primitive and constructor-state dataflow, overload identity, invoke shape, and AOSP binary-op ordering are checked |
+| DEX execution | Partial M1/M2 working | 78 interpreter tests plus eight exact assertions against pinned APK paths; method/exception geometry, exact primitive/constructor/reference dataflow, resolved catch validation, runtime casts/catches, overload identity, invoke shape, and AOSP binary-op ordering are checked |
 | End-to-end source operations | Not implemented | BatCave popular constructs an exact inert POST request and reaches `awaitSuccess`; no interpreted response or network operation completes yet |
 
 ## Per-extension execution
@@ -69,21 +69,25 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 ## Test evidence
 
-- 103/103 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
-  corpus present. The last published macOS CI baseline passed 63/63 before the
-  receiver-dispatch and verifier regressions were added.
+- 113/113 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+  corpus present and on the exact `b079d69` baseline in
+  [macOS Swift CI](https://github.com/taizaki69/Kami/actions/runs/32615730043).
 - Seven real-extension constructor/getter tests require successful return
   values. The eighth requires the exact request value and `awaitSuccess`
   frontier; arbitrary VM failures are not accepted as progress.
 - Two focused receiver-dispatch tests prove virtual and interface invokes use
   the runtime receiver's matching DEX implementation.
-- Thirty-seven focused pre-execution-verifier tests cover complete instruction
+- Forty-three focused pre-execution-verifier tests cover complete instruction
   decoding, instruction-boundary control flow, payload alignment/family/size,
   switch targets and sparse ordering, array-data element widths, AOSP branch
   and result rules, strict typed/catch-all exception-table decoding, dead-code
   register bounds, parameter seeding, normal/exception-edge category dataflow,
   joins, exact primitive families, polymorphic constants, typed conversions and
-  wide pairs, and allocation-specific constructor/uninitialized-object state.
+  wide pairs, allocation-specific constructor/uninitialized-object state,
+  resolved reference assignments/common-superclass joins, array covariance,
+  `Throwable` catch validation, and typed `move-exception` state.
+- Four focused runtime regressions cover resolved and unresolved typed-catch
+  dispatch plus hierarchy-aware `check-cast` and `instance-of` behavior.
 - One focused arithmetic regression covers AOSP's operation/type-major binary
   opcode ordering across int, long, float, double, and `/2addr` instructions.
 - Two focused host-bridge tests verify the pure request model, Kotlin duration
@@ -96,9 +100,9 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 Kami can download, validate structurally, inspect, classify, and execute a
 controlled real-extension path through pure request construction. It cannot yet
-use an unmodified extension as a reader source. Full DEX verification/opcode
-work (notably resolved reference hierarchy, catch-type assignability, and
-differential opcode semantics) is tracked in
+use an unmodified extension as a reader source. Remaining DEX work (notably
+broader external hierarchy resolution, opcode coverage, interface-default and
+invoke-super resolution, and differential semantics) is tracked in
 [#1](https://github.com/taizaki69/Kami/issues/1), the first
 complete source in [#2](https://github.com/taizaki69/Kami/issues/2), APK signer trust in
 [#3](https://github.com/taizaki69/Kami/issues/3), and privacy-safe compatibility

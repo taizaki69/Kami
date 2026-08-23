@@ -67,8 +67,10 @@ Implemented slice:
   data. It validates zero padding, ordered non-overlapping instruction ranges,
   exact handler offsets, bounded SLEB32/ULEB32 values, catch types and targets,
   and AOSP control-flow rules for `move-result`, `move-exception`, branch-zero
-  forms, and `outs_size`. Typed and catch-all handlers execute; handlers may
-  intentionally ignore the exception as ART permits.
+  forms, and `outs_size`. Resolved catch classes must derive from `Throwable`;
+  unresolved external catch classes retain verifier soft-failure behavior.
+  Typed and catch-all handlers execute, and handlers may intentionally ignore
+  the exception as ART permits.
 - Every structurally accepted instruction has its register and exposed
   string/type/field/method/prototype operands checked, including unreachable
   code. A bounded worklist then propagates seeded parameter types across normal
@@ -78,12 +80,16 @@ Implemented slice:
   uninitialized references; uninitialized constructor `this`; undefined
   values; and conflicts. Constructor calls initialize every alias, ordinary
   reference use rejects uninitialized objects, and constructors cannot return
-  before initializing `this`. It checks moves/results/returns, calls, arrays,
-  fields, branches, conversions, and numeric operations before execution. The
-  caps are 250,000 states, 8,000,000 register cells, and 8,000,000 merges per
-  method.
+  before initializing `this`. Resolved references join at their common
+  superclass (including covariant reference arrays), and assignments for
+  returns, calls, fields, arrays, constructors, and throws reject known
+  unrelated types. `move-exception` receives the common resolved catch type.
+  The pass also checks moves/results, branches, conversions, and numeric
+  operations before execution. The caps are 250,000 states, 8,000,000 register
+  cells, and 8,000,000 merges per method.
 - Java-compatible integer divide/remainder edge cases, reference identity,
-  exception handlers, recursion limit, cancellation, and trace callback.
+  hierarchy-aware `check-cast`, `instance-of`, and typed exception dispatch,
+  `throw null` behavior, recursion limit, cancellation, and trace callback.
 - Exact name/prototype dispatch for interpreted and host calls; virtual and
   interface invokes select the most-specific matching method from the runtime
   receiver's parsed DEX superclass chain. Static/instance kind, invoke word
@@ -103,8 +109,8 @@ Still required before M1 is complete:
 - Full instruction and payload coverage for the expanding corpus.
 - Complete interface-default and invoke-super resolution when hierarchy data
   leaves the parsed DEX.
-- Resolved reference-hierarchy assignability and resolved catch-type
-  assignability to `Throwable`.
+- Broader resolution for external Java/Kotlin/Android class graphs that are not
+  defined in the APK or the bounded host hierarchy.
 - Differential fixtures against AOSP-compatible reference execution.
 
 This work is tracked in [GitHub issue #1](https://github.com/taizaki69/Kami/issues/1).
@@ -164,11 +170,12 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 103 passing tests: 68 interpreter tests, 10 parser
+`MihonCompatKit` currently has 113 passing tests: 78 interpreter tests, 10 parser
 hardening tests (including every truncated prefix of generated DEX and ZIP
 fixtures), 8 pinned real-extension executions, 2 bounded request-model tests,
 and 15 reader/inflate/repository tests. GitHub Swift CI fetches the
-SHA-256-locked APK corpus before running them.
+SHA-256-locked APK corpus before running them; the exact `b079d69` baseline
+passed on [macOS CI](https://github.com/taizaki69/Kami/actions/runs/32615730043).
 
 The compatibility matrix records the exact versions, hashes, and methods. New
 runtime behavior is complete only when it has a focused regression test and,

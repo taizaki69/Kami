@@ -12,7 +12,8 @@ work was recovered, completed, verified, and pushed.
 - Repository: <https://github.com/taizaki69/Kami>
 - Visibility: private
 - Default branch: `main`
-- Current verified runtime implementation baseline: `10bf770d61ebe1f6bb5dd9d13ade63853cdbffd8`
+- Current verified runtime implementation baseline: `b079d6912fc08b89fab4d654b92ada6d07ff73f0`
+- Previous exact primitive/constructor-state baseline: `10bf770d61ebe1f6bb5dd9d13ade63853cdbffd8`
 - Previous register-category baseline: `7ce3c812d5eca159a28d680591a45a72ff325956`
 - Previous exception-verifier baseline: `66d41261e4cfa70bea2fd9a89a2f0dcdb670eff6`
 - Previous structural-verifier baseline: `284b24dc2b7bec838afed5b6a2c9ea07df8b8f0b`
@@ -111,28 +112,61 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 103 Swift tests passed locally on Windows/Swift 6.3.3; the last published macOS CI baseline passed 63 |
+| MihonCompatKit | 113 Swift tests passed locally on Windows/Swift 6.3.3 and on the exact implementation baseline in macOS CI |
 | Real APK constructors | Akuma, MangaDex, and BatCave passed |
 | Structural verifier | 9 focused regressions cover instruction geometry, branch/fallthrough boundaries, and aligned, bounded, correctly typed payloads and switch targets |
-| Exception/control verifier | 11 focused regressions cover strict try/catch decoding, handler execution, and AOSP branch/result/exception-entry rules |
-| Register dataflow verifier | 17 focused regressions cover dead-code bounds, parameter seeding, joins, polymorphic constants, exact primitive/wide families, result/invoke types, wide-pair clobbering, exception edges, and constructor/uninitialized-object state |
+| Exception/control verifier | 13 focused regressions cover strict try/catch decoding, resolved `Throwable` validation, typed handler state/execution, and AOSP branch/result/exception-entry rules |
+| Register dataflow verifier | 21 focused regressions cover dead-code bounds, parameter seeding, common-supertype joins, polymorphic constants, exact primitive/wide/reference assignments, array covariance, result/invoke types, wide-pair clobbering, exception edges, and constructor/uninitialized-object state |
+| Runtime reference semantics | 4 focused regressions cover resolved and unresolved typed-catch dispatch plus hierarchy-aware `check-cast` and `instance-of` |
 | Binary opcode semantics | 1 focused regression covers AOSP operation/type-major ordering across int, long, float, double, and `/2addr` forms |
 | Receiver dispatch | 2 focused regressions cover virtual override and interface implementation selection from the runtime receiver |
 | Request-model regressions | 2 focused tests cover request construction, duration/cache conversion, URL scheme rejection, CRLF-header rejection, and body bounds |
 | BatCave execution | Exact metadata getters passed; popular path constructs the expected POST request and stops at the `awaitSuccess` transport seam |
-| Swift CI | [successful run 32587746756](https://github.com/taizaki69/Kami/actions/runs/32587746756) |
-| iOS Simulator and unsigned device builds | [successful run 32587746746](https://github.com/taizaki69/Kami/actions/runs/32587746746) |
-| Unsigned IPA packaging | [successful run 32587746752](https://github.com/taizaki69/Kami/actions/runs/32587746752) |
+| Swift CI | [successful run 32615730043](https://github.com/taizaki69/Kami/actions/runs/32615730043) |
+| iOS Simulator and unsigned device builds | [successful run 32615730046](https://github.com/taizaki69/Kami/actions/runs/32615730046) |
+| Unsigned IPA packaging | [successful run 32615730055](https://github.com/taizaki69/Kami/actions/runs/32615730055) |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
-The referenced runs validate the earlier `4d042c9` request-model baseline and
-produced `compat-audit-macos` and `Kami-unsigned-ipa`. The `10bf770`
-register-verifier continuation was verified locally; require the same SHA to
-pass Swift CI, iOS build, and IPA workflows before calling it the published
-cross-platform checkpoint. GitHub artifacts expire; rerun the corresponding
-workflow if they are no longer available.
+The referenced runs validate the exact `b079d69` implementation baseline and
+produced `compat-audit-macos` and `Kami-unsigned-ipa`. GitHub artifacts expire;
+rerun the corresponding workflow if they are no longer available.
 
 ## What the latest continuation completed
+
+Commit `b079d69` completes the resolved-reference and typed-catch portion of the
+DEX verifier/runtime milestone:
+
+- A shared conservative hierarchy resolves parsed DEX superclasses and
+  interfaces plus the bounded Java/Kotlin classes modeled by `HostBridge`.
+  Assignability is tri-state so absent external library graphs soft-verify
+  instead of causing speculative rejection.
+- Reference-array covariance, exact primitive-array compatibility, and
+  common-superclass joins now preserve useful verifier types. Explicit external
+  superclasses named by parsed DEX definitions remain part of those joins even
+  when their own class bodies are outside the APK.
+- Returns, invoke receivers/arguments, constructor receivers, field receivers
+  and values, array writes, filled arrays, and throws reject resolved unrelated
+  reference types. Ordinary interface assignment retains ART's non-strict
+  verifier behavior; runtime checks use strict hierarchy traversal.
+- Resolved catch types must derive from `Throwable`. Handler entry state now
+  gives `move-exception` the common resolved caught type instead of always
+  widening to `Throwable`.
+- `check-cast`, `instance-of`, reflection instance checks, and typed exception
+  dispatch use the same hierarchy. Known bad casts raise a typed
+  `ClassCastException`, `throw null` produces `NullPointerException`, synthetic
+  host failures are normalized to typed exception objects, and an unresolved
+  external thrown value can reach `catch (Throwable)` without matching a
+  speculative narrower catch.
+- Ten new regressions bring MihonCompatKit to 113 passing tests, including 78
+  interpreter tests and all eight pinned real-extension paths. The explicit
+  compatibility build and KamiCore dependency build/test pass on Windows/Swift
+  6.3.3; Swift CI, both iOS targets, and IPA packaging pass on the exact SHA.
+
+Remaining issue #1 work is broader external class-graph resolution, complete
+interface-default and invoke-super behavior, remaining opcode coverage, and
+differential AOSP fixtures.
+
+## What the preceding exact-type continuation completed
 
 Commit `10bf770` completes the exact primitive-family and uninitialized-object
 portion of the DEX register verifier:
@@ -165,13 +199,13 @@ portion of the DEX register verifier:
   Nine new regressions cover cross-family misuse, polymorphic constants,
   conversion outputs, alias initialization, premature constructor return,
   double initialization, and initialized/uninitialized joins.
-- MihonCompatKit now passes 103 tests, including 68 interpreter tests and all
-  eight pinned real-extension paths. The all-products debug build and the
-  KamiCore dependency build/test also pass on Windows/Swift 6.3.3.
+- At that checkpoint MihonCompatKit passed 103 tests, including 68 interpreter
+  tests and all eight pinned real-extension paths. The all-products debug build
+  and the KamiCore dependency build/test also pass on Windows/Swift 6.3.3.
 
-Resolved reference-hierarchy assignability, catch-type assignability to
-`Throwable`, remaining opcodes, and differential AOSP fixtures remain issue #1
-work.
+Commit `b079d69` subsequently completed resolved reference-hierarchy and
+catch-type assignability. Remaining opcodes, broader external class resolution,
+and differential AOSP fixtures remain issue #1 work.
 
 ## What the preceding register-category continuation completed
 
@@ -204,7 +238,8 @@ At that checkpoint, exact `int`/`float` and `long`/`double` distinctions,
 uninitialized-instance constructor rules, resolved reference-hierarchy
 assignability, and resolved catch-type assignability to `Throwable` remained.
 Commit `10bf770` subsequently completed the primitive and constructor-state
-portions; hierarchy and catch-type resolution remain issue #1 work.
+portions; commit `b079d69` subsequently completed the resolved hierarchy and
+catch-type portions.
 
 ## What the preceding exception-verifier continuation completed
 
@@ -373,8 +408,9 @@ Proven today:
 - Bounded, transport-neutral OkHttp request values with no live-network side
   effects, including the exact pinned BatCave POST assertion.
 - Bounded pre-execution verification of complete instruction geometry,
-  try/catch tables, register operands, and exact primitive/constructor-state
-  register dataflow over normal and exception edges.
+  try/catch tables, register operands, resolved catch classes, and exact
+  primitive/constructor/reference register dataflow over normal and exception
+  edges.
 - Native MangaDex browsing through the existing `KamiSource` implementation.
 - Simulator/device compilation and creation of a real unsigned IPA.
 
@@ -385,12 +421,13 @@ Not proven or implemented:
 - Extension HTTP transport, response/response-body/Okio models, coroutine
   suspension/resumption across async transport, Jsoup, preferences, cookies,
   or WebView bridges. The current OkHttp subset is request-only.
-- Full DEX opcode coverage, resolved reference assignability, or resolved
-  `Throwable` assignability for catch types. Structural
-  code-item/control-flow/exception-table verification, exact primitive and
-  constructor-state register verification, and receiver-directed
+- Full DEX opcode coverage or complete hierarchy behavior when class data leaves
+  the parsed DEX and bounded host graph. Structural
+  code-item/control-flow/exception-table verification, exact
+  primitive/constructor/reference register verification, resolved `Throwable`
+  catch validation, runtime cast/catch checks, and receiver-directed
   virtual/interface selection across parsed DEX superclass chains are working;
-  complete behavior when hierarchy data leaves the parsed DEX remains open.
+  interface-default and invoke-super resolution remain open.
 - APK signer authentication and update identity binding.
 - A signed installation on a physical iPhone or iPad.
 - Production compatibility telemetry or a declared repository license.
@@ -425,8 +462,9 @@ Known pre-existing hardening gaps that were not diff-introduced findings:
 - URLSession response limits are checked after full-body buffering.
 - External-list/APK URL scheme, redirect, and destination policy is broad.
 - ZIP/DEX/string processing lacks a complete aggregate resource budget.
-- Catch type matching still uses an approximate hierarchy; full resolved
-  `Throwable` assignability belongs to the exact reference-hierarchy verifier.
+- External class relationships absent from both the APK and bounded host graph
+  remain deliberately unresolved; wider runtime resolution is required for
+  exact casts and narrower typed catches across that boundary.
 - Receiver-directed virtual/interface lookup walks parsed DEX superclasses;
   complete interface-default and invoke-super resolution across hierarchy data
   that leaves the parsed DEX remains open.
@@ -439,7 +477,7 @@ Address these before treating arbitrary downloaded extensions as safe.
 
 | Priority | Issue | Purpose |
 |---|---|---|
-| P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining external hierarchy, catch-type, opcode, and differential semantics work |
+| P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining external hierarchy, interface-default/invoke-super, opcode, and differential semantics work |
 | P0 | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | One real APK through search/popular, details, chapters, pages, and `KamiSource` |
 | Security gate | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | Required before downloaded APK execution |
 | Diagnostics | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Deterministic, redacted unresolved-surface reports |
@@ -452,13 +490,13 @@ The rest of the product backlog is in `TODO.md`.
 1. Work only with the pinned local corpus while the signer gate is absent.
 2. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
    plus canonical unresolved diagnostics for every new bridge decision.
-3. Continue issue #1 with resolved reference-hierarchy assignability and
-   resolved catch-type `Throwable` assignability, then grow opcode and
-   differential AOSP coverage. Code-item geometry, strict try/catch decoding,
-   branch/move-result/move-exception rules, bounded exact primitive and
-   constructor-state dataflow, receiver-directed virtual/interface lookup, and
-   invoke word-count checks are already in; complete partially external
-   hierarchy semantics remains open.
+3. Continue issue #1 with broader external hierarchy resolution, complete
+   interface-default/invoke-super behavior, remaining opcodes, and differential
+   AOSP coverage. Code-item geometry, strict try/catch decoding and resolved
+   `Throwable` validation, branch/move-result/move-exception rules, bounded
+   exact primitive/constructor/reference dataflow, runtime casts/catches,
+   receiver-directed virtual/interface lookup, and invoke word-count checks are
+   already in.
 4. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
 5. Continue issue #2 from the exact `OkHttpExtensionsKt.awaitSuccess` seam.

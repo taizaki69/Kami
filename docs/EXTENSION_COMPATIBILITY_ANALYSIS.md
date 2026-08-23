@@ -236,9 +236,11 @@ simplest `ParsedHttpSource` shapes; cannot be the general strategy.
    bounded pre-execution verifier covers instruction/payload geometry and
    control-flow targets, strict try/catch table decoding, static register bounds,
    exact primitive-family dataflow, polymorphic constants, typed wide pairs,
-   and allocation-specific constructor/uninitialized-reference rules across
-   normal and exception edges. Resolved hierarchy and catch-type assignability,
-   plus growing opcode and host-API coverage, remain driven by the audit corpus.
+   allocation-specific constructor/uninitialized-reference rules, resolved
+   reference assignment and common-supertype joins, `Throwable` catch
+   validation, and typed exception edges. Runtime casts and catch dispatch use
+   the same parsed-DEX plus bounded-host hierarchy. Broader external hierarchy,
+   opcode, and host-API coverage remain driven by the audit corpus.
    This is the long-running engineering track; see
    `EXTENSION_RUNTIME.md` for the staged plan and honest status.
 5. **Backup import** (.tachibk protobuf+zstd) independent of the runtime, so users
@@ -264,7 +266,7 @@ feasibility problem**. The blockers, honestly categorized:
 | DEX parsing/analysis | **Done** (this repo, pure Swift) |
 | APK/manifest parsing | **Done** (pure Swift, incl. binary AXML) |
 | Repo index compatibility | **Done** (JSON + proto) |
-| DEX execution | **Partial M1/M2 slice works**: exact prototype dispatch, receiver-directed virtual/interface selection across parsed DEX superclasses, class initialization, pinned constructors/getters, and BatCave's popular path execute through pure request construction to `awaitSuccess`; no end-to-end source yet |
+| DEX execution | **Partial M1/M2 slice works**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual/interface selection across parsed DEX superclasses, class initialization, pinned constructors/getters, and BatCave's popular path execute through pure request construction to `awaitSuccess`; no end-to-end source yet |
 | Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI, bounded collections, atomics/reflection, source filters, source-base constructors, and a bounded transport-neutral OkHttp request model; transport, responses, and the long tail remain open |
 | Cloudflare/WebView | Native WKWebView bridge design (see NETWORKING.md) |
 | Backup import | Proto decoding done; zstd decompression pending |
