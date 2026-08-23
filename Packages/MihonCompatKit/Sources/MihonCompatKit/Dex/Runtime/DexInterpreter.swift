@@ -60,6 +60,8 @@ public final class DexInterpreter {
         case failed(String)
     }
     private var classInitialization: [String: ClassInitializationState] = [:]
+    /// Method indexes whose complete code-item geometry was verified once.
+    private var verifiedCodeMethods: Set<Int> = []
     private var lastResult: RVal = .null
     /// Current interpreted-frame depth (recursion guard).
     private var depth = 0
@@ -365,6 +367,11 @@ public final class DexInterpreter {
             )
         }
         if isRootFrame, entryDepth == 0 { remainingInstructions = maxInstructions }
+
+        if !verifiedCodeMethods.contains(method.methodIndex) {
+            try DexCodeVerifier.verify(code: code, method: method, dex: dex)
+            verifiedCodeMethods.insert(method.methodIndex)
+        }
 
         var regs = [RVal](repeating: .int(0), count: Int(code.registersSize))
         var cursor = regs.count - incomingWords

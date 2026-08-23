@@ -328,7 +328,210 @@ final class InterpreterTests: XCTestCase {
                           insns: [0x002b, 0x7fff, 0x7fff, 0x000f], isStatic: true,
                           returnType: "I"))
         XCTAssertThrowsError(try run(b, method: "switch")) { error in
-            XCTAssertTrue(error is VMError, "expected VMError, got \(error)")
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("payload"), message)
+        }
+    }
+
+    func testVerifierRejectsTruncatedInstructionBeforeExecution() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "truncated", registers: 1, ins: 0, outs: 0,
+            insns: [0x0014, 0x0000], // const v0 requires three code units
+            isStatic: true, returnType: "I"
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "truncated")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("truncated opcode"), message)
+        }
+    }
+
+    func testVerifierRejectsBranchIntoInstructionOperand() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "badBranch", registers: 0, ins: 0, outs: 0,
+            insns: [
+                0x0029, 0x0001, // goto/16 +1 targets its own offset operand
+                0x000e,         // return-void
+            ],
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "badBranch")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("non-instruction pc 1"), message)
+        }
+    }
+
+    func testVerifierAcceptsAlignedPackedSwitchAndChecksCaseTargets() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "packed", registers: 1, ins: 0, outs: 0,
+            insns: [
+                0x1012,                   // pc 0: const/4 v0, 1
+                0x002b, 0x0005, 0x0000,   // pc 1: packed-switch v0, +5
+                0x0012,                   // pc 4: const/4 v0, 0
+                0x000f,                   // pc 5: return v0
+                0x0100, 0x0001,           // pc 6: packed payload, one case
+                0x0001, 0x0000,           // first key = 1
+                0x000b, 0x0000,           // target = switch pc + 11 = pc 12
+                0x7012,                   // pc 12: const/4 v0, 7
+                0x000f,                   // pc 13: return v0
+            ],
+            isStatic: true, returnType: "I"
+        ))
+
+        XCTAssertEqual(int(try run(builder, method: "packed")), 7)
+    }
+
+    func testVerifierRejectsSwitchCaseTargetInsidePayload() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "badCase", registers: 1, ins: 0, outs: 0,
+            insns: [
+                0x1012,
+                0x002b, 0x0005, 0x0000,
+                0x0012,
+                0x000f,
+                0x0100, 0x0001,
+                0x0001, 0x0000,
+                0x0006, 0x0000, // switch pc + 6 = pc 7, inside the payload
+                0x7012,
+                0x000f,
+            ],
+            isStatic: true, returnType: "I"
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "badCase")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("packed-switch case"), message)
+            XCTAssertTrue(message.contains("non-instruction pc 7"), message)
+        }
+    }
+
+    func testVerifierRejectsFallthroughIntoPayload() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "badFallthrough", registers: 1, ins: 0, outs: 0,
+            insns: [
+                0x0013, 0x0000,       // pc 0: const/16 v0, 0
+                0x0300, 0x0001,       // pc 2: empty array-data payload
+                0x0000, 0x0000,
+                0x000e,               // pc 6: return-void
+            ],
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "badFallthrough")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("falls through to non-instruction pc 2"), message)
+        }
+    }
+
+    func testVerifierRejectsUnalignedPayload() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "unalignedPayload", registers: 0, ins: 0, outs: 0,
+            insns: [
+                0x0528,                   // pc 0: goto +5
+                0x0100, 0x0000,           // pc 1: packed payload at an odd address
+                0x0000, 0x0000,
+                0x000e,                   // pc 5: return-void
+            ],
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "unalignedPayload")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("unaligned payload at pc 1"), message)
+        }
+    }
+
+    func testVerifierRejectsWrongPayloadFamily() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "wrongPayload", registers: 1, ins: 0, outs: 0,
+            insns: [
+                0x002b, 0x0004, 0x0000,   // pc 0: packed-switch v0, +4
+                0x000e,                   // pc 3: return-void fallthrough
+                0x0300, 0x0001,           // pc 4: empty array-data payload
+                0x0000, 0x0000,
+            ],
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "wrongPayload")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("does not reference a matching payload"), message)
+        }
+    }
+
+    func testVerifierRejectsUnsortedSparseSwitchKeys() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "unsortedSparse", registers: 1, ins: 0, outs: 0,
+            insns: [
+                0x002c, 0x0004, 0x0000,   // pc 0: sparse-switch v0, +4
+                0x000e,                   // pc 3: return-void fallthrough/target
+                0x0200, 0x0002,           // pc 4: two sparse cases
+                0x0002, 0x0000,           // key 2
+                0x0001, 0x0000,           // key 1 (invalid ordering)
+                0x0003, 0x0000,           // both cases target pc 3
+                0x0003, 0x0000,
+            ],
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "unsortedSparse")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("sparse-switch keys are not strictly increasing"), message)
+        }
+    }
+
+    func testVerifierRejectsInvalidArrayDataElementWidth() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "badArrayPayload", registers: 1, ins: 0, outs: 0,
+            insns: [
+                0x0026, 0x0004, 0x0000,   // pc 0: fill-array-data v0, +4
+                0x000e,                   // pc 3: return-void fallthrough
+                0x0300, 0x0003,           // pc 4: illegal three-byte elements
+                0x0000, 0x0000,
+            ],
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "badArrayPayload")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("element width 3"), message)
         }
     }
 
