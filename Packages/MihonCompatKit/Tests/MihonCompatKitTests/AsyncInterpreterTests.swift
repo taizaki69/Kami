@@ -107,20 +107,24 @@ final class AsyncInterpreterTests: XCTestCase {
         let handlers = [UInt8(1), UInt8(1)]
             + DexBuilder.ULEB.encode(UInt64(exceptionType))
             + DexBuilder.ULEB.encode(6)
-        builder.addMethod(.init(
+        let instructions: [UInt16] = Insn.invokeStatic(fetch, [])
+            + Insn.moveResultObject(0)
+            + Insn.const4Units(0, 0)
+            + Insn.returnReg(0)
+            + [0x010d]
+            + Insn.const4Units(0, 7)
+            + Insn.returnReg(0)
+        let encodedTryItems = tryItem(start: 0, count: 3, handlerOffset: 1)
+            + handlers
+        let method = DexBuilder.MethodSpec(
             name: "run", registers: 2, ins: 0, outs: 0,
-            insns: Insn.invokeStatic(fetch, [])
-                + Insn.moveResultObject(0)
-                + Insn.const4Units(0, 0)
-                + Insn.returnReg(0)
-                + [0x010d]
-                + Insn.const4Units(0, 7)
-                + Insn.returnReg(0),
+            insns: instructions,
             isStatic: true,
             returnType: "I",
             triesCount: 1,
-            tryItems: tryItem(start: 0, count: 3, handlerOffset: 1) + handlers
-        ))
+            tryItems: encodedTryItems
+        )
+        builder.addMethod(method)
 
         let bridge = HostBridge.minimal()
         bridge.registerAsync(
