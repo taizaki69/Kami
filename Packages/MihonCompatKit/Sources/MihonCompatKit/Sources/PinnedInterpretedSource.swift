@@ -58,6 +58,7 @@ public struct PinnedInterpretedSource: KamiSource {
     public let baseURL: String
 
     private let runtime: PinnedInterpretedRuntime
+    private let filters: [SourceFilter]
 
     /// Loads the exact BatCave 1.6.9 artifact through the production transport.
     public static func batCave169(
@@ -109,6 +110,31 @@ public struct PinnedInterpretedSource: KamiSource {
         )
     }
 
+    /// Loads the exact current MangaMelon 1.6.1 artifact through production transport.
+    public static func mangaMelon161(
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        let profile = PinnedInterpretedProfile.mangaMelon161
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: profile.networkIdentity,
+            policy: transportPolicy
+        )
+        return try Self(profile: profile, apkBytes: apkBytes, transport: transport)
+    }
+
+    /// Injection seam for deterministic MangaMelon tests.
+    public static func mangaMelon161(
+        apkBytes: [UInt8],
+        transport: any CompatHTTPTransport
+    ) throws -> Self {
+        try Self(
+            profile: .mangaMelon161,
+            apkBytes: apkBytes,
+            transport: transport
+        )
+    }
+
     fileprivate init(
         profile: PinnedInterpretedProfile,
         apkBytes: [UInt8],
@@ -126,6 +152,7 @@ public struct PinnedInterpretedSource: KamiSource {
         self.supportsLatest = metadata.supportsLatest
         self.baseURL = metadata.baseURL
         self.runtime = runtime
+        self.filters = runtime.filters
     }
 
     public func getPopularManga(page: Int) async throws -> MangasPageCompat {
@@ -141,14 +168,21 @@ public struct PinnedInterpretedSource: KamiSource {
         query: String,
         filters: [SourceFilter]
     ) async throws -> MangasPageCompat {
-        guard filters.isEmpty else {
+        guard filters.isEmpty || !self.filters.isEmpty else {
             throw PinnedInterpretedSourceError.unsupportedOperation("filtered search")
         }
-        guard query.utf8.count <= 4_096,
-              !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard query.utf8.count <= 4_096 else {
+            throw PinnedInterpretedSourceError.invalidInput(operation: "search")
+        }
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                !self.filters.isEmpty else {
             throw PinnedInterpretedSourceError.unsupportedOperation("blank search")
         }
-        return try await runtime.search(page: page, query: query)
+        return try await runtime.search(
+            page: page,
+            query: query,
+            filters: filters.isEmpty ? self.filters : filters
+        )
     }
 
     public func getMangaDetails(manga: SMangaCompat) async throws -> SMangaCompat {
@@ -180,7 +214,7 @@ public struct PinnedInterpretedSource: KamiSource {
         return ImageRequest(url: rawURL)
     }
 
-    public func getFilterList() -> [SourceFilter] { [] }
+    public func getFilterList() -> [SourceFilter] { filters }
 }
 
 /// Exact runtime profiles currently proven against real APKs. This catalog is
@@ -252,7 +286,11 @@ public enum InterpretedExtensionProfileCatalog {
         versionName: String,
         versionCode: Int64
     ) -> PinnedInterpretedProfile? {
-        let profiles: [PinnedInterpretedProfile] = [.batCave169, .kawiiManga161]
+        let profiles: [PinnedInterpretedProfile] = [
+            .batCave169,
+            .kawiiManga161,
+            .mangaMelon161,
+        ]
         return profiles.first {
             $0.packageName == packageName &&
                 $0.versionName == versionName &&
@@ -311,6 +349,11 @@ private enum StableInterpretedSourceAPI {
 }
 
 private struct PinnedInterpretedProfile: Sendable {
+    enum FilterSupport: Sendable {
+        case none
+        case staticList
+    }
+
     let identifier: String
     let sha256: String
     let signerFingerprint: String
@@ -318,6 +361,7 @@ private struct PinnedInterpretedProfile: Sendable {
     let packageName: String
     let versionName: String
     let versionCode: Int64
+    let filterSupport: FilterSupport
 
     var networkIdentity: String { "\(packageName)@\(versionName)" }
 
@@ -328,7 +372,8 @@ private struct PinnedInterpretedProfile: Sendable {
         maximumAPKBytes: 64 * 1024 * 1024,
         packageName: "eu.kanade.tachiyomi.extension.en.batcave",
         versionName: "1.6.9",
-        versionCode: 9
+        versionCode: 9,
+        filterSupport: .none
     )
 
     static let kawiiManga161 = PinnedInterpretedProfile(
@@ -338,12 +383,25 @@ private struct PinnedInterpretedProfile: Sendable {
         maximumAPKBytes: 64 * 1024 * 1024,
         packageName: "eu.kanade.tachiyomi.extension.ar.kawiimanga",
         versionName: "1.6.1",
-        versionCode: 1
+        versionCode: 1,
+        filterSupport: .none
+    )
+
+    static let mangaMelon161 = PinnedInterpretedProfile(
+        identifier: "mangamelon-1.6.1",
+        sha256: "aedbd5ba3e3a092a381779f0e6ed610e630799070c1f032c5668f7455970d9aa",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+        maximumAPKBytes: 64 * 1024 * 1024,
+        packageName: "eu.kanade.tachiyomi.extension.en.mangamelon",
+        versionName: "1.6.1",
+        versionCode: 1,
+        filterSupport: .staticList
     )
 }
 
 private actor PinnedInterpretedRuntime {
     nonisolated let metadata: PinnedInterpretedMetadata
+    nonisolated let filters: [SourceFilter]
 
     private struct Waiter {
         let id: UInt64
@@ -355,6 +413,7 @@ private actor PinnedInterpretedRuntime {
     private let receiver: RVal
     private let entryClassDescriptor: String
     private let sourceAPIWrapperDescriptor: String
+    private let filterListValue: RVal?
     private var executing = false
     private var waiters: [Waiter] = []
     private var nextWaiterID: UInt64 = 0
@@ -445,6 +504,25 @@ private actor PinnedInterpretedRuntime {
             prototype: StableInterpretedSourceAPI.supportsLatest.prototype,
             args: [receiver]
         )
+        let filterListValue: RVal?
+        let filters: [SourceFilter]
+        switch profile.filterSupport {
+        case .none:
+            filterListValue = nil
+            filters = []
+        case .staticList:
+            let value = try vm.call(
+                classDescriptor: sourceAPIWrapperDescriptor,
+                method: StableInterpretedSourceAPI.filterList.name,
+                prototype: StableInterpretedSourceAPI.filterList.prototype,
+                args: [receiver]
+            )
+            guard let converted = HostBridge.sourceFilters(from: value) else {
+                throw PinnedInterpretedSourceError.invalidMetadata(profile: profile.identifier)
+            }
+            filterListValue = value
+            filters = converted
+        }
         guard case let .long(id) = idValue,
               id > 0,
               case let .int(rawSupportsLatest) = supportsLatestValue,
@@ -458,6 +536,8 @@ private actor PinnedInterpretedRuntime {
         self.receiver = receiver
         self.entryClassDescriptor = entryClassDescriptor
         self.sourceAPIWrapperDescriptor = sourceAPIWrapperDescriptor
+        self.filterListValue = filterListValue
+        self.filters = filters
         self.metadata = PinnedInterpretedMetadata(
             id: id,
             name: name,
@@ -501,18 +581,34 @@ private actor PinnedInterpretedRuntime {
         return converted
     }
 
-    func search(page: Int, query: String) async throws -> MangasPageCompat {
+    func search(
+        page: Int,
+        query: String,
+        filters: [SourceFilter]
+    ) async throws -> MangasPageCompat {
         let page = try Self.pageNumber(page, operation: "search")
         try await acquire()
         defer { release() }
         try Task.checkCancellation()
+        let runtimeFilterValue: RVal
+        if let filterListValue {
+            guard HostBridge.applySourceFilters(filters, to: filterListValue) else {
+                throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
+            }
+            runtimeFilterValue = filterListValue
+        } else {
+            guard filters.isEmpty else {
+                throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
+            }
+            runtimeFilterValue = .null
+        }
         let result = try await vm.callAsync(
             // Keiyoushi's stable public wrapper routes URL queries and then
             // virtually dispatches to the extension's R8-renamed worker.
             classDescriptor: sourceAPIWrapperDescriptor,
             method: StableInterpretedSourceAPI.search.name,
             prototype: StableInterpretedSourceAPI.search.prototype,
-            args: [receiver, .int(page), HostBridge.string(query), .null, .null]
+            args: [receiver, .int(page), HostBridge.string(query), runtimeFilterValue, .null]
         )
         guard let converted = HostBridge.mangasPageCompat(from: result) else {
             throw PinnedInterpretedSourceError.unexpectedResult(operation: "search")

@@ -5,6 +5,7 @@ import MihonCompatKit
 
 final class ExtensionSourceFactoryTests: XCTestCase {
     private static let batCaveSourceID: Int64 = 7_422_099_479_605_463_706
+    private static let mangaMelonSourceID: Int64 = 7_505_916_148_185_744_347
     private static let keiyoushiFingerprint =
         "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
 
@@ -82,6 +83,33 @@ final class ExtensionSourceFactoryTests: XCTestCase {
                 .downloadedExtension(packageName: admission.packageName)
             )
         }
+    }
+
+    func testFactoryAdmitsCurrentMangaMelonProfileAndItsStaticFilters() throws {
+        let bytes = try corpus("mangamelon")
+        let temporary = try temporaryAPK(bytes)
+        defer { try? FileManager.default.removeItem(at: temporary.directory) }
+        let admission = ExtensionAdmission(
+            packageName: "eu.kanade.tachiyomi.extension.en.mangamelon",
+            versionName: "1.6.1",
+            versionCode: 1,
+            apkPath: temporary.apk.path,
+            apkSHA256: APKSignatureVerifier.apkSHA256(bytes),
+            signingIdentity: try APKSignatureVerifier().verify(apkBytes: bytes),
+            trustSource: .user(fingerprint: Self.keiyoushiFingerprint),
+            sourceIDs: [Self.mangaMelonSourceID]
+        )
+
+        let sources = try ExtensionSourceFactory().makeSources(
+            admission: admission,
+            transport: NoNetworkTransport()
+        )
+        let source = try XCTUnwrap(sources.first)
+        XCTAssertEqual(sources.count, 1)
+        XCTAssertEqual(source.id, Self.mangaMelonSourceID)
+        XCTAssertEqual(source.name, "MangaMelon")
+        XCTAssertEqual(source.language, "en")
+        XCTAssertEqual(source.getFilterList().count, 2)
     }
 
     func testFactoryRejectsFileReplacementBeforeSignatureOrDEXConstruction() throws {

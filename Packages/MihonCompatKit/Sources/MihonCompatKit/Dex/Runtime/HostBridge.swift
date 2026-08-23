@@ -106,9 +106,34 @@ public final class HostBridge {
         let ascending: Bool
     }
 
-    private struct FilterStateBox {
+    private struct KotlinDeferredBox {
+        let scope: RVal
+        let block: RVal
+    }
+
+    private enum FilterKind {
+        case header
+        case separator
+        case select
+        case text
+        case checkBox
+        case triState
+        case group
+        case sort
+    }
+
+    private final class FilterStateBox {
+        let kind: FilterKind
         let name: String
-        let state: RVal
+        let values: [String]
+        var state: RVal
+
+        init(kind: FilterKind, name: String, values: [String] = [], state: RVal) {
+            self.kind = kind
+            self.name = name
+            self.values = values
+            self.state = state
+        }
     }
 
     private final class FormBodyBuilderBox {
@@ -288,6 +313,27 @@ public final class HostBridge {
 
     private struct JSONStringSerializerBox {}
 
+    private struct JSONConfigurationBox {
+        let encodeDefaults: Bool
+    }
+
+    private final class JSONBuilderBox {
+        var encodeDefaults: Bool
+
+        init(encodeDefaults: Bool) {
+            self.encodeDefaults = encodeDefaults
+        }
+    }
+
+    private final class JSONObjectBuilderBox {
+        var values: [String: String] = [:]
+        var utf8Bytes = 0
+    }
+
+    private struct JSONObjectBox {
+        let values: [String: String]
+    }
+
     private indirect enum JSONEncodedValue {
         case null
         case bool(Bool)
@@ -305,10 +351,12 @@ public final class HostBridge {
     private final class JSONValueEncoderBox {
         let state: JSONEncodingState
         let depth: Int
+        let encodeDefaults: Bool
 
-        init(state: JSONEncodingState, depth: Int) {
+        init(state: JSONEncodingState, depth: Int, encodeDefaults: Bool) {
             self.state = state
             self.depth = depth
+            self.encodeDefaults = encodeDefaults
         }
     }
 
@@ -316,12 +364,19 @@ public final class HostBridge {
         let state: JSONEncodingState
         let descriptor: SerialDescriptorBox
         let depth: Int
+        let encodeDefaults: Bool
         var values: [Int: JSONEncodedValue] = [:]
 
-        init(state: JSONEncodingState, descriptor: SerialDescriptorBox, depth: Int) {
+        init(
+            state: JSONEncodingState,
+            descriptor: SerialDescriptorBox,
+            depth: Int,
+            encodeDefaults: Bool
+        ) {
             self.state = state
             self.descriptor = descriptor
             self.depth = depth
+            self.encodeDefaults = encodeDefaults
         }
     }
 
@@ -677,7 +732,9 @@ public final class HostBridge {
 
         // java.lang.String surface (payload-backed).
         Self.registerStringSurface(bridge)
+        Self.registerByteEncodingSurface(bridge)
         Self.registerStringBuilder(bridge)
+        Self.registerCoroutineSurface(bridge)
 
         // These abstract tachiyomix base classes are supplied by the host app,
         // not packaged in extension DEX files. Their empty construction surface
@@ -1272,6 +1329,7 @@ public final class HostBridge {
         Self.registerCollectionSurface(bridge)
         Self.registerFilterSurface(bridge)
         Self.registerSerializationSurface(bridge)
+        Self.registerJSONElementSurface(bridge)
         Self.registerKotlinDurationSurface(bridge)
         Self.registerOkHttpRequestSurface(bridge)
         Self.registerOkHttpResponseSurface(bridge)
@@ -1365,34 +1423,187 @@ public final class HostBridge {
             }
             return string(match.value)
         }
-        let sortSelection = "Leu/kanade/tachiyomi/source/model/Filter$Sort$Selection;"
-        bridge.objectFactories[sortSelection] = { _ in
-            .obj(ObjInstance(dexType: sortSelection, isHost: true))
-        }
-        bridge.register(class: sortSelection, "<init>", prototype: "(IZ)V") { _, args in
-            guard case let .obj(object) = try argument(args, 0, "Filter.Sort.Selection.<init>"),
-                  case let .int(index) = try argument(args, 1, "Filter.Sort.Selection.<init>"),
-                  case let .int(ascending) = try argument(args, 2, "Filter.Sort.Selection.<init>") else {
-                throw VMError.verify("Filter.Sort.Selection constructor arguments")
+        return bridge
+    }
+
+    /// Exact structured-coroutine surface reached by current lib 1.6 source
+    /// update wrappers. `async` is represented lazily and `await` interprets
+    /// the captured DEX lambda on the same VM, preserving verifier, call-depth,
+    /// instruction-budget, cancellation, and host-capability boundaries.
+    private static func registerCoroutineSurface(_ bridge: HostBridge) {
+        let scope = "Lkotlinx/coroutines/CoroutineScope;"
+        let deferred = "Lkotlinx/coroutines/Deferred;"
+
+        bridge.register(
+            class: "Lkotlin/coroutines/jvm/internal/SuspendLambda;",
+            "<init>",
+            prototype: "(ILkotlin/coroutines/Continuation;)V"
+        ) { _, args in
+            guard case .obj = try argument(args, 0, "SuspendLambda.<init>"),
+                  case .int = try argument(args, 1, "SuspendLambda.<init>") else {
+                throw VMError.verify("SuspendLambda constructor arguments")
             }
-            object.payload = FilterSortSelectionBox(index: index, ascending: ascending != 0)
+            _ = try argument(args, 2, "SuspendLambda.<init>")
             return .null
         }
-        bridge.register(class: sortSelection, "getIndex", prototype: "()I") { _, args in
-            guard case let .obj(object) = try argument(args, 0, "Filter.Sort.Selection.getIndex"),
-                  let selection = object.payload as? FilterSortSelectionBox else {
-                throw VMError.verify("Filter.Sort.Selection.getIndex receiver")
+
+        bridge.register(
+            class: "Lkotlinx/coroutines/CoroutineScopeKt;",
+            "coroutineScope",
+            prototype: "(Lkotlin/jvm/functions/Function2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+            isStatic: true
+        ) { vm, args in
+            guard case let .obj(block) = try argument(args, 0, "CoroutineScope.coroutineScope") else {
+                throw VMError.verify("CoroutineScope.coroutineScope block")
             }
-            return .int(selection.index)
+            let scopeValue = RVal.obj(ObjInstance(dexType: scope, isHost: true))
+            return try vm.call(
+                classDescriptor: block.dexType,
+                method: "invoke",
+                prototype: "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                args: [
+                    .obj(block),
+                    scopeValue,
+                    try argument(args, 1, "CoroutineScope.coroutineScope"),
+                ]
+            )
         }
-        bridge.register(class: sortSelection, "getAscending", prototype: "()Z") { _, args in
-            guard case let .obj(object) = try argument(args, 0, "Filter.Sort.Selection.getAscending"),
-                  let selection = object.payload as? FilterSortSelectionBox else {
-                throw VMError.verify("Filter.Sort.Selection.getAscending receiver")
+
+        bridge.register(
+            class: "Lkotlinx/coroutines/BuildersKt;",
+            "async$default",
+            prototype: "(Lkotlinx/coroutines/CoroutineScope;Lkotlin/coroutines/CoroutineContext;Lkotlinx/coroutines/CoroutineStart;Lkotlin/jvm/functions/Function2;ILjava/lang/Object;)Lkotlinx/coroutines/Deferred;",
+            isStatic: true
+        ) { _, args in
+            guard case let .obj(scopeObject) = try argument(args, 0, "BuildersKt.async$default"),
+                  scopeObject.dexType == scope,
+                  case let .obj(block) = try argument(args, 3, "BuildersKt.async$default"),
+                  case let .int(mask) = try argument(args, 4, "BuildersKt.async$default"),
+                  mask & 0x3 == 0x3,
+                  try argument(args, 5, "BuildersKt.async$default").isNull else {
+                throw VMError.verify("BuildersKt.async$default arguments")
             }
-            return .int(selection.ascending ? 1 : 0)
+            return .obj(ObjInstance(
+                dexType: deferred,
+                payload: KotlinDeferredBox(scope: .obj(scopeObject), block: .obj(block)),
+                isHost: true
+            ))
         }
-        return bridge
+
+        bridge.register(
+            class: deferred,
+            "await",
+            prototype: "(Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+        ) { vm, args in
+            guard case let .obj(object) = try argument(args, 0, "Deferred.await"),
+                  let deferred = object.payload as? KotlinDeferredBox,
+                  case let .obj(block) = deferred.block else {
+                throw VMError.verify("Deferred.await receiver")
+            }
+            return try vm.call(
+                classDescriptor: block.dexType,
+                method: "invoke",
+                prototype: "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                args: [
+                    deferred.block,
+                    deferred.scope,
+                    try argument(args, 1, "Deferred.await"),
+                ]
+            )
+        }
+    }
+
+    /// String-valued JsonObject subset used by tachiyomix manga/chapter memo
+    /// fields. This deliberately does not expose arbitrary JSON mutation.
+    private static func registerJSONElementSurface(_ bridge: HostBridge) {
+        let builder = "Lkotlinx/serialization/json/JsonObjectBuilder;"
+        let jsonObject = "Lkotlinx/serialization/json/JsonObject;"
+        let primitive = "Lkotlinx/serialization/json/JsonPrimitive;"
+
+        bridge.objectFactories[builder] = { _ in
+            .obj(ObjInstance(
+                dexType: builder,
+                payload: JSONObjectBuilderBox(),
+                isHost: true
+            ))
+        }
+        bridge.register(class: builder, "<init>", prototype: "()V") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "JsonObjectBuilder.<init>") else {
+                throw VMError.verify("JsonObjectBuilder constructor receiver")
+            }
+            object.payload = JSONObjectBuilderBox()
+            return .null
+        }
+        bridge.register(
+            class: "Lkotlinx/serialization/json/JsonElementBuildersKt;",
+            "put",
+            prototype: "(Lkotlinx/serialization/json/JsonObjectBuilder;Ljava/lang/String;Ljava/lang/String;)Lkotlinx/serialization/json/JsonElement;",
+            isStatic: true
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "JsonObjectBuilder.put"),
+                  let box = object.payload as? JSONObjectBuilderBox else {
+                throw VMError.verify("JsonObjectBuilder.put receiver")
+            }
+            let key = try requiredString(args, 1, "JsonObjectBuilder.put")
+            let value = try requiredString(args, 2, "JsonObjectBuilder.put")
+            guard key.utf8.count <= 4_096,
+                  value.utf8.count <= 4_096,
+                  box.values[key] != nil || box.values.count < 512 else {
+                throw VMError.verify("JsonObjectBuilder.put entry bounds")
+            }
+            let previousBytes = box.values[key].map { key.utf8.count + $0.utf8.count } ?? 0
+            let nextBytes = box.utf8Bytes - previousBytes + key.utf8.count + value.utf8.count
+            guard nextBytes <= 1_048_576 else {
+                throw VMError.verify("JsonObjectBuilder.put exceeds 1048576 UTF-8 bytes")
+            }
+            box.values[key] = value
+            box.utf8Bytes = nextBytes
+            return .obj(ObjInstance(dexType: primitive, payload: value, isHost: true))
+        }
+        bridge.register(class: builder, "build", prototype: "()Lkotlinx/serialization/json/JsonObject;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "JsonObjectBuilder.build"),
+                  let box = object.payload as? JSONObjectBuilderBox else {
+                throw VMError.verify("JsonObjectBuilder.build receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: jsonObject,
+                payload: JSONObjectBox(values: box.values),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: jsonObject,
+            "get",
+            prototype: "(Ljava/lang/Object;)Ljava/lang/Object;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "JsonObject.get"),
+                  let box = object.payload as? JSONObjectBox else {
+                throw VMError.verify("JsonObject.get receiver")
+            }
+            let key = try requiredString(args, 1, "JsonObject.get")
+            guard let value = box.values[key] else { return .null }
+            return .obj(ObjInstance(dexType: primitive, payload: value, isHost: true))
+        }
+        bridge.register(
+            class: "Lkotlinx/serialization/json/JsonElementKt;",
+            "getJsonPrimitive",
+            prototype: "(Lkotlinx/serialization/json/JsonElement;)Lkotlinx/serialization/json/JsonPrimitive;",
+            isStatic: true
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "JsonElement.getJsonPrimitive"),
+                  object.dexType == primitive,
+                  object.payload is String else {
+                throw DEXThrowable(string("IllegalArgumentException: JsonElement is not a primitive"))
+            }
+            return .obj(object)
+        }
+        bridge.register(class: primitive, "getContent", prototype: "()Ljava/lang/String;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "JsonPrimitive.getContent"),
+                  let value = object.payload as? String else {
+                throw VMError.verify("JsonPrimitive.getContent receiver")
+            }
+            return string(value)
+        }
     }
 
     /// Minimal dependency-injection entry used by keiyoushi's serialization
@@ -1406,6 +1617,12 @@ public final class HostBridge {
 
         func serializationThrowable(_ message: String) -> DEXThrowable {
             hostThrowable("Lkotlinx/serialization/SerializationException;", message)
+        }
+
+        func isJSONBoolean(_ value: Any) -> Bool {
+            guard let number = value as? NSNumber else { return false }
+            let encoding = String(cString: number.objCType)
+            return encoding == "c" || encoding == "B"
         }
 
         func validateJSON(_ root: Any) throws {
@@ -1552,10 +1769,18 @@ public final class HostBridge {
             return output
         }
 
-        func encoderValue(state: JSONEncodingState, depth: Int) -> RVal {
+        func encoderValue(
+            state: JSONEncodingState,
+            depth: Int,
+            encodeDefaults: Bool
+        ) -> RVal {
             .obj(ObjInstance(
                 dexType: encoder,
-                payload: JSONValueEncoderBox(state: state, depth: depth),
+                payload: JSONValueEncoderBox(
+                    state: state,
+                    depth: depth,
+                    encodeDefaults: encodeDefaults
+                ),
                 isHost: true
             ))
         }
@@ -1564,7 +1789,8 @@ public final class HostBridge {
             _ strategy: RVal,
             value: RVal,
             vm: DexInterpreter,
-            depth: Int = 1
+            depth: Int = 1,
+            encodeDefaults: Bool = false
         ) throws -> JSONEncodedValue {
             guard depth <= bridge.htmlPolicy.maximumDepth else {
                 throw serializationThrowable("encoded JSON exceeds depth limit")
@@ -1586,7 +1812,8 @@ public final class HostBridge {
                         listSerializer.elementSerializer,
                         value: $0,
                         vm: vm,
-                        depth: depth + 1
+                        depth: depth + 1,
+                        encodeDefaults: encodeDefaults
                     )
                 })
             }
@@ -1598,7 +1825,15 @@ public final class HostBridge {
                 classDescriptor: serializer.dexType,
                 method: "serialize",
                 prototype: "(Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V",
-                args: [strategy, encoderValue(state: state, depth: depth), value]
+                args: [
+                    strategy,
+                    encoderValue(
+                        state: state,
+                        depth: depth,
+                        encodeDefaults: encodeDefaults
+                    ),
+                    value,
+                ]
             )
             guard let encoded = state.value else {
                 throw serializationThrowable("serializer produced no JSON value")
@@ -1708,6 +1943,94 @@ public final class HostBridge {
             target.box.values[target.index] = value
         }
 
+        let json = "Lkotlinx/serialization/json/Json;"
+        let jsonBuilder = "Lkotlinx/serialization/json/JsonBuilder;"
+        bridge.objectFactories[json] = { _ in
+            .obj(ObjInstance(
+                dexType: json,
+                payload: JSONConfigurationBox(encodeDefaults: false),
+                isHost: true
+            ))
+        }
+        bridge.objectFactories[jsonBuilder] = { _ in
+            .obj(ObjInstance(
+                dexType: jsonBuilder,
+                payload: JSONBuilderBox(encodeDefaults: false),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: jsonBuilder,
+            "setEncodeDefaults",
+            prototype: "(Z)V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "JsonBuilder.setEncodeDefaults"),
+                  let builder = object.payload as? JSONBuilderBox,
+                  case let .int(value) = try argument(args, 1, "JsonBuilder.setEncodeDefaults") else {
+                throw VMError.verify("JsonBuilder.setEncodeDefaults arguments")
+            }
+            builder.encodeDefaults = value != 0
+            return .null
+        }
+
+        func configuredJSON(
+            base: RVal,
+            action: RVal,
+            vm: DexInterpreter,
+            operation: String
+        ) throws -> RVal {
+            let inheritedDefaults: Bool
+            if base.isNull {
+                inheritedDefaults = false
+            } else if case let .obj(object) = base,
+                      object.dexType == json {
+                inheritedDefaults = (object.payload as? JSONConfigurationBox)?.encodeDefaults ?? false
+            } else {
+                throw VMError.verify("\(operation) base Json")
+            }
+            guard case let .obj(actionObject) = action else {
+                throw VMError.verify("\(operation) builder action")
+            }
+            let builderBox = JSONBuilderBox(encodeDefaults: inheritedDefaults)
+            let builderValue = RVal.obj(ObjInstance(
+                dexType: jsonBuilder,
+                payload: builderBox,
+                isHost: true
+            ))
+            _ = try vm.call(
+                classDescriptor: actionObject.dexType,
+                method: "invoke",
+                prototype: "(Ljava/lang/Object;)Ljava/lang/Object;",
+                args: [action, builderValue]
+            )
+            return .obj(ObjInstance(
+                dexType: json,
+                payload: JSONConfigurationBox(encodeDefaults: builderBox.encodeDefaults),
+                isHost: true
+            ))
+        }
+
+        bridge.register(
+            class: "Lkotlinx/serialization/json/JsonKt;",
+            "Json$default",
+            prototype: "(Lkotlinx/serialization/json/Json;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Lkotlinx/serialization/json/Json;",
+            isStatic: true
+        ) { vm, args in
+            guard case let .int(mask) = try argument(args, 2, "JsonKt.Json$default"),
+                  try argument(args, 3, "JsonKt.Json$default").isNull else {
+                throw VMError.verify("JsonKt.Json$default arguments")
+            }
+            let base: RVal = mask & 0x1 != 0
+                ? .null
+                : try argument(args, 0, "JsonKt.Json$default")
+            return try configuredJSON(
+                base: base,
+                action: try argument(args, 1, "JsonKt.Json$default"),
+                vm: vm,
+                operation: "JsonKt.Json$default"
+            )
+        }
+
         let scope = RVal.obj(ObjInstance(
             dexType: "Luy/kohesive/injekt/api/InjektScope;",
             isHost: true
@@ -1739,7 +2062,8 @@ public final class HostBridge {
             prototype: "(Ljava/lang/reflect/Type;)Ljava/lang/Object;"
         ) { _, _ in
             .obj(ObjInstance(
-                dexType: "Lkotlinx/serialization/json/Json;",
+                dexType: json,
+                payload: JSONConfigurationBox(encodeDefaults: false),
                 isHost: true
             ))
         }
@@ -1829,19 +2153,26 @@ public final class HostBridge {
         }
 
         bridge.register(
-            class: "Lkotlinx/serialization/json/Json;",
+            class: json,
             "encodeToString",
             prototype: "(Lkotlinx/serialization/SerializationStrategy;Ljava/lang/Object;)Ljava/lang/String;"
         ) { vm, args in
+            guard case let .obj(jsonObject) = try argument(args, 0, "Json.encodeToString"),
+                  jsonObject.dexType == json else {
+                throw VMError.verify("Json.encodeToString receiver")
+            }
+            let encodeDefaults =
+                (jsonObject.payload as? JSONConfigurationBox)?.encodeDefaults ?? false
             let encoded = try serialize(
                 try argument(args, 1, "Json.encodeToString"),
                 value: try argument(args, 2, "Json.encodeToString"),
-                vm: vm
+                vm: vm,
+                encodeDefaults: encodeDefaults
             )
             return string(try renderJSON(encoded))
         }
         bridge.register(
-            class: "Lkotlinx/serialization/json/Json;",
+            class: json,
             "decodeFromString",
             prototype: "(Lkotlinx/serialization/DeserializationStrategy;Ljava/lang/String;)Ljava/lang/Object;"
         ) { vm, args in
@@ -1930,7 +2261,8 @@ public final class HostBridge {
                 payload: JSONCompositeEncoderBox(
                     state: value.state,
                     descriptor: descriptor,
-                    depth: value.depth
+                    depth: value.depth,
+                    encodeDefaults: value.encodeDefaults
                 ),
                 isHost: true
             ))
@@ -1940,8 +2272,11 @@ public final class HostBridge {
             "shouldEncodeElementDefault",
             prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)Z"
         ) { _, args in
-            _ = try encodingElement(args, "CompositeEncoder.shouldEncodeElementDefault")
-            return .int(0)
+            let target = try encodingElement(
+                args,
+                "CompositeEncoder.shouldEncodeElementDefault"
+            )
+            return .int(target.box.encodeDefaults ? 1 : 0)
         }
         bridge.register(
             class: compositeEncoder,
@@ -2018,7 +2353,8 @@ public final class HostBridge {
                 try argument(args, 3, "CompositeEncoder.encodeSerializableElement"),
                 value: value,
                 vm: vm,
-                depth: target.box.depth + 1
+                depth: target.box.depth + 1,
+                encodeDefaults: target.box.encodeDefaults
             )
             return .null
         }
@@ -2037,7 +2373,8 @@ public final class HostBridge {
                     try argument(args, 3, "CompositeEncoder.encodeNullableSerializableElement"),
                     value: value,
                     vm: vm,
-                    depth: target.box.depth + 1
+                    depth: target.box.depth + 1,
+                    encodeDefaults: target.box.encodeDefaults
                 )
             return .null
         }
@@ -2112,9 +2449,8 @@ public final class HostBridge {
             "decodeBooleanElement",
             prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)Z"
         ) { _, args in
-            guard let value = try element(
-                args, "CompositeDecoder.decodeBooleanElement"
-            ) as? Bool else {
+            let rawValue = try element(args, "CompositeDecoder.decodeBooleanElement")
+            guard isJSONBoolean(rawValue), let value = rawValue as? Bool else {
                 throw serializationThrowable("expected JSON boolean")
             }
             return .int(value ? 1 : 0)
@@ -2125,7 +2461,7 @@ public final class HostBridge {
             prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)I"
         ) { _, args in
             let value = try element(args, "CompositeDecoder.decodeIntElement")
-            guard !(value is Bool), let number = value as? NSNumber else {
+            guard !isJSONBoolean(value), let number = value as? NSNumber else {
                 throw serializationThrowable("expected JSON integer")
             }
             let result = number.doubleValue
@@ -2137,11 +2473,35 @@ public final class HostBridge {
         }
         bridge.register(
             class: compositeDecoder,
+            "decodeLongElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)J"
+        ) { _, args in
+            let value = try element(args, "CompositeDecoder.decodeLongElement")
+            guard !isJSONBoolean(value), let number = value as? NSNumber else {
+                throw serializationThrowable("expected JSON long integer")
+            }
+            let result: Int64
+            if let exact = Int64(number.stringValue) {
+                result = exact
+            } else {
+                let double = number.doubleValue
+                guard double.isFinite,
+                      double.rounded(.towardZero) == double,
+                      double >= -9_223_372_036_854_775_808,
+                      double < 9_223_372_036_854_775_808 else {
+                    throw serializationThrowable("JSON long integer is out of range")
+                }
+                result = Int64(double)
+            }
+            return .long(result)
+        }
+        bridge.register(
+            class: compositeDecoder,
             "decodeFloatElement",
             prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)F"
         ) { _, args in
             let value = try element(args, "CompositeDecoder.decodeFloatElement")
-            guard !(value is Bool), let number = value as? NSNumber else {
+            guard !isJSONBoolean(value), let number = value as? NSNumber else {
                 throw serializationThrowable("expected JSON number")
             }
             let result = number.floatValue
@@ -2388,6 +2748,12 @@ public final class HostBridge {
 
     static func registerStringSurface(_ bridge: HostBridge) {
         let d = "Ljava/lang/String;"
+        let locale = "Ljava/util/Locale;"
+        bridge.staticFields["\(locale)->ROOT"] = .obj(ObjInstance(
+            dexType: locale,
+            payload: "ROOT",
+            isHost: true
+        ))
         bridge.register(class: d, "length", prototype: "()I") { _, args in
             .int(Int32(vmStringValue(try argument(args, 0, "String.length")).utf16.count))
         }
@@ -2423,6 +2789,125 @@ public final class HostBridge {
         }
         bridge.register(class: d, "toString", prototype: "()Ljava/lang/String;") { _, args in
             Self.string(vmStringValue(try argument(args, 0, "String.toString")))
+        }
+        bridge.register(
+            class: d,
+            "toLowerCase",
+            prototype: "(Ljava/util/Locale;)Ljava/lang/String;"
+        ) { _, args in
+            let value = try requiredString(args, 0, "String.toLowerCase")
+            guard case let .obj(localeObject) = try argument(args, 1, "String.toLowerCase"),
+                  localeObject.dexType == locale,
+                  localeObject.payload as? String == "ROOT" else {
+                throw VMError.verify("String.toLowerCase supports Locale.ROOT only")
+            }
+            let lowered = value.lowercased()
+            guard lowered.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                throw DEXThrowable(string(
+                    "IllegalArgumentException: lowercase output is too long"
+                ))
+            }
+            return string(lowered)
+        }
+    }
+
+    /// Exact UTF-8 -> Okio ByteString -> Base64 path used by current
+    /// lib 1.6 API-backed sources. Both raw and encoded values remain bounded;
+    /// no filesystem, native code, or arbitrary charset implementation is
+    /// exposed through this surface.
+    private static func registerByteEncodingSurface(_ bridge: HostBridge) {
+        let charset = "Ljava/nio/charset/Charset;"
+        let byteString = "Lokio/ByteString;"
+        let companion = "Lokio/ByteString$Companion;"
+        let maximumBytes = 1_048_576
+
+        let utf8 = RVal.obj(ObjInstance(
+            dexType: charset,
+            payload: "UTF-8",
+            isHost: true
+        ))
+        bridge.staticFields["Lkotlin/text/Charsets;->UTF_8"] = utf8
+        bridge.staticFields["Ljava/nio/charset/StandardCharsets;->UTF_8"] = utf8
+
+        bridge.register(
+            class: "Ljava/lang/String;",
+            "getBytes",
+            prototype: "(Ljava/nio/charset/Charset;)[B"
+        ) { _, args in
+            let value = try requiredString(args, 0, "String.getBytes")
+            guard case let .obj(charsetObject) = try argument(args, 1, "String.getBytes"),
+                  charsetObject.dexType == charset,
+                  let charsetName = charsetObject.payload as? String,
+                  charsetName.caseInsensitiveCompare("UTF-8") == .orderedSame else {
+                throw DEXThrowable(string(
+                    "UnsupportedCharsetException: String.getBytes supports UTF-8 only"
+                ))
+            }
+            let bytes = Array(value.utf8)
+            guard bytes.count <= maximumBytes else {
+                throw DEXThrowable(string(
+                    "IllegalArgumentException: UTF-8 value exceeds 1048576 bytes"
+                ))
+            }
+            return byteArray(bytes)
+        }
+
+        let companionValue = RVal.obj(ObjInstance(
+            dexType: companion,
+            isHost: true
+        ))
+        bridge.staticFields["\(byteString)->Companion"] = companionValue
+        bridge.register(
+            class: companion,
+            "of$default",
+            prototype: "(Lokio/ByteString$Companion;[BIIILjava/lang/Object;)Lokio/ByteString;",
+            isStatic: true
+        ) { _, args in
+            guard case let .obj(companionObject) = try argument(args, 0, "ByteString.Companion.of$default"),
+                  companionObject.dexType == companion,
+                  case let .arr(array) = try argument(args, 1, "ByteString.Companion.of$default"),
+                  array.elemDescriptor == "B",
+                  array.elements.count <= maximumBytes,
+                  case let .int(rawOffset) = try argument(args, 2, "ByteString.Companion.of$default"),
+                  case let .int(rawCount) = try argument(args, 3, "ByteString.Companion.of$default"),
+                  case let .int(mask) = try argument(args, 4, "ByteString.Companion.of$default"),
+                  try argument(args, 5, "ByteString.Companion.of$default").isNull else {
+                throw VMError.verify("ByteString.Companion.of$default arguments")
+            }
+            let offset = mask & 0x1 != 0 ? 0 : Int(rawOffset)
+            let count = mask & 0x2 != 0 ? array.elements.count : Int(rawCount)
+            guard offset >= 0,
+                  count >= 0,
+                  offset <= array.elements.count,
+                  count <= array.elements.count - offset else {
+                throw DEXThrowable(string(
+                    "ArrayIndexOutOfBoundsException: ByteString range"
+                ))
+            }
+            var bytes: [UInt8] = []
+            bytes.reserveCapacity(count)
+            for value in array.elements[offset..<(offset + count)] {
+                guard case let .int(rawByte) = value,
+                      rawByte >= Int32(Int8.min),
+                      rawByte <= Int32(UInt8.max) else {
+                    throw VMError.verify("ByteString byte array contents")
+                }
+                bytes.append(UInt8(truncatingIfNeeded: rawByte))
+            }
+            return .obj(ObjInstance(
+                dexType: byteString,
+                payload: bytes,
+                isHost: true
+            ))
+        }
+        bridge.register(class: byteString, "base64", prototype: "()Ljava/lang/String;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "ByteString.base64"),
+                  object.dexType == byteString,
+                  let bytes = object.payload as? [UInt8],
+                  bytes.count <= maximumBytes else {
+                throw VMError.verify("ByteString.base64 receiver")
+            }
+            return string(Data(bytes).base64EncodedString())
         }
     }
 
@@ -3003,6 +3488,85 @@ public final class HostBridge {
             return .int(defaultValue)
         }
         bridge.register(
+            class: "Lkotlin/comparisons/ComparisonsKt;",
+            "compareValues",
+            prototype: "(Ljava/lang/Comparable;Ljava/lang/Comparable;)I",
+            isStatic: true
+        ) { _, args in
+            let lhs = try argument(args, 0, "ComparisonsKt.compareValues")
+            let rhs = try argument(args, 1, "ComparisonsKt.compareValues")
+            if lhs.isNull { return .int(rhs.isNull ? 0 : -1) }
+            if rhs.isNull { return .int(1) }
+            guard case let .obj(lhsObject) = lhs,
+                  case let .obj(rhsObject) = rhs,
+                  let lhsValue = lhsObject.payload as? Int32,
+                  let rhsValue = rhsObject.payload as? Int32 else {
+                throw VMError.verify("ComparisonsKt.compareValues supports boxed Int values only")
+            }
+            return .int(lhsValue == rhsValue ? 0 : (lhsValue < rhsValue ? -1 : 1))
+        }
+        bridge.register(
+            class: collections,
+            "sortedWith",
+            prototype: "(Ljava/lang/Iterable;Ljava/util/Comparator;)Ljava/util/List;",
+            isStatic: true
+        ) { vm, args in
+            var input = try listBox(args, "CollectionsKt.sortedWith").elements
+            guard input.count <= 65_536,
+                  case let .obj(comparator) = try argument(
+                    args, 1, "CollectionsKt.sortedWith"
+                  ) else {
+                throw VMError.verify("CollectionsKt.sortedWith arguments or size")
+            }
+            guard input.count > 1 else { return hostList(input, isMutable: false) }
+
+            var output = input
+            var width = 1
+            while width < input.count {
+                var start = 0
+                while start < input.count {
+                    let middle = min(start + width, input.count)
+                    let end = min(start + width * 2, input.count)
+                    var left = start
+                    var right = middle
+                    var destination = start
+                    while left < middle && right < end {
+                        let comparison = try vm.call(
+                            classDescriptor: comparator.dexType,
+                            method: "compare",
+                            prototype: "(Ljava/lang/Object;Ljava/lang/Object;)I",
+                            args: [.obj(comparator), input[left], input[right]]
+                        )
+                        guard case let .int(order) = comparison else {
+                            throw VMError.verify("Comparator.compare result")
+                        }
+                        if order <= 0 {
+                            output[destination] = input[left]
+                            left += 1
+                        } else {
+                            output[destination] = input[right]
+                            right += 1
+                        }
+                        destination += 1
+                    }
+                    while left < middle {
+                        output[destination] = input[left]
+                        left += 1
+                        destination += 1
+                    }
+                    while right < end {
+                        output[destination] = input[right]
+                        right += 1
+                        destination += 1
+                    }
+                    start = end
+                }
+                swap(&input, &output)
+                width *= 2
+            }
+            return hostList(input, isMutable: false)
+        }
+        bridge.register(
             class: collections,
             "createListBuilder",
             prototype: "()Ljava/util/List;",
@@ -3199,8 +3763,10 @@ public final class HostBridge {
                 .int(try listBox(args, "\(descriptor).isEmpty").elements.isEmpty ? 1 : 0)
             }
         }
-        bridge.register(class: "Ljava/util/ArrayList;", "size", prototype: "()I") { _, args in
-            .int(Int32(clamping: try listBox(args, "ArrayList.size").elements.count))
+        for descriptor in ["Ljava/util/List;", "Ljava/util/ArrayList;"] {
+            bridge.register(class: descriptor, "size", prototype: "()I") { _, args in
+                .int(Int32(clamping: try listBox(args, "\(descriptor).size").elements.count))
+            }
         }
         bridge.register(
             class: "Ljava/util/ArrayList;",
@@ -3279,11 +3845,17 @@ public final class HostBridge {
         let checkBox = "Leu/kanade/tachiyomi/source/model/Filter$CheckBox;"
         let group = "Leu/kanade/tachiyomi/source/model/Filter$Group;"
         let header = "Leu/kanade/tachiyomi/source/model/Filter$Header;"
+        let select = "Leu/kanade/tachiyomi/source/model/Filter$Select;"
         let separator = "Leu/kanade/tachiyomi/source/model/Filter$Separator;"
         let sort = "Leu/kanade/tachiyomi/source/model/Filter$Sort;"
+        let sortSelection = "Leu/kanade/tachiyomi/source/model/Filter$Sort$Selection;"
         let textFilter = "Leu/kanade/tachiyomi/source/model/Filter$Text;"
+        let triState = "Leu/kanade/tachiyomi/source/model/Filter$TriState;"
         let filterList = "Leu/kanade/tachiyomi/source/model/FilterList;"
-        for descriptor in [checkBox, group, header, separator, sort, textFilter, filterList] {
+        for descriptor in [
+            checkBox, group, header, select, separator, sort, sortSelection,
+            textFilter, triState, filterList,
+        ] {
             bridge.objectFactories[descriptor] = { _ in
                 .obj(ObjInstance(dexType: descriptor, isHost: true))
             }
@@ -3301,6 +3873,7 @@ public final class HostBridge {
             }
             let state = mask & 0x2 == 0 ? rawState != 0 : false
             object.payload = FilterStateBox(
+                kind: .checkBox,
                 name: vmStringValue(try argument(args, 1, "Filter.CheckBox.<init>")),
                 state: boxedBoolean(state)
             )
@@ -3308,6 +3881,23 @@ public final class HostBridge {
         }
         bridge.register(class: checkBox, "getState", prototype: "()Ljava/lang/Object;") { _, args in
             try filterState(args, "Filter.CheckBox.getState")
+        }
+
+        bridge.register(
+            class: checkBox,
+            "<init>",
+            prototype: "(Ljava/lang/String;Z)V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Filter.CheckBox.<init>"),
+                  case let .int(rawState) = try argument(args, 2, "Filter.CheckBox.<init>") else {
+                throw VMError.verify("Filter.CheckBox constructor arguments")
+            }
+            object.payload = FilterStateBox(
+                kind: .checkBox,
+                name: vmStringValue(try argument(args, 1, "Filter.CheckBox.<init>")),
+                state: boxedBoolean(rawState != 0)
+            )
+            return .null
         }
 
         bridge.register(
@@ -3320,6 +3910,7 @@ public final class HostBridge {
             }
             _ = try listBox(args, "Filter.Group.<init>", index: 2)
             object.payload = FilterStateBox(
+                kind: .group,
                 name: vmStringValue(try argument(args, 1, "Filter.Group.<init>")),
                 state: try argument(args, 2, "Filter.Group.<init>")
             )
@@ -3338,6 +3929,7 @@ public final class HostBridge {
                 throw VMError.verify("Filter.Header constructor receiver")
             }
             object.payload = FilterStateBox(
+                kind: .header,
                 name: vmStringValue(try argument(args, 1, "Filter.Header.<init>")),
                 state: .null
             )
@@ -3352,29 +3944,116 @@ public final class HostBridge {
                 throw VMError.verify("Filter.Separator constructor receiver")
             }
             object.payload = FilterStateBox(
+                kind: .separator,
                 name: vmStringValue(try argument(args, 1, "Filter.Separator.<init>")),
                 state: .null
             )
             return .null
         }
 
-        bridge.register(
-            class: sort,
-            "<init>",
-            prototype: "(Ljava/lang/String;[Ljava/lang/String;Leu/kanade/tachiyomi/source/model/Filter$Sort$Selection;)V"
-        ) { _, args in
-            guard case let .obj(object) = try argument(args, 0, "Filter.Sort.<init>"),
-                  case .arr = try argument(args, 2, "Filter.Sort.<init>") else {
-                throw VMError.verify("Filter.Sort constructor arguments")
+        func registerSelectConstructor(_ prototype: String, hasDefaultMask: Bool) {
+            bridge.register(class: select, "<init>", prototype: prototype) { _, args in
+                guard case let .obj(object) = try argument(args, 0, "Filter.Select.<init>"),
+                      case let .arr(rawValues) = try argument(args, 2, "Filter.Select.<init>"),
+                      case let .int(rawState) = try argument(args, 3, "Filter.Select.<init>") else {
+                    throw VMError.verify("Filter.Select constructor arguments")
+                }
+                let state: Int32
+                if hasDefaultMask {
+                    guard case let .int(mask) = try argument(args, 4, "Filter.Select.<init>") else {
+                        throw VMError.verify("Filter.Select default constructor mask")
+                    }
+                    state = mask & 0x4 == 0 ? rawState : 0
+                } else {
+                    state = rawState
+                }
+                guard let values = filterStringValues(rawValues) else {
+                    throw VMError.verify("Filter.Select values")
+                }
+                object.payload = FilterStateBox(
+                    kind: .select,
+                    name: vmStringValue(try argument(args, 1, "Filter.Select.<init>")),
+                    values: values,
+                    state: boxedInteger(state)
+                )
+                return .null
             }
-            object.payload = FilterStateBox(
-                name: vmStringValue(try argument(args, 1, "Filter.Sort.<init>")),
-                state: try argument(args, 3, "Filter.Sort.<init>")
-            )
-            return .null
         }
+        registerSelectConstructor(
+            "(Ljava/lang/String;[Ljava/lang/Object;IILkotlin/jvm/internal/DefaultConstructorMarker;)V",
+            hasDefaultMask: true
+        )
+        registerSelectConstructor(
+            "(Ljava/lang/String;[Ljava/lang/Object;I)V",
+            hasDefaultMask: false
+        )
+        bridge.register(class: select, "getState", prototype: "()Ljava/lang/Object;") { _, args in
+            try filterState(args, "Filter.Select.getState")
+        }
+
+        func registerSortConstructor(_ prototype: String, hasDefaultMask: Bool) {
+            bridge.register(class: sort, "<init>", prototype: prototype) { _, args in
+                guard case let .obj(object) = try argument(args, 0, "Filter.Sort.<init>"),
+                      case let .arr(rawValues) = try argument(args, 2, "Filter.Sort.<init>") else {
+                    throw VMError.verify("Filter.Sort constructor arguments")
+                }
+                let state: RVal
+                if hasDefaultMask {
+                    guard case let .int(mask) = try argument(args, 4, "Filter.Sort.<init>") else {
+                        throw VMError.verify("Filter.Sort default constructor mask")
+                    }
+                    state = mask & 0x4 == 0
+                        ? try argument(args, 3, "Filter.Sort.<init>")
+                        : .null
+                } else {
+                    state = try argument(args, 3, "Filter.Sort.<init>")
+                }
+                guard let values = filterStringValues(rawValues) else {
+                    throw VMError.verify("Filter.Sort values")
+                }
+                object.payload = FilterStateBox(
+                    kind: .sort,
+                    name: vmStringValue(try argument(args, 1, "Filter.Sort.<init>")),
+                    values: values,
+                    state: state
+                )
+                return .null
+            }
+        }
+        registerSortConstructor(
+            "(Ljava/lang/String;[Ljava/lang/String;Leu/kanade/tachiyomi/source/model/Filter$Sort$Selection;)V",
+            hasDefaultMask: false
+        )
+        registerSortConstructor(
+            "(Ljava/lang/String;[Ljava/lang/String;Leu/kanade/tachiyomi/source/model/Filter$Sort$Selection;ILkotlin/jvm/internal/DefaultConstructorMarker;)V",
+            hasDefaultMask: true
+        )
         bridge.register(class: sort, "getState", prototype: "()Ljava/lang/Object;") { _, args in
             try filterState(args, "Filter.Sort.getState")
+        }
+
+        bridge.register(class: sortSelection, "<init>", prototype: "(IZ)V") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Filter.Sort.Selection.<init>"),
+                  case let .int(index) = try argument(args, 1, "Filter.Sort.Selection.<init>"),
+                  case let .int(ascending) = try argument(args, 2, "Filter.Sort.Selection.<init>") else {
+                throw VMError.verify("Filter.Sort.Selection constructor arguments")
+            }
+            object.payload = FilterSortSelectionBox(index: index, ascending: ascending != 0)
+            return .null
+        }
+        bridge.register(class: sortSelection, "getIndex", prototype: "()I") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Filter.Sort.Selection.getIndex"),
+                  let selection = object.payload as? FilterSortSelectionBox else {
+                throw VMError.verify("Filter.Sort.Selection.getIndex receiver")
+            }
+            return .int(selection.index)
+        }
+        bridge.register(class: sortSelection, "getAscending", prototype: "()Z") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Filter.Sort.Selection.getAscending"),
+                  let selection = object.payload as? FilterSortSelectionBox else {
+                throw VMError.verify("Filter.Sort.Selection.getAscending receiver")
+            }
+            return .int(selection.ascending ? 1 : 0)
         }
 
         bridge.register(
@@ -3390,6 +4069,7 @@ public final class HostBridge {
                 ? try argument(args, 2, "Filter.Text.<init>")
                 : string("")
             object.payload = FilterStateBox(
+                kind: .text,
                 name: vmStringValue(try argument(args, 1, "Filter.Text.<init>")),
                 state: state
             )
@@ -3397,6 +4077,27 @@ public final class HostBridge {
         }
         bridge.register(class: textFilter, "getState", prototype: "()Ljava/lang/Object;") { _, args in
             try filterState(args, "Filter.Text.getState")
+        }
+
+        bridge.register(
+            class: triState,
+            "<init>",
+            prototype: "(Ljava/lang/String;IILkotlin/jvm/internal/DefaultConstructorMarker;)V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Filter.TriState.<init>"),
+                  case let .int(rawState) = try argument(args, 2, "Filter.TriState.<init>"),
+                  case let .int(mask) = try argument(args, 3, "Filter.TriState.<init>") else {
+                throw VMError.verify("Filter.TriState constructor arguments")
+            }
+            object.payload = FilterStateBox(
+                kind: .triState,
+                name: vmStringValue(try argument(args, 1, "Filter.TriState.<init>")),
+                state: boxedInteger(mask & 0x2 == 0 ? rawState : 0)
+            )
+            return .null
+        }
+        bridge.register(class: triState, "getState", prototype: "()Ljava/lang/Object;") { _, args in
+            try filterState(args, "Filter.TriState.getState")
         }
 
         bridge.register(
@@ -3408,6 +4109,9 @@ public final class HostBridge {
                 throw VMError.verify("FilterList constructor receiver")
             }
             let source = try listBox(args, "FilterList.<init>", index: 1)
+            guard source.elements.count <= 512 else {
+                throw VMError.verify("FilterList exceeds 512 filters")
+            }
             object.payload = HostListBox(source.elements, isMutable: true)
             return .null
         }
@@ -3419,6 +4123,9 @@ public final class HostBridge {
             guard case let .obj(object) = try argument(args, 0, "FilterList.<init>"),
                   case let .arr(array) = try argument(args, 1, "FilterList.<init>") else {
                 throw VMError.verify("FilterList array constructor arguments")
+            }
+            guard array.elements.count <= 512 else {
+                throw VMError.verify("FilterList exceeds 512 filters")
             }
             object.payload = HostListBox(array.elements, isMutable: true)
             return .null
@@ -3443,6 +4150,22 @@ public final class HostBridge {
             throw VMError.verify("\(method) receiver")
         }
         return filter.state
+    }
+
+    private static func filterStringValues(_ array: ArrInstance) -> [String]? {
+        guard array.elements.count <= 512 else { return nil }
+        var strings: [String] = []
+        strings.reserveCapacity(array.elements.count)
+        var utf8Bytes = 0
+        for value in array.elements {
+            guard case let .obj(object) = value,
+                  let string = object.payload as? String,
+                  string.utf8.count <= 4_096 else { return nil }
+            utf8Bytes += string.utf8.count
+            guard utf8Bytes <= 256 * 1_024 else { return nil }
+            strings.append(string)
+        }
+        return strings
     }
 
     private static func registerOkHttpRequestSurface(_ bridge: HostBridge) {
@@ -4840,6 +5563,31 @@ public final class HostBridge {
             box.value.dateUpload = value
             return .null
         }
+        bridge.register(
+            class: schapter,
+            "setMemo",
+            prototype: "(Lkotlinx/serialization/json/JsonObject;)V"
+        ) { _, args in
+            let box = try chapterBox(args, "SChapter.setMemo")
+            guard case let .obj(object) = try argument(args, 1, "SChapter.setMemo"),
+                  let memo = object.payload as? JSONObjectBox else {
+                throw VMError.verify("SChapter.setMemo value")
+            }
+            box.value.memo = memo.values
+            return .null
+        }
+        bridge.register(
+            class: schapter,
+            "getMemo",
+            prototype: "()Lkotlinx/serialization/json/JsonObject;"
+        ) { _, args in
+            let memo = try chapterBox(args, "SChapter.getMemo").value.memo
+            return .obj(ObjInstance(
+                dexType: "Lkotlinx/serialization/json/JsonObject;",
+                payload: JSONObjectBox(values: memo),
+                isHost: true
+            ))
+        }
 
         bridge.register(
             class: "Leu/kanade/tachiyomi/source/online/HttpSource;",
@@ -5045,6 +5793,220 @@ public final class HostBridge {
 
     static func emptyListValue() -> RVal {
         hostList([], isMutable: false)
+    }
+
+    private struct SourceFilterBudget {
+        var filters = 0
+        var utf8Bytes = 0
+    }
+
+    /// Converts the host-backed Mihon filter graph produced by the exact APK
+    /// into immutable app-facing values. Unsupported subclasses or excessive
+    /// nesting fail closed instead of being silently omitted.
+    static func sourceFilters(from value: RVal) -> [SourceFilter]? {
+        guard case let .obj(object) = value,
+              let list = object.payload as? HostListBox else { return nil }
+        var budget = SourceFilterBudget()
+        return sourceFilters(from: list.elements, depth: 0, budget: &budget)
+    }
+
+    /// Applies app-edited state to the original DEX filter instances so
+    /// extension type checks (for example `firstInstanceOrNull<SortFilter>`) and
+    /// subclass getters retain their real runtime identity.
+    static func applySourceFilters(_ filters: [SourceFilter], to value: RVal) -> Bool {
+        guard case let .obj(object) = value,
+              let list = object.payload as? HostListBox,
+              sourceFilterStructureMatches(filters, values: list.elements, depth: 0) else {
+            return false
+        }
+        applyValidatedSourceFilters(filters, values: list.elements)
+        return true
+    }
+
+    private static func sourceFilters(
+        from values: [RVal],
+        depth: Int,
+        budget: inout SourceFilterBudget
+    ) -> [SourceFilter]? {
+        guard depth <= 16, values.count <= 512 else { return nil }
+        var result: [SourceFilter] = []
+        result.reserveCapacity(values.count)
+        for value in values {
+            guard case let .obj(object) = value,
+                  let filter = object.payload as? FilterStateBox,
+                  filter.name.utf8.count <= 4_096 else { return nil }
+            budget.filters += 1
+            budget.utf8Bytes += filter.name.utf8.count
+            guard budget.filters <= 512, budget.utf8Bytes <= 1_048_576 else { return nil }
+
+            switch filter.kind {
+            case .header:
+                result.append(.header(filter.name))
+            case .separator:
+                result.append(.separator(filter.name))
+            case .select:
+                guard let state = filterInteger(filter.state),
+                      state >= 0,
+                      Int(state) < filter.values.count,
+                      accountFilterValues(filter.values, budget: &budget) else { return nil }
+                result.append(.select(
+                    name: filter.name,
+                    values: filter.values,
+                    state: Int(state)
+                ))
+            case .text:
+                guard let state = filterString(filter.state), state.utf8.count <= 4_096 else {
+                    return nil
+                }
+                budget.utf8Bytes += state.utf8.count
+                guard budget.utf8Bytes <= 1_048_576 else { return nil }
+                result.append(.text(name: filter.name, state: state))
+            case .checkBox:
+                guard let state = filterBoolean(filter.state) else { return nil }
+                result.append(.checkBox(name: filter.name, state: state))
+            case .triState:
+                guard let rawState = filterInteger(filter.state),
+                      let state = SourceFilter.TriState(rawValue: Int(rawState)) else { return nil }
+                result.append(.triState(name: filter.name, state: state))
+            case .group:
+                guard case let .obj(groupObject) = filter.state,
+                      let list = groupObject.payload as? HostListBox,
+                      let children = sourceFilters(
+                          from: list.elements,
+                          depth: depth + 1,
+                          budget: &budget
+                      ) else { return nil }
+                result.append(.group(name: filter.name, filters: children))
+            case .sort:
+                guard accountFilterValues(filter.values, budget: &budget) else { return nil }
+                let selection: SourceFilter.SortSelection?
+                if filter.state.isNull {
+                    selection = nil
+                } else {
+                    guard case let .obj(selectionObject) = filter.state,
+                          let rawSelection = selectionObject.payload as? FilterSortSelectionBox,
+                          rawSelection.index >= 0,
+                          Int(rawSelection.index) < filter.values.count else { return nil }
+                    selection = .init(
+                        index: Int(rawSelection.index),
+                        ascending: rawSelection.ascending
+                    )
+                }
+                result.append(.sort(
+                    name: filter.name,
+                    values: filter.values,
+                    state: selection
+                ))
+            }
+        }
+        return result
+    }
+
+    private static func accountFilterValues(
+        _ values: [String],
+        budget: inout SourceFilterBudget
+    ) -> Bool {
+        guard values.count <= 512, values.allSatisfy({ $0.utf8.count <= 4_096 }) else {
+            return false
+        }
+        budget.utf8Bytes += values.reduce(0) { $0 + $1.utf8.count }
+        return budget.utf8Bytes <= 1_048_576
+    }
+
+    private static func sourceFilterStructureMatches(
+        _ filters: [SourceFilter],
+        values: [RVal],
+        depth: Int
+    ) -> Bool {
+        guard depth <= 16, filters.count == values.count, filters.count <= 512 else {
+            return false
+        }
+        for (source, value) in zip(filters, values) {
+            guard case let .obj(object) = value,
+                  let target = object.payload as? FilterStateBox else { return false }
+            switch (source, target.kind) {
+            case let (.header(name), .header), let (.separator(name), .separator):
+                guard name == target.name else { return false }
+            case let (.select(name, values, state), .select):
+                guard name == target.name,
+                      values == target.values,
+                      state >= 0,
+                      state < values.count else { return false }
+            case let (.text(name, state), .text):
+                guard name == target.name, state.utf8.count <= 4_096 else { return false }
+            case let (.checkBox(name, _), .checkBox):
+                guard name == target.name else { return false }
+            case let (.triState(name, _), .triState):
+                guard name == target.name else { return false }
+            case let (.group(name, children), .group):
+                guard name == target.name,
+                      case let .obj(groupObject) = target.state,
+                      let list = groupObject.payload as? HostListBox,
+                      sourceFilterStructureMatches(
+                          children,
+                          values: list.elements,
+                          depth: depth + 1
+                      ) else { return false }
+            case let (.sort(name, values, state), .sort):
+                guard name == target.name, values == target.values else { return false }
+                if let state, (state.index < 0 || state.index >= values.count) { return false }
+            default:
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func applyValidatedSourceFilters(_ filters: [SourceFilter], values: [RVal]) {
+        for (source, value) in zip(filters, values) {
+            guard case let .obj(object) = value,
+                  let target = object.payload as? FilterStateBox else { continue }
+            switch source {
+            case let .select(_, _, state):
+                target.state = boxedInteger(Int32(state))
+            case let .text(_, state):
+                target.state = string(state)
+            case let .checkBox(_, state):
+                target.state = boxedBoolean(state)
+            case let .triState(_, state):
+                target.state = boxedInteger(Int32(state.rawValue))
+            case let .group(_, children):
+                if case let .obj(groupObject) = target.state,
+                   let list = groupObject.payload as? HostListBox {
+                    applyValidatedSourceFilters(children, values: list.elements)
+                }
+            case let .sort(_, _, state):
+                if let state {
+                    target.state = .obj(ObjInstance(
+                        dexType: "Leu/kanade/tachiyomi/source/model/Filter$Sort$Selection;",
+                        payload: FilterSortSelectionBox(
+                            index: Int32(state.index),
+                            ascending: state.ascending
+                        ),
+                        isHost: true
+                    ))
+                } else {
+                    target.state = .null
+                }
+            case .header, .separator:
+                break
+            }
+        }
+    }
+
+    private static func filterInteger(_ value: RVal) -> Int32? {
+        guard case let .obj(object) = value else { return nil }
+        return object.payload as? Int32
+    }
+
+    private static func filterBoolean(_ value: RVal) -> Bool? {
+        guard case let .obj(object) = value else { return nil }
+        return object.payload as? Bool
+    }
+
+    private static func filterString(_ value: RVal) -> String? {
+        guard case let .obj(object) = value else { return nil }
+        return object.payload as? String
     }
 
     /// Converts an interpreted tachiyomix `SManga` host value into the public

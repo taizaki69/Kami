@@ -1,6 +1,6 @@
 {
   "source": "Keiyoushi release assets and AOSP apksig conformance fixtures",
-  "locked": "2026-08-21",
+  "locked": "2026-08-23",
   "artifacts": [
     {
       "name": "akuma",
@@ -25,6 +25,12 @@
       "package": "eu.kanade.tachiyomi.extension.ar.kawiimanga",
       "version": "1.6.1",
       "sha256": "9e6110b8d1946180e948d3a890347529a5889e636ca6a001170cd206f74dd52a"
+    },
+    {
+      "name": "mangamelon",
+      "package": "eu.kanade.tachiyomi.extension.en.mangamelon",
+      "version": "1.6.1",
+      "sha256": "aedbd5ba3e3a092a381779f0e6ed610e630799070c1f032c5668f7455970d9aa"
     },
     {
       "name": "aosp-v3-original",

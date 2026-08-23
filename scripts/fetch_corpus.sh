@@ -89,6 +89,11 @@ download \
   "https://github.com/keiyoushi/extensions/releases/download/a76c957-0/tachiyomi-ar.kawiimanga-v1.6.1.apk" \
   "9e6110b8d1946180e948d3a890347529a5889e636ca6a001170cd206f74dd52a"
 
+download \
+  mangamelon \
+  "https://github.com/keiyoushi/extensions/releases/download/808890d/tachiyomi-en.mangamelon-v1.6.1.apk" \
+  "aedbd5ba3e3a092a381779f0e6ed610e630799070c1f032c5668f7455970d9aa"
+
 # Small Apache-2.0 Android Open Source Project apksig conformance fixtures,
 # pinned to one source revision. They cover schemes absent from the extension
 # sample without checking generated binaries into Kami.
