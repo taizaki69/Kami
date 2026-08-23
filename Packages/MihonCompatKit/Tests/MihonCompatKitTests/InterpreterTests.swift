@@ -27,6 +27,11 @@ final class InterpreterTests: XCTestCase {
         return nil
     }
 
+    private func double(_ v: RVal) -> Double? {
+        if case let .double(d) = v { return d }
+        return nil
+    }
+
     private func tryItem(start: Int, count: Int, handlerOffset: Int) -> [UInt8] {
         let start = UInt32(start)
         let count = UInt16(count)
@@ -61,11 +66,11 @@ final class InterpreterTests: XCTestCase {
         b.addMethod(.init(name: "calc", registers: 4, ins: 0, outs: 0,
                           insns: Insn.const16Units(0, 10)
                               + Insn.const4Units(1, 3)
-                              + Insn.binop(0x94, 2, 0, 1)      // sub → 7
+                              + Insn.binop(0x91, 2, 0, 1)      // sub → 7
                               + Insn.const4Units(0, 6)
-                              + Insn.binop(0x98, 3, 2, 0)      // mul → 42
+                              + Insn.binop(0x92, 3, 2, 0)      // mul → 42
                               + Insn.const4Units(0, 2)
-                              + Insn.binop(0x9c, 1, 3, 0)      // div → 21
+                              + Insn.binop(0x93, 1, 3, 0)      // div → 21
                               + Insn.returnReg(1),
                           isStatic: true, returnType: "I"))
         let result = try run(b, method: "calc")
@@ -78,7 +83,7 @@ final class InterpreterTests: XCTestCase {
         b.addMethod(.init(name: "div", registers: 3, ins: 0, outs: 0,
                           insns: Insn.const4Units(0, 10)
                               + Insn.const4Units(1, 0)
-                              + Insn.binop(0x9c, 2, 0, 1)
+                              + Insn.binop(0x93, 2, 0, 1)
                               + Insn.returnReg(2),
                           isStatic: true, returnType: "I"))
         XCTAssertThrowsError(try run(b, method: "div")) { error in
@@ -94,7 +99,7 @@ final class InterpreterTests: XCTestCase {
             insns: [
                 0x0014, 0x0000, 0x8000, // const v0, Int32.min
                 0xf112,                 // const/4 v1, -1
-                0x029c, 0x0100,         // div-int v2, v0, v1
+                0x0293, 0x0100,         // div-int v2, v0, v1
                 0x020f,
             ],
             isStatic: true,
@@ -106,7 +111,7 @@ final class InterpreterTests: XCTestCase {
         remainder.setClass("LTest;")
         remainder.addMethod(.init(
             name: "remainder", registers: 3, ins: 0, outs: 0,
-            insns: [0x0014, 0x0000, 0x8000, 0xf112, 0x02a0, 0x0100, 0x020f],
+            insns: [0x0014, 0x0000, 0x8000, 0xf112, 0x0294, 0x0100, 0x020f],
             isStatic: true,
             returnType: "I"
         ))
@@ -312,7 +317,7 @@ final class InterpreterTests: XCTestCase {
         var floating = DexBuilder()
         floating.setClass("LTest;")
         floating.addMethod(.init(name: "mul", registers: 3, ins: 2, outs: 0,
-                                 insns: [0x009a, 0x0201, 0x000f], isStatic: true,
+                                 insns: [0x00a8, 0x0201, 0x000f], isStatic: true,
                                  returnType: "F", parameters: ["F", "F"]))
         XCTAssertEqual(float(try run(floating, method: "mul", args: [.float(1.5), .float(4)])), 6)
     }
@@ -460,6 +465,247 @@ final class InterpreterTests: XCTestCase {
             }
             XCTAssertTrue(message.contains("outs_size 6 exceeds registers_size 1"), message)
         }
+    }
+
+    func testRegisterVerifierRejectsOutOfBoundsOperandInDeadCode() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "deadRegister", registers: 1, ins: 0, outs: 0,
+            insns: [
+                0x0328,       // pc 0: goto pc 3
+                0x0002, 0x0001, // pc 1: move/from16 v0, v1 (dead, but invalid)
+                0x000e,
+            ],
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "deadRegister")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("register v1 at pc 1 is outside"), message)
+        }
+    }
+
+    func testRegisterVerifierRejectsUndefinedReturn() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "undefinedReturn", registers: 1, ins: 0, outs: 0,
+            insns: [0x000f], isStatic: true, returnType: "I"
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "undefinedReturn")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("return value v0"), message)
+            XCTAssertTrue(message.contains("undefined"), message)
+        }
+    }
+
+    func testRegisterVerifierRejectsConflictingJoin() throws {
+        var builder = DexBuilder()
+        let stringIndex = builder.string("Kami")
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "conflictingJoin", registers: 2, ins: 0, outs: 0,
+            insns: [
+                0x0112,                   // pc 0: const/4 v1, 0
+                0x0138, 0x0004,           // pc 1: if-eqz v1, pc 5
+                0x1012,                   // pc 3: const/4 v0, 1
+                0x0328,                   // pc 4: goto pc 7
+                0x001a, UInt16(stringIndex), // pc 5: const-string v0
+                0x0011,                   // pc 7: return-object v0
+            ],
+            isStatic: true, returnType: "Ljava/lang/Object;"
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "conflictingJoin")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("return value v0"), message)
+            XCTAssertTrue(message.contains("conflict"), message)
+        }
+    }
+
+    func testRegisterVerifierMergesZeroWithReference() throws {
+        var builder = DexBuilder()
+        let stringIndex = builder.string("Kami")
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "nullableJoin", registers: 2, ins: 0, outs: 0,
+            insns: [
+                0x0112,                   // pc 0: const/4 v1, 0
+                0x0138, 0x0004,           // pc 1: if-eqz v1, pc 5
+                0x0012,                   // pc 3: const/4 v0, 0 (null-compatible)
+                0x0328,                   // pc 4: goto pc 7
+                0x001a, UInt16(stringIndex), // pc 5: const-string v0
+                0x0011,                   // pc 7: return-object v0
+            ],
+            isStatic: true, returnType: "Ljava/lang/Object;"
+        ))
+
+        XCTAssertEqual(vmStringValue(try run(builder, method: "nullableJoin")), "Kami")
+    }
+
+    func testRegisterVerifierRejectsMoveResultCategoryMismatch() throws {
+        var builder = DexBuilder()
+        let target = builder.method(
+            classDescriptor: "LHost;", name: "object", shorty: "L",
+            ret: "Ljava/lang/Object;"
+        )
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "badResult", registers: 1, ins: 0, outs: 0,
+            insns: Insn.invokeStatic(target, []) + Insn.moveResult(0) + Insn.returnVoid(),
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "badResult")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("does not match result Ljava/lang/Object;"), message)
+        }
+    }
+
+    func testRegisterVerifierRejectsInvokeArgumentCategoryMismatch() throws {
+        var builder = DexBuilder()
+        let target = builder.method(
+            classDescriptor: "LHost;", name: "accept", shorty: "VL", ret: "V",
+            parameters: ["Ljava/lang/Object;"]
+        )
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "badArgument", registers: 1, ins: 0, outs: 1,
+            insns: Insn.const4Units(0, 1)
+                + Insn.invokeStatic(target, [0])
+                + Insn.returnVoid(),
+            isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "badArgument")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("invoke argument 0 v0"), message)
+            XCTAssertTrue(message.contains("expected reference"), message)
+        }
+    }
+
+    func testRegisterVerifierRejectsClobberedWidePair() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "clobberedWide", registers: 2, ins: 0, outs: 0,
+            insns: [
+                0x0016, 0x0001, // const-wide/16 v0, 1
+                0x0112,         // const/4 v1, 0; clobbers the high half
+                0x0010,         // return-wide v0
+            ],
+            isStatic: true, returnType: "J"
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "clobberedWide")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("return value v0"), message)
+            XCTAssertTrue(message.contains("expected wide pair"), message)
+        }
+    }
+
+    func testRegisterVerifierPropagatesExceptionEdges() throws {
+        var builder = DexBuilder()
+        let target = builder.method(classDescriptor: "LHost;", name: "mayThrow")
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "handlerState", registers: 1, ins: 0, outs: 0,
+            insns: Insn.invokeStatic(target, [])
+                + Insn.const4Units(0, 1)
+                + Insn.returnReg(0)
+                + Insn.returnReg(0),
+            isStatic: true, returnType: "I",
+            triesCount: 1,
+            tryItems: tryItem(start: 0, count: 3, handlerOffset: 1)
+                + [0x01, 0x00, 0x05]
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "handlerState")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("return value v0 at pc 5"), message)
+            XCTAssertTrue(message.contains("undefined"), message)
+        }
+    }
+
+    func testAOSPBinaryOpcodeOrderingAcrossTypes() throws {
+        var integer = DexBuilder()
+        integer.setClass("LTest;")
+        integer.addMethod(.init(
+            name: "and", registers: 3, ins: 0, outs: 0,
+            insns: Insn.const4Units(0, 6)
+                + Insn.const4Units(1, 3)
+                + Insn.binop(0x95, 2, 0, 1)
+                + Insn.returnReg(2),
+            isStatic: true, returnType: "I"
+        ))
+        XCTAssertEqual(int(try run(integer, method: "and")), 2)
+
+        var wide = DexBuilder()
+        wide.setClass("LTest;")
+        wide.addMethod(.init(
+            name: "addLong", registers: 6, ins: 0, outs: 0,
+            insns: [0x0016, 10, 0x0216, 5]
+                + Insn.binop(0x9b, 4, 0, 2)
+                + [0x0410],
+            isStatic: true, returnType: "J"
+        ))
+        XCTAssertEqual(long(try run(wide, method: "addLong")), 15)
+
+        var floating = DexBuilder()
+        floating.setClass("LTest;")
+        floating.addMethod(.init(
+            name: "multiplyFloat", registers: 3, ins: 2, outs: 0,
+            insns: Insn.binop(0xa8, 0, 1, 2) + Insn.returnReg(0),
+            isStatic: true, returnType: "F", parameters: ["F", "F"]
+        ))
+        XCTAssertEqual(
+            float(try run(floating, method: "multiplyFloat", args: [.float(1.5), .float(4)])),
+            6
+        )
+
+        var doublePrecision = DexBuilder()
+        doublePrecision.setClass("LTest;")
+        doublePrecision.addMethod(.init(
+            name: "subtractDouble", registers: 6, ins: 4, outs: 0,
+            insns: Insn.binop(0xac, 0, 2, 4) + [0x0010],
+            isStatic: true, returnType: "D", parameters: ["D", "D"]
+        ))
+        XCTAssertEqual(
+            double(try run(
+                doublePrecision,
+                method: "subtractDouble",
+                args: [.double(8.5), .double(3)]
+            )),
+            5.5
+        )
+
+        var twoAddress = DexBuilder()
+        twoAddress.setClass("LTest;")
+        twoAddress.addMethod(.init(
+            name: "andTwoAddress", registers: 2, ins: 2, outs: 0,
+            insns: [0x10b5, 0x000f],
+            isStatic: true, returnType: "I", parameters: ["I", "I"]
+        ))
+        XCTAssertEqual(
+            int(try run(twoAddress, method: "andTwoAddress", args: [.int(6), .int(3)])),
+            2
+        )
     }
 
     func testVerifierAcceptsAlignedPackedSwitchAndChecksCaseTargets() throws {
@@ -1205,9 +1451,9 @@ final class InterpreterTests: XCTestCase {
                           insns: Insn.newInstance(0, sbType)
                               + Insn.constString(1, b.string("Kami"))
                               + Insn.invokeVirtual(appendIdx, [0, 1])
-                              + Insn.moveResult(0)
+                              + Insn.moveResultObject(0)
                               + Insn.invokeVirtual(toStringIdx, [0])
-                              + Insn.moveResult(0)
+                              + Insn.moveResultObject(0)
                               + Insn.returnObjectReg(0),
                           isStatic: true, returnType: "Ljava/lang/String;"))
         XCTAssertEqual(vmStringValue(try run(b, method: "greet")), "Kami")

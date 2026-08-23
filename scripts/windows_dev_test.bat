@@ -1,7 +1,7 @@
 @echo off
 rem Kami Windows development helper: runs SwiftPM tests for a package using
 rem the installed Visual Studio C++ environment + user-local Swift toolchain.
-rem Usage: windows_dev_test.bat <package-dir> [test|build]
+rem Usage: windows_dev_test.bat <package-dir> [test|build|clean]
 setlocal enabledelayedexpansion
 
 if "%~1"=="" (
@@ -77,6 +77,8 @@ if errorlevel 1 (
 
 if /i "%ACTION%"=="build" (
     "!SWIFT_BIN!swift-build.exe" --package-path "%PKG%"
+) else if /i "%ACTION%"=="clean" (
+    "!SWIFT_BIN!swift-package.exe" --package-path "%PKG%" clean
 ) else (
     "!SWIFT_BIN!swift-test.exe" --package-path "%PKG%"
 )

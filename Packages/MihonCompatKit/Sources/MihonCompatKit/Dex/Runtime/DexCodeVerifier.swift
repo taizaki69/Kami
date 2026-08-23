@@ -13,10 +13,9 @@ struct DexTryBlock {
 
 /// Bounded structural verification for one DEX `code_item` before execution.
 ///
-/// This pass deliberately focuses on geometry and control flow. Register-type
-/// dataflow remains a later M1 milestone, but malformed code cannot hide a
-/// truncated instruction, branch into an operand/payload, or point a switch at
-/// the wrong payload family merely because that path was not taken at runtime.
+/// Geometry, exception tables, control flow, register bounds, and register
+/// category dataflow are all checked before the interpreter can execute the
+/// method. Reference-hierarchy assignability remains a later M1 milestone.
 enum DexCodeVerifier {
     static let maximumCodeUnits = 2_000_000
     static let maximumEncodedHandlers = 65_535
@@ -33,7 +32,7 @@ enum DexCodeVerifier {
         let width: Int
     }
 
-    private struct InstructionInfo {
+    struct InstructionInfo {
         let address: Int
         let width: Int
         let opcode: UInt8
@@ -285,6 +284,16 @@ enum DexCodeVerifier {
                 context: context
             )
         }
+        try DexRegisterVerifier.verify(
+            code: code,
+            method: method,
+            dex: dex,
+            units: units,
+            instructions: instructions,
+            instructionStarts: instructionStarts,
+            tryBlocks: tryBlocks,
+            context: context
+        )
         return tryBlocks
     }
 

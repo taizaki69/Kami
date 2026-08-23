@@ -419,6 +419,7 @@ enum Insn {
     static func returnReg(_ reg: Int) -> [UInt16] { [0x0f | UInt16(reg << 8)] }
     static func returnObjectReg(_ reg: Int) -> [UInt16] { [0x11 | UInt16(reg << 8)] }
     static func moveResult(_ reg: Int) -> [UInt16] { [0x0a | UInt16(reg << 8)] }
+    static func moveResultObject(_ reg: Int) -> [UInt16] { [0x0c | UInt16(reg << 8)] }
     static func goto(_ offset: Int8) -> [UInt16] { [0x28 | (UInt16(UInt8(bitPattern: offset)) << 8)] }
     static func ifEqz(_ reg: Int, _ offset: Int16) -> [UInt16] {
         [0x38 | UInt16(reg << 8), UInt16(bitPattern: offset)]

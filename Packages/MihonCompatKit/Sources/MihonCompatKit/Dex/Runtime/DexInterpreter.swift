@@ -559,7 +559,7 @@ public final class DexInterpreter {
 
         case 0x1d, 0x1e: return pc + 1 // monitor-enter/exit (single-threaded M1)
 
-        case 0x1f: return pc + 2 // check-cast (no verifier in M1)
+        case 0x1f: return pc + 2 // category-verified; exact hierarchy check remains M1 work
         case 0x20: return try { // instance-of vA, vB, type@CCCC
             let target = try typeAt(Int(u[1]))
             let result = Self.typeCheck(reg(Int(u[0] >> 12)), ofType: target)
@@ -1083,55 +1083,55 @@ public final class DexInterpreter {
         func arith(_ a: Int32, _ b: Int32) throws -> Int32 {
             switch op {
             case 0x90: return a &+ b
-            case 0x94: return a &- b
-            case 0x98: return a &* b
-            case 0x9c: return try javaDivide(a, by: b)
-            case 0xa0: return try javaRemainder(a, by: b)
-            case 0xa4: return a & b
-            case 0xa6: return a | b
-            case 0xa8: return a ^ b
-            case 0xaa: return a << (b & 31)
-            case 0xac: return a >> (b & 31)
-            case 0xae: return Int32(bitPattern: UInt32(bitPattern: a) >> (b & 31))
+            case 0x91: return a &- b
+            case 0x92: return a &* b
+            case 0x93: return try javaDivide(a, by: b)
+            case 0x94: return try javaRemainder(a, by: b)
+            case 0x95: return a & b
+            case 0x96: return a | b
+            case 0x97: return a ^ b
+            case 0x98: return a << (b & 31)
+            case 0x99: return a >> (b & 31)
+            case 0x9a: return Int32(bitPattern: UInt32(bitPattern: a) >> (b & 31))
             default: throw VMError.verify("bad int binop")
             }
         }
         switch op {
-        case 0x90, 0x94, 0x98, 0x9c, 0xa0, 0xa4, 0xa6, 0xa8, 0xaa, 0xac, 0xae:
+        case 0x90...0x9a:
             return .int(try arith(i32(l), i32(r)))
-        case 0x91, 0x95, 0x99, 0x9d, 0xa1, 0xa5, 0xa7, 0xa9:
+        case 0x9b...0xa2:
             let a = i64(l), b = i64(r)
             switch op {
-            case 0x91: return .long(a &+ b)
-            case 0x95: return .long(a &- b)
-            case 0x99: return .long(a &* b)
-            case 0x9d: return .long(try javaDivide(a, by: b))
-            case 0xa1: return .long(try javaRemainder(a, by: b))
-            case 0xa5: return .long(a & b)
-            case 0xa7: return .long(a | b)
+            case 0x9b: return .long(a &+ b)
+            case 0x9c: return .long(a &- b)
+            case 0x9d: return .long(a &* b)
+            case 0x9e: return .long(try javaDivide(a, by: b))
+            case 0x9f: return .long(try javaRemainder(a, by: b))
+            case 0xa0: return .long(a & b)
+            case 0xa1: return .long(a | b)
             default:   return .long(a ^ b)
             }
-        case 0xab, 0xad, 0xaf:
+        case 0xa3...0xa5:
             let a = i64(l), distance = Int(i32(r) & 63)
-            if op == 0xab { return .long(a << distance) }
-            if op == 0xad { return .long(a >> distance) }
+            if op == 0xa3 { return .long(a << distance) }
+            if op == 0xa4 { return .long(a >> distance) }
             return .long(Int64(bitPattern: UInt64(bitPattern: a) >> distance))
-        case 0x92, 0x96, 0x9a, 0x9e, 0xa2:
+        case 0xa6...0xaa:
             let a = f32(l), b = f32(r)
             switch op {
-            case 0x92: return .float(a + b)
-            case 0x96: return .float(a - b)
-            case 0x9a: return .float(a * b)
-            case 0x9e: return .float(a / b)
+            case 0xa6: return .float(a + b)
+            case 0xa7: return .float(a - b)
+            case 0xa8: return .float(a * b)
+            case 0xa9: return .float(a / b)
             default:   return .float(a.truncatingRemainder(dividingBy: b))
             }
-        case 0x93, 0x97, 0x9b, 0x9f, 0xa3:
+        case 0xab...0xaf:
             let a = f64(l), b = f64(r)
             switch op {
-            case 0x93: return .double(a + b)
-            case 0x97: return .double(a - b)
-            case 0x9b: return .double(a * b)
-            case 0x9f: return .double(a / b)
+            case 0xab: return .double(a + b)
+            case 0xac: return .double(a - b)
+            case 0xad: return .double(a * b)
+            case 0xae: return .double(a / b)
             default:   return .double(a.truncatingRemainder(dividingBy: b))
             }
         default:
