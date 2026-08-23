@@ -107,15 +107,16 @@ final class AsyncInterpreterTests: XCTestCase {
         let handlers = [UInt8(1), UInt8(1)]
             + DexBuilder.ULEB.encode(UInt64(exceptionType))
             + DexBuilder.ULEB.encode(6)
-        let instructions: [UInt16] = Insn.invokeStatic(fetch, [])
-            + Insn.moveResultObject(0)
-            + Insn.const4Units(0, 0)
-            + Insn.returnReg(0)
-            + [0x010d]
-            + Insn.const4Units(0, 7)
-            + Insn.returnReg(0)
-        let encodedTryItems = tryItem(start: 0, count: 3, handlerOffset: 1)
-            + handlers
+        var instructions: [UInt16] = []
+        instructions.append(contentsOf: Insn.invokeStatic(fetch, []))
+        instructions.append(contentsOf: Insn.moveResultObject(0))
+        instructions.append(contentsOf: Insn.const4Units(0, 0))
+        instructions.append(contentsOf: Insn.returnReg(0))
+        instructions.append(0x010d)
+        instructions.append(contentsOf: Insn.const4Units(0, 7))
+        instructions.append(contentsOf: Insn.returnReg(0))
+        var encodedTryItems = tryItem(start: 0, count: 3, handlerOffset: 1)
+        encodedTryItems.append(contentsOf: handlers)
         let method = DexBuilder.MethodSpec(
             name: "run", registers: 2, ins: 0, outs: 0,
             insns: instructions,
