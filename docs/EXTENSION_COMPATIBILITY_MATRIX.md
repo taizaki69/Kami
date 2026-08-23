@@ -20,8 +20,8 @@ is no compatibility claim.
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
 | DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| DEX execution | Partial M1/M2 working | The 150-test suite includes 11 exact pinned-APK paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, and bounded HTML/CSS execution are checked |
-| End-to-end source operations | Partial | BatCave popular and paginated text search cross deterministic injected transport and parse production selectors into exact `MangasPage` values; filtered search, details, chapters, pages, and `KamiSource` exposure remain open |
+| DEX execution | Partial M1/M2 working | The 155-test suite includes 13 exact pinned-APK paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, and bounded HTML/CSS execution are checked |
+| End-to-end source operations | Partial | BatCave popular, paginated text search, latest updates, and core manga details cross deterministic injected transport and parse production selectors into exact compatibility models; filtered search, chapters, pages, and `KamiSource` exposure remain open |
 
 ## Per-extension execution
 
@@ -29,7 +29,7 @@ is no compatibility claim.
 |---|---:|---|:---:|:---:|---|---|:---:|:---:|:---:|:---:|
 | MangaDex (`all.mangadex`) | 1.4.212 | `543dcf6a…306fa3` | ✅ | ✅ | — | — | — | — | — | — |
 | Akuma (`all.akuma`) | 1.4.10 | `9f5e744e…ba39a` | ✅ | ✅ | — | — | — | — | — | — |
-| BatCave (`en.batcave`) | 1.6.9 | `f5338a90…34fab6` | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ deterministic `MangasPage` | ✅ paginated text query | — | — | — |
+| BatCave (`en.batcave`) | 1.6.9 | `f5338a90…34fab6` | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ paginated text query | ✅ core fields | — | — |
 
 All three constructors execute their real no-argument DEX paths and return
 objects of the declared entry type. BatCave's popular path additionally proves
@@ -44,6 +44,11 @@ not claim live-site availability or a complete app-facing source. The pinned
 text-search worker additionally proves whitespace trimming, Java-compatible
 UTF-8 form encoding, GET construction, page routing, source cache policy, and
 the no-next-page result. Filtered search is not yet covered.
+
+The public latest-updates path proves its cached page-3 GET and pagination.
+The real details worker proves URL, title, thumbnail, publisher/year
+description, author, artist, genres, and status. Its optional related-manga JSON
+memo branch is deliberately not claimed yet.
 
 ## Current measured API workload
 
@@ -75,20 +80,24 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 ## Test evidence
 
-- 150/150 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+- 155/155 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present.
 - The `6cb46b5` iOS Build and IPA Package workflows passed. Swift CI found a
   macOS compiler type-check timeout in a large test expression; `e5988c3` splits
-  it and passes the full local suite. The latest `8d49633` Swift CI, iOS Build,
-  and IPA Package jobs were blocked with zero steps before runner dispatch by
-  the account's Actions payment/spending limit.
-- Eleven real-extension tests require exact successful values or exact typed
-  boundaries. The BatCave popular and text-search tests require exact requests
-  and parsed manga/page fields; its 503 test requires the exact Mihon
+  it and passes the full local suite. The latest `4eca3b2` Swift CI
+  [32657995346](https://github.com/taizaki69/Kami/actions/runs/32657995346),
+  iOS Build [32657995294](https://github.com/taizaki69/Kami/actions/runs/32657995294),
+  and IPA Package [32657995329](https://github.com/taizaki69/Kami/actions/runs/32657995329)
+  jobs were blocked with zero steps before runner dispatch by the account's
+  Actions payment/spending limit.
+- Thirteen real-extension tests require exact successful values or exact typed
+  boundaries. The BatCave popular, text-search, latest, and details tests require
+  exact requests and parsed model fields; its 503 test requires the exact Mihon
   `HttpException` code.
-- Five focused HTML regressions cover the BatCave selectors and URL resolution,
-  invalid bases, input/node/depth/attribute limits, selector syntax/length/result
-  and cumulative-work limits, and extracted-string bounds.
+- Six focused HTML regressions cover the BatCave selectors, modern direct-child
+  relative-selector semantics, URL resolution, invalid bases,
+  input/node/depth/attribute limits, selector syntax/length/result and
+  cumulative-work limits, and extracted-string bounds.
 - Four focused async regressions prove nested DEX-frame resumption, the typed
   sync-entry diagnostic, DEX handler re-entry, cancellation, and bounded
   response/body/charset/closed-state behavior.
@@ -122,9 +131,9 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 Kami can download, validate structurally, inspect, classify, and execute a
 controlled real-extension path through bounded async response delivery and
-parse BatCave popular/text-search HTML into manga pages. It cannot yet run the
-remaining source operations or use an unmodified extension as an app reader
-source. Remaining DEX work (notably
+parse BatCave popular/search/latest/details HTML into exact compatibility
+models. It cannot yet run chapters/pages or use an unmodified extension as an
+app reader source. Remaining DEX work (notably
 broader external hierarchy and super/default resolution beyond parsed class
 graphs, opcode coverage, and differential semantics) is tracked in
 [#1](https://github.com/taizaki69/Kami/issues/1), the first

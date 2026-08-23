@@ -4,7 +4,7 @@
 
 | Component | Verified how |
 |---|---|
-| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 — **150/150 tests pass**, including 11 real-APK paths, 5 bounded HTML/selector regressions, 46 pre-execution-verifier tests, and async HTTP/DEX coverage; exact-head macOS verification is pending restoration of GitHub Actions billing |
+| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 — **155/155 tests pass**, including 13 real-APK paths, 6 bounded HTML/selector regressions, 46 pre-execution-verifier tests, and async HTTP/DEX coverage; exact-head macOS verification is pending restoration of GitHub Actions billing |
 | compat-audit CLI | built and run on Windows against 3 SHA-256-locked extension APKs; uploaded by Swift CI on macOS |
 | KamiCore (models, SQLite store, MangaDex source) | `swift test` passes in GitHub Actions; package builds as an app dependency for Simulator and device |
 | App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |
@@ -52,10 +52,14 @@ Keiyoushi release assets and verifies the SHA-256 values recorded in
 - `iOS Build`: generic Simulator plus unsigned generic-device compilation.
 - `IPA Package`: unsigned device build and downloadable IPA artifact.
 
-As of commit `8d49633`, all three workflows are blocked before runner dispatch
-by the account payment/spending-limit setting. Their jobs contain zero steps;
-this is an account state, not a source/test failure. The local Windows package
-suite and optimized `compat-audit` build pass at that checkpoint.
+As of commit `4eca3b2`, all three workflows are blocked before runner dispatch
+by the account payment/spending-limit setting. Their jobs contain zero steps and
+the explicit billing annotation: [Swift CI 32657995346](https://github.com/taizaki69/Kami/actions/runs/32657995346),
+[iOS Build 32657995294](https://github.com/taizaki69/Kami/actions/runs/32657995294),
+and [IPA Package 32657995329](https://github.com/taizaki69/Kami/actions/runs/32657995329).
+This is an account state, not a source/test failure. The local Windows package
+suite, KamiCore dependency build/test, and optimized `compat-audit` build pass
+at that checkpoint.
 
 A signed install still requires credentials owned by the user; no certificate,
 profile, password, or Apple account secret belongs in this repository.

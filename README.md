@@ -27,12 +27,16 @@ SwiftSoup-backed Jsoup bridge now runs BatCave's production CSS selectors and
 the real APK returns an exact `MangasPage` from deterministic response HTML,
 including relative-URL resolution and pagination. Its real text-search branch
 also trims and Java-form-encodes a page-2 query, preserves the source's cache
-policy, and returns the parsed result. A separate real-APK regression proves
-non-2xx responses become Mihon's `HttpException`. This is a measured M1/M2
-runtime slice, **not end-to-end source compatibility**: filtered search,
-details, chapters, pages, preferences, the `KamiSource` adapter, and much of the
-Kotlin/Java surface remain open (`docs/EXTENSION_RUNTIME.md`). Kami currently
-reads through its native MangaDex source.
+policy, and returns the parsed result. The public latest-updates path likewise
+builds its cached page GET and returns a parsed page. The real manga-details
+worker now returns URL, title, thumbnail, publisher/year description, author,
+artist, genres, and status using modern Jsoup direct-child selector semantics.
+A separate real-APK regression proves non-2xx responses become Mihon's
+`HttpException`. This is a measured M1/M2 runtime slice, **not end-to-end source
+compatibility**: filtered search, chapters, pages, preferences, the
+`KamiSource` adapter, and much of the Kotlin/Java surface remain open
+(`docs/EXTENSION_RUNTIME.md`). Kami currently reads through its native
+MangaDex source.
 
 ## Layout
 
@@ -64,7 +68,7 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 150 tests run on Windows with Swift 6.3
+The compatibility kit and all 155 tests run on Windows with Swift 6.3
 (`scripts/windows_dev_test.bat`). GitHub Actions is configured to run the pinned
 real-APK suite on macOS, compiles both Simulator and unsigned device targets,
 and publishes an unsigned IPA artifact. The `compat-audit` CLI produced the

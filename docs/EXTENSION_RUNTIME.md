@@ -27,10 +27,17 @@ Measured real-APK behavior today:
   to Mihon's typed `HttpException` with the exact status code.
 - BatCave's real nonblank text-search worker trims and Java-form-encodes a page-2
   query, builds the exact cached GET, and parses its result into `MangasPage`.
-- Popular and text-search parsing are proven only with deterministic offline
-  response HTML. No test yet claims filtered search, details, chapters, pages,
-  JSON serialization, preferences, Cloudflare behavior, or an interpreted
-  `KamiSource` adapter. The pinned suite never performs live network I/O.
+- BatCave's public latest-updates operation builds its cached page-3 GET and
+  parses the production card selectors into a paginated `MangasPage`.
+- Its real manga-details worker fetches an `HttpUrl` and returns URL, title,
+  thumbnail, publisher/year description, author, artist, genres, and status.
+  This crosses modern Jsoup direct-child `:has(> ...)` and element-relative
+  `> ...` selectors plus Kotlin's default collection join behavior.
+- These source-result paths are proven only with deterministic offline response
+  HTML. No test yet claims filtered search, chapters, pages, the optional
+  related-manga JSON memo, preferences, Cloudflare behavior, or an
+  interpreted `KamiSource` adapter. The pinned suite never performs live
+  network I/O.
 
 ## Architecture
 
@@ -42,8 +49,8 @@ classes*.dex                        validated structural parse
    ↓ DexInterpreter                 partial M1; async frame resume works
    ↓ Java/Kotlin HostBridge         partial exact-signature M2 surface
    ↓ source-scoped HTTP transport   bounded async request/response slice works
-   ↓ bounded HTML/CSS bridge        BatCave popular/text-search slice works
-   ↓ tachiyomix API bridge          SManga/MangasPage slice; no KamiSource yet
+   ↓ bounded HTML/CSS bridge        BatCave browse/search/details slice works
+   ↓ tachiyomix API bridge          SManga/MangasPage fields; no chapters/pages
 KamiSource (Swift protocol)         working for native sources
    ↓ SourceRegistry / app / DB      working
 ```
@@ -146,7 +153,8 @@ synthetic and pinned-corpus tests:
   primitive boxes, atomics, concurrent maps, bounded lists, and iterators.
 - Kotlin `Intrinsics`, `Result`, basic synchronous continuation setup, lazy
   values, pairs, `isBlank`, trimming, Java-compatible UTF-8 form URL encoding,
-  regex construction, and mutable reference boxes.
+  regex construction, bounded default `joinToString`, and mutable reference
+  boxes.
 - Mihon filter/filter-list construction and state access, plus construction
   shims for `HttpSource` and `ParsedHttpSource` superclasses.
 - The date-pattern object needed by the pinned BatCave constructor.
@@ -163,16 +171,22 @@ synthetic and pinned-corpus tests:
 - SwiftSoup 2.9.6 supplies HTML5 parsing and CSS semantics behind an exact
   Jsoup-compatible document/element/elements slice. Kami caps input bytes, DOM
   nodes/depth/attributes, selector length/results/cumulative work, and extracted
-  strings before values return to DEX.
+  strings before values return to DEX. A bounded adapter supplies the modern
+  direct-child relative selectors reached by the details parser even though
+  the pinned SwiftSoup release predates those Jsoup semantics.
 - The reached tachiyomix model slice constructs and mutates `SManga`, applies
   `setUrlWithoutDomain`, constructs `MangasPage`, and converts that result to the
-  public Swift compatibility models without silently dropping entries.
+  public Swift compatibility models without silently dropping entries. Core
+  manga-detail author, artist, description, genre, thumbnail, and status fields
+  are now proven through the real APK.
 - Kotlin duration encoding/conversion reached by OkHttp cache-control setup.
 
-The measured next layer is BatCave filtered search/latest, followed by its
-details, chapters, and pages paths. The longer tail remains additional Jsoup
-DOM behavior, string/collection overloads, serialization, preferences, and
-Android context/UI shims. A class appearing in the analyzer's
+The measured next layer is BatCave chapter parsing and update assembly, followed
+by pages and filtered search. That frontier introduces script-data extraction,
+kotlinx JSON serialization, `SChapter`, date parsing, and `SMangaUpdate`. The
+longer tail remains additional Jsoup DOM behavior, string/collection overloads,
+serialization, preferences, and Android context/UI shims. A class appearing in
+the analyzer's
 `implementedClasses` set is only a coarse prioritization signal; it does not
 mean every method on that class is callable.
 
@@ -208,17 +222,19 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 150 passing tests locally on Windows/Swift 6.3.3.
-They include 11 pinned real-extension executions, 5 focused HTML/parser-limit
-regressions, a Java URL-encoding regression, and 4 focused async
+`MihonCompatKit` currently has 155 passing tests locally on Windows/Swift 6.3.3.
+They include 13 pinned real-extension executions, 6 focused HTML/parser-limit
+regressions, Java URL-encoding and bounded Kotlin collection-joining
+regressions, and 4 focused async
 interpreter/transport regressions, alongside the existing parser, verifier,
 request-model, repository, and compression coverage. GitHub Swift CI fetches
 the SHA-256-locked APK corpus before running it.
 
 The first `6cb46b5` macOS run found a compiler type-check timeout in one large
-test-fixture expression. The expression was split in `e5988c3`; all 150 tests
-pass locally; exact-head GitHub reruns could not start because the account's
-Actions payment/spending limit blocked runner dispatch.
+test-fixture expression. The expression was split in `e5988c3`; all 155 tests
+pass locally. Exact-head `4eca3b2` Swift CI, iOS Build, and IPA Package jobs
+again had zero steps because the account's Actions payment/spending limit
+blocked runner dispatch.
 
 The compatibility matrix records the exact versions, hashes, and methods. New
 runtime behavior is complete only when it has a focused regression test and,

@@ -32,14 +32,17 @@ bounded response, parses it through `JsoupExtensionsKt.asJsoup$default`, and
 returns an exact `MangasPage` from the source's production selectors. The
 fixture remains deterministic and offline. BatCave's nonblank text-search path
 also proves the exact page-2 GET and its 600-second cache policy before parsing
-the result through the same bounded surface.
+the result through the same bounded surface. The public latest-updates path
+proves its cached page-3 GET, and the real manga-details worker proves its
+cached detail GET before returning the expected core `SManga` fields.
 
 ## Remaining extension-facing stack
 
-Still required for useful source results and broader extension compatibility:
+Still required for the remaining source results and broader extension
+compatibility:
 
 - Additional Jsoup document/element APIs only as the next pinned source paths
-  measure them; the BatCave popular slice already enforces input, DOM, extracted
+  measure them; the covered BatCave paths already enforce input, DOM, extracted
   string, result-count, and cumulative selector-work limits.
 - Additional request/response overloads (including JSON and byte-array bodies)
   only as measured extensions reach them.
