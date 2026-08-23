@@ -57,8 +57,10 @@ download_gitiles() {
   echo "==> Fetching $name.apk"
   curl --fail --location --silent --show-error --retry 3 \
     --proto '=https' --tlsv1.2 "$url" --output "$encoded"
-  if ! base64 --decode "$encoded" > "$temporary" 2>/dev/null; then
-    base64 -D "$encoded" > "$temporary"
+  # Reading from stdin is portable across GNU coreutils and macOS/BSD
+  # `base64`; their positional input-file syntax is not compatible.
+  if ! base64 --decode < "$encoded" > "$temporary" 2>/dev/null; then
+    base64 -D < "$encoded" > "$temporary"
   fi
   [[ "$(sha256 "$temporary")" == "$expected" ]]
   mv "$temporary" "$destination"
