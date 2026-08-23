@@ -72,11 +72,16 @@ Implemented slice:
 - Every structurally accepted instruction has its register and exposed
   string/type/field/method/prototype operands checked, including unreachable
   code. A bounded worklist then propagates seeded parameter types across normal
-  and exception edges, tracking undefined/conflicting values, the
-  verifier-polymorphic zero, category-1 primitives, adjacent wide pairs, and
-  references. It checks moves/results/returns, calls, arrays, fields, branches,
-  and numeric operations before execution. The caps are 250,000 states,
-  8,000,000 register cells, and 8,000,000 merges per method.
+  and exception edges. Its ART-shaped lattice tracks bounded polymorphic
+  constants; boolean, byte, char, short, int, and float registers; distinct
+  long/double pairs; initialized references; allocation-site-specific
+  uninitialized references; uninitialized constructor `this`; undefined
+  values; and conflicts. Constructor calls initialize every alias, ordinary
+  reference use rejects uninitialized objects, and constructors cannot return
+  before initializing `this`. It checks moves/results/returns, calls, arrays,
+  fields, branches, conversions, and numeric operations before execution. The
+  caps are 250,000 states, 8,000,000 register cells, and 8,000,000 merges per
+  method.
 - Java-compatible integer divide/remainder edge cases, reference identity,
   exception handlers, recursion limit, cancellation, and trace callback.
 - Exact name/prototype dispatch for interpreted and host calls; virtual and
@@ -98,10 +103,8 @@ Still required before M1 is complete:
 - Full instruction and payload coverage for the expanding corpus.
 - Complete interface-default and invoke-super resolution when hierarchy data
   leaves the parsed DEX.
-- Exact primitive subtype tracking (`int` versus `float`, `long` versus
-  `double`), uninitialized-instance rules around constructors, resolved
-  reference-hierarchy assignability, and resolved catch-type assignability to
-  `Throwable`.
+- Resolved reference-hierarchy assignability and resolved catch-type
+  assignability to `Throwable`.
 - Differential fixtures against AOSP-compatible reference execution.
 
 This work is tracked in [GitHub issue #1](https://github.com/taizaki69/Kami/issues/1).
@@ -161,7 +164,7 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 94 passing tests: 59 interpreter tests, 10 parser
+`MihonCompatKit` currently has 103 passing tests: 68 interpreter tests, 10 parser
 hardening tests (including every truncated prefix of generated DEX and ZIP
 fixtures), 8 pinned real-extension executions, 2 bounded request-model tests,
 and 15 reader/inflate/repository tests. GitHub Swift CI fetches the

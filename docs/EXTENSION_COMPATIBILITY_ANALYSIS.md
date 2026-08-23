@@ -235,10 +235,10 @@ simplest `ParsedHttpSource` shapes; cannot be the general strategy.
    engine now executes pinned real constructors and metadata getters. A
    bounded pre-execution verifier covers instruction/payload geometry and
    control-flow targets, strict try/catch table decoding, static register bounds,
-   and category-level dataflow across normal and exception edges. Exact
-   primitive subtypes, uninitialized-reference rules, resolved hierarchy and
-   catch-type assignability, and growing opcode and host-API coverage remain
-   driven by the audit corpus.
+   exact primitive-family dataflow, polymorphic constants, typed wide pairs,
+   and allocation-specific constructor/uninitialized-reference rules across
+   normal and exception edges. Resolved hierarchy and catch-type assignability,
+   plus growing opcode and host-API coverage, remain driven by the audit corpus.
    This is the long-running engineering track; see
    `EXTENSION_RUNTIME.md` for the staged plan and honest status.
 5. **Backup import** (.tachibk protobuf+zstd) independent of the runtime, so users

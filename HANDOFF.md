@@ -12,7 +12,8 @@ work was recovered, completed, verified, and pushed.
 - Repository: <https://github.com/taizaki69/Kami>
 - Visibility: private
 - Default branch: `main`
-- Current verified runtime implementation baseline: `7ce3c812d5eca159a28d680591a45a72ff325956`
+- Current verified runtime implementation baseline: `10bf770d61ebe1f6bb5dd9d13ade63853cdbffd8`
+- Previous register-category baseline: `7ce3c812d5eca159a28d680591a45a72ff325956`
 - Previous exception-verifier baseline: `66d41261e4cfa70bea2fd9a89a2f0dcdb670eff6`
 - Previous structural-verifier baseline: `284b24dc2b7bec838afed5b6a2c9ea07df8b8f0b`
 - Previous receiver-directed dispatch baseline: `057169640b43c516455f753ae3efd81e3db02e61`
@@ -110,11 +111,11 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 94 Swift tests passed locally on Windows/Swift 6.3.3; the last published macOS CI baseline passed 63 |
+| MihonCompatKit | 103 Swift tests passed locally on Windows/Swift 6.3.3; the last published macOS CI baseline passed 63 |
 | Real APK constructors | Akuma, MangaDex, and BatCave passed |
 | Structural verifier | 9 focused regressions cover instruction geometry, branch/fallthrough boundaries, and aligned, bounded, correctly typed payloads and switch targets |
 | Exception/control verifier | 11 focused regressions cover strict try/catch decoding, handler execution, and AOSP branch/result/exception-entry rules |
-| Register-category verifier | 8 focused regressions cover dead-code bounds, parameter seeding, undefined/conflicting joins, zero/reference merging, result/invoke categories, wide-pair clobbering, and exception edges |
+| Register dataflow verifier | 17 focused regressions cover dead-code bounds, parameter seeding, joins, polymorphic constants, exact primitive/wide families, result/invoke types, wide-pair clobbering, exception edges, and constructor/uninitialized-object state |
 | Binary opcode semantics | 1 focused regression covers AOSP operation/type-major ordering across int, long, float, double, and `/2addr` forms |
 | Receiver dispatch | 2 focused regressions cover virtual override and interface implementation selection from the runtime receiver |
 | Request-model regressions | 2 focused tests cover request construction, duration/cache conversion, URL scheme rejection, CRLF-header rejection, and body bounds |
@@ -125,13 +126,54 @@ At the implementation baseline:
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
 The referenced runs validate the earlier `4d042c9` request-model baseline and
-produced `compat-audit-macos` and `Kami-unsigned-ipa`. The `7ce3c81`
+produced `compat-audit-macos` and `Kami-unsigned-ipa`. The `10bf770`
 register-verifier continuation was verified locally; require the same SHA to
 pass Swift CI, iOS build, and IPA workflows before calling it the published
 cross-platform checkpoint. GitHub artifacts expire; rerun the corresponding
 workflow if they are no longer available.
 
 ## What the latest continuation completed
+
+Commit `10bf770` completes the exact primitive-family and uninitialized-object
+portion of the DEX register verifier:
+
+- The register lattice now follows ART's concrete type families: bounded
+  polymorphic 32-bit constants; boolean, byte, char, short, int, and float;
+  distinct long/double/constant-wide pairs; initialized references;
+  allocation-site-specific uninitialized references; and uninitialized
+  constructor `this`. Undefined and conflict states remain explicit.
+- Numeric opcodes, comparisons, branches, arrays, fields, calls, returns, and
+  conversions now require and produce their exact primitive family. Constants
+  remain usable as int/float or long/double until an operation resolves them,
+  matching the verifier behavior documented by ART's
+  [`RegType`](https://android.googlesource.com/platform/art/+/master/runtime/verifier/reg_type.h).
+- `new-instance` produces an allocation-identity value rather than an ordinary
+  reference. Only object moves and the matching direct constructor call may
+  consume that state; successful construction initializes every alias.
+  Ordinary calls, fields, arrays, casts, monitors, throws, and returns reject
+  uninitialized objects.
+- Instance constructors receive uninitialized `this`, may access their own
+  fields before the super/this call, and cannot return until a direct
+  constructor call initializes all aliases. Constructor calls on already
+  initialized references and constructor names invoked with the wrong opcode
+  are rejected. These rules follow ART's
+  [`MethodVerifier`](https://android.googlesource.com/platform/art/+/master/runtime/verifier/method_verifier.cc)
+  model while retaining its permissive superclass-constructor behavior used by
+  optimized DEX.
+- Synthetic object fixtures now execute explicit constructors instead of
+  relying on the interpreter's previous implicit initialized-reference state.
+  Nine new regressions cover cross-family misuse, polymorphic constants,
+  conversion outputs, alias initialization, premature constructor return,
+  double initialization, and initialized/uninitialized joins.
+- MihonCompatKit now passes 103 tests, including 68 interpreter tests and all
+  eight pinned real-extension paths. The all-products debug build and the
+  KamiCore dependency build/test also pass on Windows/Swift 6.3.3.
+
+Resolved reference-hierarchy assignability, catch-type assignability to
+`Throwable`, remaining opcodes, and differential AOSP fixtures remain issue #1
+work.
+
+## What the preceding register-category continuation completed
 
 Commit `7ce3c81` adds bounded register-category verification and corrects the
 interpreter's binary arithmetic opcode mapping:
@@ -158,10 +200,11 @@ interpreter's binary arithmetic opcode mapping:
   real-extension paths still pass, and a clean KamiCore dependency build sees
   the new verifier source.
 
-This is category-level verification, not the complete Dalvik verifier. Exact
-`int`/`float` and `long`/`double` distinctions, uninitialized-instance
-constructor rules, resolved reference-hierarchy assignability, and resolved
-catch-type assignability to `Throwable` remain issue #1 work.
+At that checkpoint, exact `int`/`float` and `long`/`double` distinctions,
+uninitialized-instance constructor rules, resolved reference-hierarchy
+assignability, and resolved catch-type assignability to `Throwable` remained.
+Commit `10bf770` subsequently completed the primitive and constructor-state
+portions; hierarchy and catch-type resolution remain issue #1 work.
 
 ## What the preceding exception-verifier continuation completed
 
@@ -330,8 +373,8 @@ Proven today:
 - Bounded, transport-neutral OkHttp request values with no live-network side
   effects, including the exact pinned BatCave POST assertion.
 - Bounded pre-execution verification of complete instruction geometry,
-  try/catch tables, register operands, and category-level register dataflow over
-  normal and exception edges.
+  try/catch tables, register operands, and exact primitive/constructor-state
+  register dataflow over normal and exception edges.
 - Native MangaDex browsing through the existing `KamiSource` implementation.
 - Simulator/device compilation and creation of a real unsigned IPA.
 
@@ -342,13 +385,12 @@ Not proven or implemented:
 - Extension HTTP transport, response/response-body/Okio models, coroutine
   suspension/resumption across async transport, Jsoup, preferences, cookies,
   or WebView bridges. The current OkHttp subset is request-only.
-- Full DEX opcode coverage; exact primitive subtype typing, uninitialized
-  instance/constructor semantics, resolved reference assignability, or resolved
+- Full DEX opcode coverage, resolved reference assignability, or resolved
   `Throwable` assignability for catch types. Structural
-  code-item/control-flow/exception-table and category-level register
-  verification plus receiver-directed virtual/interface selection across
-  parsed DEX superclass chains are working; complete behavior when hierarchy
-  data leaves the parsed DEX remains open.
+  code-item/control-flow/exception-table verification, exact primitive and
+  constructor-state register verification, and receiver-directed
+  virtual/interface selection across parsed DEX superclass chains are working;
+  complete behavior when hierarchy data leaves the parsed DEX remains open.
 - APK signer authentication and update identity binding.
 - A signed installation on a physical iPhone or iPad.
 - Production compatibility telemetry or a declared repository license.
@@ -397,7 +439,7 @@ Address these before treating arbitrary downloaded extensions as safe.
 
 | Priority | Issue | Purpose |
 |---|---|---|
-| P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining exact subtype/uninitialized-reference verifier, external hierarchy, opcode, and differential semantics work |
+| P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining external hierarchy, catch-type, opcode, and differential semantics work |
 | P0 | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | One real APK through search/popular, details, chapters, pages, and `KamiSource` |
 | Security gate | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | Required before downloaded APK execution |
 | Diagnostics | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Deterministic, redacted unresolved-surface reports |
@@ -410,11 +452,11 @@ The rest of the product backlog is in `TODO.md`.
 1. Work only with the pinned local corpus while the signer gate is absent.
 2. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
    plus canonical unresolved diagnostics for every new bridge decision.
-3. Continue issue #1 with exact primitive subtype tracking, uninitialized
-   instance/constructor rules, resolved reference-hierarchy assignability, and
-   resolved catch-type `Throwable` assignability. Code-item geometry, strict
-   try/catch decoding, branch/move-result/move-exception rules, bounded
-   category-level dataflow, receiver-directed virtual/interface lookup, and
+3. Continue issue #1 with resolved reference-hierarchy assignability and
+   resolved catch-type `Throwable` assignability, then grow opcode and
+   differential AOSP coverage. Code-item geometry, strict try/catch decoding,
+   branch/move-result/move-exception rules, bounded exact primitive and
+   constructor-state dataflow, receiver-directed virtual/interface lookup, and
    invoke word-count checks are already in; complete partially external
    hierarchy semantics remains open.
 4. Add aggregate parser/runtime resource accounting and streaming or
