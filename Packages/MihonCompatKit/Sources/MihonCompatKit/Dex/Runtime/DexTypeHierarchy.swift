@@ -147,6 +147,10 @@ struct DexTypeHierarchy {
         typeInfo(descriptor)?.isInterface
     }
 
+    func isKnown(_ descriptor: String) -> Bool {
+        typeInfo(descriptor) != nil
+    }
+
     private func arrayAssignability(
         from candidate: String,
         to expected: String,
@@ -298,6 +302,10 @@ struct DexTypeHierarchy {
         classType("Ljava/lang/Exception;", superclass: throwable)
         classType("Ljava/lang/RuntimeException;", superclass: "Ljava/lang/Exception;")
         classType("Ljava/lang/Error;", superclass: throwable)
+        classType("Ljava/lang/LinkageError;", superclass: "Ljava/lang/Error;")
+        classType("Ljava/lang/IncompatibleClassChangeError;", superclass: "Ljava/lang/LinkageError;")
+        classType("Ljava/lang/AbstractMethodError;", superclass: "Ljava/lang/IncompatibleClassChangeError;")
+        classType("Ljava/lang/NoSuchMethodError;", superclass: "Ljava/lang/IncompatibleClassChangeError;")
 
         let runtimeExceptions = [
             "Ljava/lang/ArithmeticException;",

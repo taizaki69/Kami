@@ -94,6 +94,8 @@ public struct DexFile {
     public let fieldIds: [FieldRef]
     public let methodIds: [MethodRef]
     public let classDefs: [ClassDef]
+    /// Numeric DEX format version from the magic (`035`, `037`...`040`).
+    public let version: Int
 
     /// descriptor ("La/b/C;") → class def index.
     public let classIndexByDescriptor: [String: Int]
@@ -112,6 +114,10 @@ public struct DexFile {
         guard supportedMagics.contains(magic) else {
             throw Error.badMagic(magic)
         }
+        guard let version = Int(magic.dropFirst(4).prefix(3)) else {
+            throw Error.badMagic(magic)
+        }
+        self.version = version
         try r.seek(8)
         let declaredChecksum = try r.u32()
         _ = try r.skip(20) // sha1 signature

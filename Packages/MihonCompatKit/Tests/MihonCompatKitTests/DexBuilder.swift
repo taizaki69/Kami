@@ -3,7 +3,7 @@ import Foundation
 
 /// Builds minimal, valid DEX images for interpreter tests (mission §30).
 /// Emits exactly the structures `DexFile` parses: header, string/type/proto/
-/// field/method id tables, one class def with class_data, and code items.
+/// field/method id tables, class defs with class_data, and code items.
 struct DexBuilder {
     struct MethodSpec {
         let name: String
@@ -13,6 +13,8 @@ struct DexBuilder {
         let insns: [UInt16]
         let isStatic: Bool
         let isVirtual: Bool
+        let accessFlags: UInt32
+        let hasCode: Bool
         let returnType: String
         let parameters: [String]
         let triesCount: Int
@@ -24,7 +26,8 @@ struct DexBuilder {
              insns: [UInt16], isStatic: Bool, returnType: String = "V",
              parameters: [String] = [], triesCount: Int = 0,
              tryPadding: UInt16 = 0, tryItems: [UInt8] = [],
-             isVirtual: Bool? = nil) {
+             isVirtual: Bool? = nil, accessFlags: UInt32? = nil,
+             hasCode: Bool = true) {
             self.name = name
             self.registers = registers
             self.ins = ins
@@ -32,6 +35,9 @@ struct DexBuilder {
             self.insns = insns
             self.isStatic = isStatic
             self.isVirtual = isVirtual ?? (!isStatic && name != "<init>")
+            self.accessFlags = accessFlags
+                ?? (isStatic ? 0x8 : (self.isVirtual ? 0x1 : 0))
+            self.hasCode = hasCode
             self.returnType = returnType
             self.parameters = parameters
             self.triesCount = triesCount
@@ -45,12 +51,31 @@ struct DexBuilder {
     private var protos: [(shorty: Int, ret: Int, parameters: [Int])] = []
     private var fieldIds: [(classIdx: UInt16, typeIdx: UInt16, nameIdx: Int)] = []
     private var methodIds: [(classIdx: UInt16, protoIdx: UInt16, nameIdx: Int)] = []
-    private var classDescriptorIdx: Int = -1
-    private var superclassIdx: Int = -1
-    private var interfaceTypeIndices: [Int] = []
-    private var methods: [MethodSpec] = []
-    private var staticFields: [(name: String, type: String)] = []
-    private var fields: [(name: String, type: String)] = []
+    private struct RegisteredMethod {
+        let methodIndex: Int
+        let spec: MethodSpec
+    }
+    private struct RegisteredField {
+        let fieldIndex: Int
+        let accessFlags: UInt32
+    }
+    private struct ClassSpec {
+        let descriptorIdx: Int
+        let superclassIdx: Int
+        let interfaceTypeIndices: [Int]
+        let accessFlags: UInt32
+        var methods: [RegisteredMethod]
+        var staticFields: [RegisteredField]
+        var instanceFields: [RegisteredField]
+    }
+    private var classes: [ClassSpec] = []
+    private var activeClassIndex: Int?
+    private let version: Int
+
+    init(version: Int = 35) {
+        precondition([35, 37, 38, 39, 40].contains(version))
+        self.version = version
+    }
 
     // MARK: registration
 
@@ -98,37 +123,59 @@ struct DexBuilder {
                            superclass: String? = nil,
                            interfaces: [String] = [],
                            staticFields: [(String, String)] = [],
-                           fields: [(String, String)] = []) {
-        classDescriptorIdx = type(descriptor)
-        if let superclass {
-            superclassIdx = type(superclass)
-        } else {
-            superclassIdx = -1
+                           fields: [(String, String)] = [],
+                           accessFlags: UInt32 = 0x1) {
+        let descriptorIdx = type(descriptor)
+        precondition(!classes.contains { $0.descriptorIdx == descriptorIdx })
+        let superclassIdx = superclass.map { type($0) } ?? -1
+        let interfaceTypeIndices = interfaces.map { type($0) }
+        var registeredStaticFields: [RegisteredField] = []
+        var registeredInstanceFields: [RegisteredField] = []
+        for fieldSpec in staticFields {
+            let index = field(
+                classDescriptor: descriptor,
+                name: fieldSpec.0,
+                typeDescriptor: fieldSpec.1
+            )
+            registeredStaticFields.append(RegisteredField(fieldIndex: index, accessFlags: 0x8))
         }
-        interfaceTypeIndices = []
-        for interface in interfaces {
-            interfaceTypeIndices.append(type(interface))
+        for fieldSpec in fields {
+            let index = field(
+                classDescriptor: descriptor,
+                name: fieldSpec.0,
+                typeDescriptor: fieldSpec.1
+            )
+            registeredInstanceFields.append(RegisteredField(fieldIndex: index, accessFlags: 0x2))
         }
-        self.staticFields = []
-        self.fields = []
-        for field in staticFields {
-            _ = self.field(classDescriptor: descriptor, name: field.0, typeDescriptor: field.1)
-            self.staticFields.append((name: field.0, type: field.1))
-        }
-        for f in fields {
-            _ = field(classDescriptor: descriptor, name: f.0, typeDescriptor: f.1)
-            self.fields.append((name: f.0, type: f.1))
-        }
+        classes.append(ClassSpec(
+            descriptorIdx: descriptorIdx,
+            superclassIdx: superclassIdx,
+            interfaceTypeIndices: interfaceTypeIndices,
+            accessFlags: accessFlags,
+            methods: [],
+            staticFields: registeredStaticFields,
+            instanceFields: registeredInstanceFields
+        ))
+        activeClassIndex = classes.count - 1
     }
 
-    mutating func addMethod(_ spec: MethodSpec) {
+    @discardableResult
+    mutating func addMethod(_ spec: MethodSpec) -> Int {
         // Auto-register the exact method_id so class_data and invoke tests use
         // the same prototype identity as production DEX files.
-        let cls = classDescriptorIdx >= 0 ? classDescriptorIdx : 0
+        guard let activeClassIndex else {
+            preconditionFailure("setClass must be called before addMethod")
+        }
+        let cls = classes[activeClassIndex].descriptorIdx
         let shorty = Self.shorty(returnType: spec.returnType, parameters: spec.parameters)
         let protoIdx = proto(shorty: shorty, ret: spec.returnType, parameters: spec.parameters)
         methodIds.append((UInt16(cls), UInt16(protoIdx), string(spec.name)))
-        methods.append(spec)
+        let methodIndex = methodIds.count - 1
+        classes[activeClassIndex].methods.append(RegisteredMethod(
+            methodIndex: methodIndex,
+            spec: spec
+        ))
+        return methodIndex
     }
 
     private static func shorty(returnType: String, parameters: [String]) -> String {
@@ -140,16 +187,16 @@ struct DexBuilder {
     // MARK: emission
 
     mutating func build() -> [UInt8] {
-        // Ensure class descriptor exists.
-        let _ = classDescriptorIdx
+        precondition(!classes.isEmpty)
 
         // Layout: header(112) stringIds typeIds protoIds fieldIds methodIds
-        //         classDefs(1) stringData protoTypeLists classData codeItems
+        //         classDefs stringData proto/interface type lists classData codeItems
         let stringIdsSize = strings.count
         let typeIdsSize = types.count
         let protoIdsSize = protos.count
         let fieldIdsSize = fieldIds.count
         let methodIdsSize = methodIds.count
+        let classDefsSize = classes.count
 
         let stringIdsOff = 112
         let typeIdsOff = stringIdsOff + stringIdsSize * 4
@@ -157,7 +204,7 @@ struct DexBuilder {
         let fieldIdsOff = protoIdsOff + protoIdsSize * 12
         let methodIdsOff = fieldIdsOff + fieldIdsSize * 8
         let classDefsOff = methodIdsOff + methodIdsSize * 8
-        let stringDataOff = classDefsOff + 32
+        let stringDataOff = classDefsOff + classDefsSize * 32
 
         var stringData: [UInt8] = []
         var stringOffsets: [Int] = []
@@ -170,123 +217,143 @@ struct DexBuilder {
         }
 
         // Every non-empty proto parameter list is a 4-byte-aligned type_list.
-        var protoData: [UInt8] = []
+        var tableData: [UInt8] = []
         var protoParameterOffsets: [Int] = []
         for proto in protos {
             guard !proto.parameters.isEmpty else {
                 protoParameterOffsets.append(0)
                 continue
             }
-            while (stringDataOff + stringData.count + protoData.count) % 4 != 0 {
-                protoData.append(0)
+            while (stringDataOff + stringData.count + tableData.count) % 4 != 0 {
+                tableData.append(0)
             }
-            protoParameterOffsets.append(stringDataOff + stringData.count + protoData.count)
+            protoParameterOffsets.append(stringDataOff + stringData.count + tableData.count)
             let count = UInt32(proto.parameters.count)
-            protoData.append(UInt8(count & 0xFF))
-            protoData.append(UInt8((count >> 8) & 0xFF))
-            protoData.append(UInt8((count >> 16) & 0xFF))
-            protoData.append(UInt8(count >> 24))
+            tableData.append(UInt8(count & 0xFF))
+            tableData.append(UInt8((count >> 8) & 0xFF))
+            tableData.append(UInt8((count >> 16) & 0xFF))
+            tableData.append(UInt8(count >> 24))
             for parameter in proto.parameters {
                 let value = UInt16(parameter)
-                protoData.append(UInt8(value & 0xFF))
-                protoData.append(UInt8(value >> 8))
+                tableData.append(UInt8(value & 0xFF))
+                tableData.append(UInt8(value >> 8))
             }
         }
 
-        var interfacesOff = 0
-        if !interfaceTypeIndices.isEmpty {
-            while (stringDataOff + stringData.count + protoData.count) % 4 != 0 {
-                protoData.append(0)
+        var interfaceOffsets = [Int](repeating: 0, count: classes.count)
+        for (classIndex, classSpec) in classes.enumerated() {
+            guard !classSpec.interfaceTypeIndices.isEmpty else { continue }
+            while (stringDataOff + stringData.count + tableData.count) % 4 != 0 {
+                tableData.append(0)
             }
-            interfacesOff = stringDataOff + stringData.count + protoData.count
-            let count = UInt32(interfaceTypeIndices.count)
-            protoData.append(UInt8(count & 0xFF))
-            protoData.append(UInt8((count >> 8) & 0xFF))
-            protoData.append(UInt8((count >> 16) & 0xFF))
-            protoData.append(UInt8(count >> 24))
-            for interface in interfaceTypeIndices {
+            interfaceOffsets[classIndex] = stringDataOff + stringData.count + tableData.count
+            let count = UInt32(classSpec.interfaceTypeIndices.count)
+            tableData.append(UInt8(count & 0xFF))
+            tableData.append(UInt8((count >> 8) & 0xFF))
+            tableData.append(UInt8((count >> 16) & 0xFF))
+            tableData.append(UInt8(count >> 24))
+            for interface in classSpec.interfaceTypeIndices {
                 let value = UInt16(interface)
-                protoData.append(UInt8(value & 0xFF))
-                protoData.append(UInt8(value >> 8))
+                tableData.append(UInt8(value & 0xFF))
+                tableData.append(UInt8(value >> 8))
             }
         }
 
         struct CodeItemLayout {
             let offset: Int
+            let methodIndex: Int
             let spec: MethodSpec
         }
         var codeLayouts: [CodeItemLayout] = []
         var codeCursor = 0
-        for m in methods {
-            precondition((0...Int(UInt16.max)).contains(m.triesCount))
-            codeLayouts.append(CodeItemLayout(offset: codeCursor, spec: m))
-            codeCursor += 16 + m.insns.count * 2
-            if m.triesCount > 0, m.insns.count % 2 == 1 { codeCursor += 2 }
-            codeCursor += m.tryItems.count
+        for registered in classes.flatMap(\.methods) where registered.spec.hasCode {
+            let method = registered.spec
+            precondition((0...Int(UInt16.max)).contains(method.triesCount))
+            codeLayouts.append(CodeItemLayout(
+                offset: codeCursor,
+                methodIndex: registered.methodIndex,
+                spec: method
+            ))
+            codeCursor += 16 + method.insns.count * 2
+            if method.triesCount > 0, method.insns.count % 2 == 1 { codeCursor += 2 }
+            codeCursor += method.tryItems.count
             codeCursor = (codeCursor + 3) & ~3 // every code_item begins on a u32 boundary
         }
-
-        let directLayouts = codeLayouts.enumerated().filter { !$0.element.spec.isVirtual }
-        let virtualLayouts = codeLayouts.enumerated().filter { $0.element.spec.isVirtual }
-
-        // class_data: each field and method list has its own index-delta stream.
-        var classDataHeader: [UInt8] = []
-        classDataHeader.append(contentsOf: ULEB.encode(UInt64(staticFields.count)))
-        classDataHeader.append(contentsOf: ULEB.encode(UInt64(fields.count)))   // instance fields
-        classDataHeader.append(contentsOf: ULEB.encode(UInt64(directLayouts.count)))
-        classDataHeader.append(contentsOf: ULEB.encode(UInt64(virtualLayouts.count)))
-        var classData: [UInt8] = []
+        let codeLayoutByMethodIndex = Dictionary(
+            uniqueKeysWithValues: codeLayouts.map { ($0.methodIndex, $0) }
+        )
 
         // class_data must encode ABSOLUTE code offsets; uleb width depends on
-        // the values, so iterate to a fixed point (converges in one pass here).
-        var fieldEntries: [UInt8] = []
-        for index in staticFields.indices {
-            fieldEntries.append(contentsOf: ULEB.encode(UInt64(index == 0 ? 0 : 1)))
-            fieldEntries.append(contentsOf: ULEB.encode(0x8)) // static
-        }
-        for i in fields.indices {
-            let absoluteIndex = staticFields.count + i
-            fieldEntries.append(contentsOf: ULEB.encode(UInt64(i == 0 ? absoluteIndex : 1)))
-            fieldEntries.append(contentsOf: ULEB.encode(0x2)) // private instance
-        }
-        func buildClassData(codeBaseGuess: Int) -> [UInt8] {
-            var out = classDataHeader + fieldEntries
-            func appendMethods(
-                _ layouts: [(offset: Int, element: CodeItemLayout)],
-                to output: inout [UInt8]
-            ) {
-                var previousMethodIndex: UInt64 = 0
-                for (listIndex, item) in layouts.enumerated() {
-                    let methodIndex = UInt64(methodBase + item.offset)
+        // the values, so iterate all class_data blocks to a fixed point.
+        func buildClassData(_ classSpec: ClassSpec, codeBaseGuess: Int) -> [UInt8] {
+            let staticFields = classSpec.staticFields.sorted { $0.fieldIndex < $1.fieldIndex }
+            let instanceFields = classSpec.instanceFields.sorted { $0.fieldIndex < $1.fieldIndex }
+            let directMethods = classSpec.methods
+                .filter { !$0.spec.isVirtual }
+                .sorted { $0.methodIndex < $1.methodIndex }
+            let virtualMethods = classSpec.methods
+                .filter(\.spec.isVirtual)
+                .sorted { $0.methodIndex < $1.methodIndex }
+            var out: [UInt8] = []
+            out.append(contentsOf: ULEB.encode(UInt64(staticFields.count)))
+            out.append(contentsOf: ULEB.encode(UInt64(instanceFields.count)))
+            out.append(contentsOf: ULEB.encode(UInt64(directMethods.count)))
+            out.append(contentsOf: ULEB.encode(UInt64(virtualMethods.count)))
+
+            func appendFields(_ fields: [RegisteredField], to output: inout [UInt8]) {
+                var previousIndex = 0
+                for (listIndex, field) in fields.enumerated() {
+                    output.append(contentsOf: ULEB.encode(UInt64(
+                        field.fieldIndex - (listIndex == 0 ? 0 : previousIndex)
+                    )))
+                    previousIndex = field.fieldIndex
+                    output.append(contentsOf: ULEB.encode(UInt64(field.accessFlags)))
+                }
+            }
+            appendFields(staticFields, to: &out)
+            appendFields(instanceFields, to: &out)
+
+            func appendMethods(_ methods: [RegisteredMethod], to output: inout [UInt8]) {
+                var previousMethodIndex = 0
+                for (listIndex, registered) in methods.enumerated() {
+                    let methodIndex = registered.methodIndex
                     output.append(contentsOf: ULEB.encode(
-                        methodIndex - (listIndex == 0 ? 0 : previousMethodIndex)
+                        UInt64(methodIndex - (listIndex == 0 ? 0 : previousMethodIndex))
                     ))
                     previousMethodIndex = methodIndex
-                    let flags: UInt64 = item.element.spec.isStatic ? 0x8 :
-                        (item.element.spec.isVirtual ? 0x1 : 0)
-                    output.append(contentsOf: ULEB.encode(flags))
+                    output.append(contentsOf: ULEB.encode(UInt64(registered.spec.accessFlags)))
+                    let codeOffset = codeLayoutByMethodIndex[methodIndex].map {
+                        codeBaseGuess + $0.offset
+                    } ?? 0
                     output.append(contentsOf: ULEB.encode(
-                        UInt64(codeBaseGuess + item.element.offset)
+                        UInt64(codeOffset)
                     ))
                 }
             }
-            appendMethods(directLayouts, to: &out)
-            appendMethods(virtualLayouts, to: &out)
+            appendMethods(directMethods, to: &out)
+            appendMethods(virtualMethods, to: &out)
             return out
         }
+
         var guessedCodeBase = 0
-        classData = buildClassData(codeBaseGuess: guessedCodeBase)
-        // Fixed-point: recompute until byte length stabilizes.
+        var classDataBlocks = classes.map { buildClassData($0, codeBaseGuess: guessedCodeBase) }
+        let classDataBase = stringDataOff + stringData.count + tableData.count
         for _ in 0..<8 {
-            let unalignedBase = stringDataOff + stringData.count + protoData.count + classData.count
+            classDataBlocks = classes.map { buildClassData($0, codeBaseGuess: guessedCodeBase) }
+            let unalignedBase = classDataBase + classDataBlocks.reduce(0) { $0 + $1.count }
             let newBase = (unalignedBase + 3) & ~3
             if newBase == guessedCodeBase { break }
             guessedCodeBase = newBase
-            classData = buildClassData(codeBaseGuess: guessedCodeBase)
         }
-        let classDataOff = stringDataOff + stringData.count + protoData.count
+        classDataBlocks = classes.map { buildClassData($0, codeBaseGuess: guessedCodeBase) }
+        var classDataOffsets: [Int] = []
+        var classDataCursor = classDataBase
+        for block in classDataBlocks {
+            classDataOffsets.append(classDataCursor)
+            classDataCursor += block.count
+        }
         let codeOff = guessedCodeBase
-        let codePadding = codeOff - (classDataOff + classData.count)
+        let codePadding = codeOff - classDataCursor
         let fileSize = codeOff + codeCursor
 
         var out: [UInt8] = []
@@ -297,7 +364,7 @@ struct DexBuilder {
         func i32(_ v: Int32) { u32(UInt32(bitPattern: v)) }
 
         // Header.
-        out.append(contentsOf: Array("dex\n035\0".utf8))
+        out.append(contentsOf: Array(String(format: "dex\n%03d\0", version).utf8))
         u32(0)      // checksum, filled after the rest of the file is assembled
         out.append(contentsOf: [UInt8](repeating: 0, count: 20))
         u32(UInt32(fileSize))
@@ -310,7 +377,7 @@ struct DexBuilder {
         u32(UInt32(protoIdsSize)); u32(protoIdsSize == 0 ? 0 : UInt32(protoIdsOff))
         u32(UInt32(fieldIdsSize)); u32(fieldIdsSize == 0 ? 0 : UInt32(fieldIdsOff))
         u32(UInt32(methodIdsSize)); u32(methodIdsSize == 0 ? 0 : UInt32(methodIdsOff))
-        u32(1); u32(UInt32(classDefsOff))
+        u32(UInt32(classDefsSize)); u32(UInt32(classDefsOff))
         u32(UInt32(fileSize - stringDataOff)); u32(UInt32(stringDataOff))
 
         // string_ids → absolute offsets into stringData
@@ -325,20 +392,24 @@ struct DexBuilder {
         for f in fieldIds { u16(f.classIdx); u16(f.typeIdx); u32(UInt32(f.nameIdx)) }
         // method_ids
         for m in methodIds { u16(m.classIdx); u16(m.protoIdx); u32(UInt32(m.nameIdx)) }
-        // class_def: class, access, super, interfaces, source(-1), ann(0),
-        //             class_data_off, static_values(0)
-        u32(UInt32(classDescriptorIdx))
-        u32(1)                     // PUBLIC
-        u32(superclassIdx >= 0 ? UInt32(superclassIdx) : 0xFFFF_FFFF)
-        u32(UInt32(interfacesOff))
-        u32(0xFFFF_FFFF)
-        u32(0)
-        u32(UInt32(classDataOff))
-        u32(0)
+        // class_defs are sorted by class_idx as required by the DEX format.
+        for classIndex in classes.indices.sorted(by: {
+            classes[$0].descriptorIdx < classes[$1].descriptorIdx
+        }) {
+            let classSpec = classes[classIndex]
+            u32(UInt32(classSpec.descriptorIdx))
+            u32(classSpec.accessFlags)
+            u32(classSpec.superclassIdx >= 0 ? UInt32(classSpec.superclassIdx) : 0xFFFF_FFFF)
+            u32(UInt32(interfaceOffsets[classIndex]))
+            u32(0xFFFF_FFFF)
+            u32(0)
+            u32(UInt32(classDataOffsets[classIndex]))
+            u32(0)
+        }
 
         out.append(contentsOf: stringData)
-        out.append(contentsOf: protoData)
-        out.append(contentsOf: classData)
+        out.append(contentsOf: tableData)
+        for block in classDataBlocks { out.append(contentsOf: block) }
         out.append(contentsOf: [UInt8](repeating: 0, count: codePadding))
 
         for (index, layout) in codeLayouts.enumerated() {
@@ -373,9 +444,6 @@ struct DexBuilder {
         out[11] = UInt8(checksum >> 24)
         return out
     }
-
-    /// method index base: methods registered via `method(...)` first.
-    var methodBase: Int { methodIds.count - methods.count }
 
     enum ULEB {
         static func encode(_ v: UInt64) -> [UInt8] {
@@ -439,8 +507,14 @@ enum Insn {
     static func invokeVirtual(_ methodIdx: Int, _ regs: [Int]) -> [UInt16] {
         invokeKind(0x6e, methodIdx, regs)
     }
+    static func invokeSuper(_ methodIdx: Int, _ regs: [Int]) -> [UInt16] {
+        invokeKind(0x6f, methodIdx, regs)
+    }
     static func invokeInterface(_ methodIdx: Int, _ regs: [Int]) -> [UInt16] {
         invokeKind(0x72, methodIdx, regs)
+    }
+    static func invokeSuperRange(_ methodIdx: Int, start: Int, count: Int) -> [UInt16] {
+        invokeRangeKind(0x75, methodIdx, start: start, count: count)
     }
     static func invokeKind(_ opcode: UInt8, _ methodIdx: Int, _ regs: [Int]) -> [UInt16] {
         let a = regs.count
@@ -451,6 +525,20 @@ enum Insn {
         let f = regs.count > 3 ? regs[3] : 0
         let registerWord = UInt16(c) | UInt16(d << 4) | UInt16(e << 8) | UInt16(f << 12)
         return [UInt16(opcode) | UInt16(g << 8) | UInt16(a << 12), UInt16(methodIdx), registerWord]
+    }
+    static func invokeRangeKind(
+        _ opcode: UInt8,
+        _ methodIdx: Int,
+        start: Int,
+        count: Int
+    ) -> [UInt16] {
+        precondition((0...Int(UInt8.max)).contains(count))
+        precondition((0...Int(UInt16.max)).contains(start))
+        return [
+            UInt16(opcode) | UInt16(count << 8),
+            UInt16(methodIdx),
+            UInt16(start),
+        ]
     }
     static func newInstance(_ reg: Int, _ typeIdx: Int) -> [UInt16] {
         [0x22 | UInt16(reg << 8), UInt16(typeIdx)]

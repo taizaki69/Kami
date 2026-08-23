@@ -969,7 +969,7 @@ enum DexRegisterVerifier {
         case 0x6e...0x72, 0x74...0x78:
             try verifyInvocation(
                 op: op, first: first, units: units, pc: pc, line: &line,
-                dex: dex, hierarchy: hierarchy, context: context
+                method: method, dex: dex, hierarchy: hierarchy, context: context
             )
         case 0x7b...0x8f:
             try transferUnary(op: op, first: first, line: &line, pc: pc, context: context)
@@ -1086,6 +1086,7 @@ enum DexRegisterVerifier {
         units: [UInt16],
         pc: Int,
         line: inout RegisterLine,
+        method: DexFile.EncodedMethod,
         dex: DexFile,
         hierarchy: DexTypeHierarchy,
         context: String
@@ -1093,9 +1094,160 @@ enum DexRegisterVerifier {
         let methodIndex = Int(units[pc + 1])
         let reference = dex.methodIds[methodIndex]
         let registers = registerList(op: op, first: first, units: units, pc: pc)
-        let isStatic = op == 0x71 || op == 0x77
-        let isDirect = op == 0x70 || op == 0x76
+        guard let kind = DexInvocationKind(opcode: op) else {
+            throw VMError.verify(
+                "invalid invoke opcode 0x\(String(op, radix: 16)) at pc \(pc) in \(context)"
+            )
+        }
+        let isStatic = kind.isStatic
+        let isDirect = kind == .direct
         let isConstructor = reference.name == "<init>"
+
+        let targetIsInterface = hierarchy.isInterface(reference.declaringClass)
+        if kind == .interface, targetIsInterface == false {
+            throw VMError.verify(
+                "invoke-interface target \(reference.declaringClass) is not an interface "
+                    + "at pc \(pc) in \(context)"
+            )
+        }
+        if kind == .virtual, targetIsInterface == true {
+            throw VMError.verify(
+                "invoke-virtual target \(reference.declaringClass) is an interface "
+                    + "at pc \(pc) in \(context)"
+            )
+        }
+        if targetIsInterface == true, dex.version < 37,
+           kind == .superMethod || kind == .direct || kind == .staticMethod {
+            throw VMError.verify(
+                "\(invokeName(kind)) to interface \(reference.declaringClass) requires "
+                    + "DEX 037 or newer at pc \(pc) in \(context)"
+            )
+        }
+
+        let enclosingReference = dex.methodIds[method.methodIndex]
+        if kind == .superMethod {
+            guard method.accessFlags & 0x8 == 0 else {
+                throw VMError.verify(
+                    "invoke-super is not permitted in static method \(context) at pc \(pc)"
+                )
+            }
+            guard enclosingReference.declaringClass != reference.declaringClass else {
+                throw VMError.verify(
+                    "invoke-super target \(reference.declaringClass) is not a strict supertype "
+                        + "of \(enclosingReference.declaringClass) at pc \(pc) in \(context)"
+                )
+            }
+            if hierarchy.assignability(
+                from: enclosingReference.declaringClass,
+                to: reference.declaringClass,
+                strict: true
+            ) == .no {
+                throw VMError.verify(
+                    "invoke-super target \(reference.declaringClass) is not a supertype "
+                        + "of \(enclosingReference.declaringClass) at pc \(pc) in \(context)"
+                )
+            }
+        }
+
+        let resolver = DexMethodResolver(dex: dex, hierarchy: hierarchy)
+        if let targetIndex = dex.classIndexByDescriptor[reference.declaringClass] {
+            let target = dex.classDefs[targetIndex]
+            let directMatches = target.directMethods.filter {
+                let candidate = dex.methodIds[$0.methodIndex]
+                return candidate.name == reference.name
+                    && candidate.prototype.descriptor == reference.prototype.descriptor
+            }
+            let virtualMatches = target.virtualMethods.filter {
+                let candidate = dex.methodIds[$0.methodIndex]
+                return candidate.name == reference.name
+                    && candidate.prototype.descriptor == reference.prototype.descriptor
+            }
+            guard directMatches.count + virtualMatches.count <= 1 else {
+                throw VMError.verify(
+                    "duplicate local method \(reference.declaringClass).\(reference.signature) "
+                        + "at pc \(pc) in \(context)"
+                )
+            }
+            if let encoded = (directMatches + virtualMatches).first {
+                let encodedIsStatic = encoded.accessFlags & 0x8 != 0
+                let encodedIsDirect = directMatches.contains {
+                    $0.methodIndex == encoded.methodIndex
+                }
+                switch kind {
+                case .staticMethod:
+                    if !encodedIsStatic {
+                        throw invocationKindError(
+                            reference: reference, expected: "static", actual: "instance",
+                            pc: pc, context: context
+                        )
+                    }
+                case .direct:
+                    if encodedIsStatic {
+                        throw invocationKindError(
+                            reference: reference, expected: "instance", actual: "static",
+                            pc: pc, context: context
+                        )
+                    }
+                    if !encodedIsDirect {
+                        throw VMError.verify(
+                            "\(reference.signature) uses invoke-direct but is encoded as a virtual "
+                                + "method at pc \(pc) in \(context)"
+                        )
+                    }
+                case .virtual, .superMethod, .interface:
+                    if encodedIsStatic {
+                        throw invocationKindError(
+                            reference: reference, expected: "instance", actual: "static",
+                            pc: pc, context: context
+                        )
+                    }
+                    if encodedIsDirect {
+                        throw VMError.verify(
+                            "\(reference.signature) uses \(invokeName(kind)) but is encoded as a "
+                                + "direct method at pc \(pc) in \(context)"
+                        )
+                    }
+                }
+            }
+
+            let referenceLookup = try resolver.referencedMethod(
+                declaringType: reference.declaringClass,
+                name: reference.name,
+                prototype: reference.prototype.descriptor,
+                kind: kind
+            )
+            try verifyReferenceLookup(
+                referenceLookup,
+                kind: kind,
+                reference: reference,
+                pc: pc,
+                context: context
+            )
+        }
+
+        if kind == .superMethod {
+            let dispatchLookup: DexMethodResolver.Lookup
+            if targetIsInterface == true {
+                dispatchLookup = try resolver.interfaceSuper(
+                    targetInterface: reference.declaringClass,
+                    name: reference.name,
+                    prototype: reference.prototype.descriptor
+                )
+            } else {
+                dispatchLookup = try resolver.classSuper(
+                    callerDescriptor: enclosingReference.declaringClass,
+                    name: reference.name,
+                    prototype: reference.prototype.descriptor
+                )
+            }
+            try verifySuperDispatchLookup(
+                dispatchLookup,
+                reference: reference,
+                pc: pc,
+                context: context
+            )
+        }
+
         if isConstructor, !isDirect {
             throw VMError.verify(
                 "constructor \(reference.signature) at pc \(pc) must use invoke-direct in \(context)"
@@ -1188,6 +1340,83 @@ enum DexRegisterVerifier {
         }
         if let constructorReceiver {
             line.markInitialized(constructorReceiver)
+        }
+    }
+
+    private static func invokeName(_ kind: DexInvocationKind) -> String {
+        switch kind {
+        case .virtual: return "invoke-virtual"
+        case .superMethod: return "invoke-super"
+        case .direct: return "invoke-direct"
+        case .staticMethod: return "invoke-static"
+        case .interface: return "invoke-interface"
+        }
+    }
+
+    private static func invocationKindError(
+        reference: DexFile.MethodRef,
+        expected: String,
+        actual: String,
+        pc: Int,
+        context: String
+    ) -> VMError {
+        .verify(
+            "\(reference.signature) invoked as \(expected) but encoded method is \(actual) "
+                + "at pc \(pc) in \(context)"
+        )
+    }
+
+    private static func verifyReferenceLookup(
+        _ lookup: DexMethodResolver.Lookup,
+        kind: DexInvocationKind,
+        reference: DexFile.MethodRef,
+        pc: Int,
+        context: String
+    ) throws {
+        switch lookup {
+        case .found, .unresolved:
+            return
+        case .abstract where kind == .virtual
+            || kind == .superMethod
+            || kind == .interface:
+            return
+        case .abstract:
+            throw VMError.verify(
+                "\(invokeName(kind)) cannot target abstract method \(reference.signature) "
+                    + "at pc \(pc) in \(context)"
+            )
+        case let .conflict(interfaces):
+            throw VMError.verify(
+                "method reference \(reference.signature) has conflicting interface defaults "
+                    + "\(interfaces.joined(separator: ", ")) at pc \(pc) in \(context)"
+            )
+        case .missing:
+            throw VMError.verify(
+                "method reference \(reference.declaringClass)->\(reference.signature) does not "
+                    + "resolve at pc \(pc) in \(context)"
+            )
+        }
+    }
+
+    private static func verifySuperDispatchLookup(
+        _ lookup: DexMethodResolver.Lookup,
+        reference: DexFile.MethodRef,
+        pc: Int,
+        context: String
+    ) throws {
+        switch lookup {
+        case .found, .abstract, .unresolved:
+            return
+        case let .conflict(interfaces):
+            throw VMError.verify(
+                "invoke-super target \(reference.signature) has conflicting defaults "
+                    + "\(interfaces.joined(separator: ", ")) at pc \(pc) in \(context)"
+            )
+        case .missing:
+            throw VMError.verify(
+                "invoke-super target \(reference.declaringClass)->\(reference.signature) has no "
+                    + "super implementation at pc \(pc) in \(context)"
+            )
         }
     }
 

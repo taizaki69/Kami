@@ -1892,6 +1892,670 @@ final class InterpreterTests: XCTestCase {
         )
     }
 
+    func testInvokeSuperUsesLexicalSuperclassForNormalAndRangeForms() throws {
+        var builder = DexBuilder(version: 38)
+        let grandValue = builder.method(
+            classDescriptor: "LGrandBase;", name: "value", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+
+        builder.setClass("LGrandBase;", superclass: "Ljava/lang/Object;")
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 1) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+
+        builder.setClass("LParent;", superclass: "LGrandBase;")
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 2) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+
+        builder.setClass("LChild;", superclass: "LParent;")
+        var normalSuper: [UInt16] = []
+        normalSuper.append(contentsOf: Insn.invokeSuper(grandValue, [1]))
+        normalSuper.append(contentsOf: Insn.moveResult(0))
+        normalSuper.append(contentsOf: Insn.returnReg(0))
+        let callSuper = builder.addMethod(.init(
+            name: "callSuper", registers: 2, ins: 1, outs: 1,
+            insns: normalSuper, isStatic: false, returnType: "I"
+        ))
+
+        var rangeSuper: [UInt16] = []
+        rangeSuper.append(contentsOf: Insn.invokeSuperRange(grandValue, start: 1, count: 1))
+        rangeSuper.append(contentsOf: Insn.moveResult(0))
+        rangeSuper.append(contentsOf: Insn.returnReg(0))
+        let callSuperRange = builder.addMethod(.init(
+            name: "callSuperRange", registers: 2, ins: 1, outs: 1,
+            insns: rangeSuper, isStatic: false, returnType: "I"
+        ))
+
+        let childType = builder.typeIdx("LChild;")
+        func entryInstructions(_ target: Int) -> [UInt16] {
+            var instructions: [UInt16] = []
+            instructions.append(contentsOf: Insn.newInstance(0, childType))
+            instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+            instructions.append(contentsOf: Insn.invokeVirtual(target, [0]))
+            instructions.append(contentsOf: Insn.moveResult(0))
+            instructions.append(contentsOf: Insn.returnReg(0))
+            return instructions
+        }
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: entryInstructions(callSuper), isStatic: true, returnType: "I"
+        ))
+        builder.addMethod(.init(
+            name: "runRange", registers: 1, ins: 0, outs: 1,
+            insns: entryInstructions(callSuperRange), isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertEqual(int(try vm.call(classDescriptor: "LChild;", method: "run")), 2)
+        XCTAssertEqual(int(try vm.call(classDescriptor: "LChild;", method: "runRange")), 2)
+    }
+
+    func testInvokeInterfaceFindsInheritedDefaultMethod() throws {
+        var builder = DexBuilder(version: 38)
+        let inheritedValue = builder.method(
+            classDescriptor: "LChildDefault;", name: "value", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass(
+            "LParentDefault;", superclass: "Ljava/lang/Object;", accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 4) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass(
+            "LChildDefault;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LParentDefault;"], accessFlags: 0x601
+        )
+        builder.setClass(
+            "LDefaultImplementation;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LChildDefault;"]
+        )
+        let implementationType = builder.typeIdx("LDefaultImplementation;")
+        var instructions: [UInt16] = []
+        instructions.append(contentsOf: Insn.newInstance(0, implementationType))
+        instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+        instructions.append(contentsOf: Insn.invokeInterface(inheritedValue, [0]))
+        instructions.append(contentsOf: Insn.moveResult(0))
+        instructions.append(contentsOf: Insn.returnReg(0))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: instructions, isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertEqual(
+            int(try vm.call(classDescriptor: "LDefaultImplementation;", method: "run")),
+            4
+        )
+    }
+
+    func testInvokeInterfaceUsesMostSpecificDefault() throws {
+        var builder = DexBuilder(version: 38)
+        let parentValue = builder.method(
+            classDescriptor: "LParentDefault;", name: "value", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass(
+            "LParentDefault;", superclass: "Ljava/lang/Object;", accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 4) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass(
+            "LChildDefault;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LParentDefault;"], accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 5) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass(
+            "LDefaultImplementation;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LChildDefault;"]
+        )
+        let implementationType = builder.typeIdx("LDefaultImplementation;")
+        var instructions: [UInt16] = []
+        instructions.append(contentsOf: Insn.newInstance(0, implementationType))
+        instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+        instructions.append(contentsOf: Insn.invokeInterface(parentValue, [0]))
+        instructions.append(contentsOf: Insn.moveResult(0))
+        instructions.append(contentsOf: Insn.returnReg(0))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: instructions, isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertEqual(
+            int(try vm.call(classDescriptor: "LDefaultImplementation;", method: "run")),
+            5
+        )
+    }
+
+    func testAbstractSubinterfaceMasksParentDefault() throws {
+        var builder = DexBuilder(version: 38)
+        let parentValue = builder.method(
+            classDescriptor: "LParentDefault;", name: "value", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass(
+            "LParentDefault;", superclass: "Ljava/lang/Object;", accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 4) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass(
+            "LAbstractChild;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LParentDefault;"], accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 1, ins: 1, outs: 0,
+            insns: [], isStatic: false, returnType: "I",
+            isVirtual: true, accessFlags: 0x401, hasCode: false
+        ))
+        builder.setClass(
+            "LAbstractImplementation;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LAbstractChild;"]
+        )
+        let implementationType = builder.typeIdx("LAbstractImplementation;")
+        var instructions: [UInt16] = []
+        instructions.append(contentsOf: Insn.newInstance(0, implementationType))
+        instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+        instructions.append(contentsOf: Insn.invokeInterface(parentValue, [0]))
+        instructions.append(contentsOf: Insn.moveResult(0))
+        instructions.append(contentsOf: Insn.returnReg(0))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: instructions, isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertThrowsError(
+            try vm.call(classDescriptor: "LAbstractImplementation;", method: "run")
+        ) { error in
+            guard let thrown = error as? DEXThrowable,
+                  case let .obj(object) = thrown.value else {
+                return XCTFail("expected AbstractMethodError, got \(error)")
+            }
+            XCTAssertEqual(object.dexType, "Ljava/lang/AbstractMethodError;")
+        }
+    }
+
+    func testUnrelatedInterfaceDefaultsThrowIncompatibleClassChangeError() throws {
+        var builder = DexBuilder(version: 38)
+        let leftValue = builder.method(
+            classDescriptor: "LLeftDefault;", name: "value", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass(
+            "LLeftDefault;", superclass: "Ljava/lang/Object;", accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 1) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass(
+            "LRightDefault;", superclass: "Ljava/lang/Object;", accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 2) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass(
+            "LConflictImplementation;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LLeftDefault;", "LRightDefault;"]
+        )
+        let implementationType = builder.typeIdx("LConflictImplementation;")
+        var instructions: [UInt16] = []
+        instructions.append(contentsOf: Insn.newInstance(0, implementationType))
+        instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+        instructions.append(contentsOf: Insn.invokeInterface(leftValue, [0]))
+        instructions.append(contentsOf: Insn.moveResult(0))
+        instructions.append(contentsOf: Insn.returnReg(0))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: instructions, isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertThrowsError(
+            try vm.call(classDescriptor: "LConflictImplementation;", method: "run")
+        ) { error in
+            guard let thrown = error as? DEXThrowable,
+                  case let .obj(object) = thrown.value else {
+                return XCTFail("expected IncompatibleClassChangeError, got \(error)")
+            }
+            XCTAssertEqual(object.dexType, "Ljava/lang/IncompatibleClassChangeError;")
+        }
+    }
+
+    func testInvokeInterfaceRejectsKnownNonImplementerAtRuntime() throws {
+        var builder = DexBuilder(version: 38)
+        let interfaceValue = builder.method(
+            classDescriptor: "LDefault;", name: "value", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass(
+            "LDefault;", superclass: "Ljava/lang/Object;", accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 1) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass("LNonImplementer;", superclass: "Ljava/lang/Object;")
+        let receiverType = builder.typeIdx("LNonImplementer;")
+        var instructions: [UInt16] = []
+        instructions.append(contentsOf: Insn.newInstance(0, receiverType))
+        instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+        instructions.append(contentsOf: Insn.invokeInterface(interfaceValue, [0]))
+        instructions.append(contentsOf: Insn.moveResult(0))
+        instructions.append(contentsOf: Insn.returnReg(0))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: instructions, isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertThrowsError(
+            try vm.call(classDescriptor: "LNonImplementer;", method: "run")
+        ) { error in
+            guard let thrown = error as? DEXThrowable,
+                  case let .obj(object) = thrown.value else {
+                return XCTFail("expected IncompatibleClassChangeError, got \(error)")
+            }
+            XCTAssertEqual(object.dexType, "Ljava/lang/IncompatibleClassChangeError;")
+        }
+    }
+
+    func testNativeInterfaceDeclarationRemainsUnresolvedInsteadOfAbstract() throws {
+        var builder = DexBuilder(version: 38)
+        let nativeValue = builder.method(
+            classDescriptor: "LNativeDefault;", name: "value", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass(
+            "LNativeDefault;", superclass: "Ljava/lang/Object;", accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 1, ins: 1, outs: 0,
+            insns: [], isStatic: false, returnType: "I",
+            isVirtual: true, accessFlags: 0x101, hasCode: false
+        ))
+        builder.setClass(
+            "LNativeImplementation;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LNativeDefault;"]
+        )
+        let implementationType = builder.typeIdx("LNativeImplementation;")
+        var instructions: [UInt16] = []
+        instructions.append(contentsOf: Insn.newInstance(0, implementationType))
+        instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+        instructions.append(contentsOf: Insn.invokeInterface(nativeValue, [0]))
+        instructions.append(contentsOf: Insn.moveResult(0))
+        instructions.append(contentsOf: Insn.returnReg(0))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: instructions, isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertThrowsError(
+            try vm.call(classDescriptor: "LNativeImplementation;", method: "run")
+        ) { error in
+            guard case let VMError.unresolvedMethod(type, signature) = error else {
+                return XCTFail("expected unresolved native method, got \(error)")
+            }
+            XCTAssertEqual(type, "LNativeDefault;")
+            XCTAssertEqual(signature, "value()I")
+        }
+    }
+
+    func testUnknownInterfaceRelationshipDefersDefaultSelection() throws {
+        var builder = DexBuilder(version: 38)
+        let defaultValue = builder.method(
+            classDescriptor: "LKnownDefault;", name: "value", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass(
+            "LKnownDefault;", superclass: "Ljava/lang/Object;", accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 7) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass(
+            "LPossibleMask;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LExternalInterfaceParent;"], accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 1, ins: 1, outs: 0,
+            insns: [], isStatic: false, returnType: "I",
+            isVirtual: true, accessFlags: 0x401, hasCode: false
+        ))
+        builder.setClass(
+            "LUnknownGraphImplementation;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LKnownDefault;", "LPossibleMask;"]
+        )
+        let implementationType = builder.typeIdx("LUnknownGraphImplementation;")
+        var instructions: [UInt16] = []
+        instructions.append(contentsOf: Insn.newInstance(0, implementationType))
+        instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+        instructions.append(contentsOf: Insn.invokeInterface(defaultValue, [0]))
+        instructions.append(contentsOf: Insn.moveResult(0))
+        instructions.append(contentsOf: Insn.returnReg(0))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: instructions, isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertThrowsError(
+            try vm.call(classDescriptor: "LUnknownGraphImplementation;", method: "run")
+        ) { error in
+            guard case let VMError.unresolvedMethod(type, signature) = error else {
+                return XCTFail("expected unresolved interface graph, got \(error)")
+            }
+            XCTAssertEqual(type, "LKnownDefault;")
+            XCTAssertEqual(signature, "value()I")
+        }
+    }
+
+    func testMissingResolvedVirtualMethodThrowsNoSuchMethodError() throws {
+        var builder = DexBuilder(version: 38)
+        let missing = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "missing", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass("LMissingImplementation;", superclass: "Ljava/lang/Object;")
+        let implementationType = builder.typeIdx("LMissingImplementation;")
+        var instructions: [UInt16] = []
+        instructions.append(contentsOf: Insn.newInstance(0, implementationType))
+        instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+        instructions.append(contentsOf: Insn.invokeVirtual(missing, [0]))
+        instructions.append(contentsOf: Insn.moveResult(0))
+        instructions.append(contentsOf: Insn.returnReg(0))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: instructions, isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertThrowsError(
+            try vm.call(classDescriptor: "LMissingImplementation;", method: "run")
+        ) { error in
+            guard let thrown = error as? DEXThrowable,
+                  case let .obj(object) = thrown.value else {
+                return XCTFail("expected NoSuchMethodError, got \(error)")
+            }
+            XCTAssertEqual(object.dexType, "Ljava/lang/NoSuchMethodError;")
+        }
+    }
+
+    func testInterfaceInvokeSuperUsesReferencedDefaultInsteadOfClassOverride() throws {
+        var builder = DexBuilder(version: 38)
+        let childValue = builder.method(
+            classDescriptor: "LChildDefault;", name: "value", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass(
+            "LParentDefault;", superclass: "Ljava/lang/Object;", accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 4) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass(
+            "LChildDefault;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LParentDefault;"], accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 5) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass(
+            "LSuperImplementation;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LChildDefault;"]
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const16Units(0, 9) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        var callInstructions: [UInt16] = []
+        callInstructions.append(contentsOf: Insn.invokeSuper(childValue, [1]))
+        callInstructions.append(contentsOf: Insn.moveResult(0))
+        callInstructions.append(contentsOf: Insn.returnReg(0))
+        let callDefault = builder.addMethod(.init(
+            name: "callDefault", registers: 2, ins: 1, outs: 1,
+            insns: callInstructions, isStatic: false, returnType: "I"
+        ))
+        let implementationType = builder.typeIdx("LSuperImplementation;")
+        var runInstructions: [UInt16] = []
+        runInstructions.append(contentsOf: Insn.newInstance(0, implementationType))
+        runInstructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+        runInstructions.append(contentsOf: Insn.invokeVirtual(callDefault, [0]))
+        runInstructions.append(contentsOf: Insn.moveResult(0))
+        runInstructions.append(contentsOf: Insn.returnReg(0))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: runInstructions, isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertEqual(
+            int(try vm.call(classDescriptor: "LSuperImplementation;", method: "run")),
+            5
+        )
+    }
+
+    func testInterfaceInvokeSuperRequiresDex037() throws {
+        var builder = DexBuilder(version: 35)
+        let interfaceValue = builder.method(
+            classDescriptor: "LDefault;", name: "value", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass(
+            "LDefault;", superclass: "Ljava/lang/Object;", accessFlags: 0x601
+        )
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 6) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass(
+            "LOldImplementation;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LDefault;"]
+        )
+        var callInstructions: [UInt16] = []
+        callInstructions.append(contentsOf: Insn.invokeSuper(interfaceValue, [1]))
+        callInstructions.append(contentsOf: Insn.moveResult(0))
+        callInstructions.append(contentsOf: Insn.returnReg(0))
+        let callDefault = builder.addMethod(.init(
+            name: "callDefault", registers: 2, ins: 1, outs: 1,
+            insns: callInstructions, isStatic: false, returnType: "I"
+        ))
+        let implementationType = builder.typeIdx("LOldImplementation;")
+        var runInstructions: [UInt16] = []
+        runInstructions.append(contentsOf: Insn.newInstance(0, implementationType))
+        runInstructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+        runInstructions.append(contentsOf: Insn.invokeVirtual(callDefault, [0]))
+        runInstructions.append(contentsOf: Insn.moveResult(0))
+        runInstructions.append(contentsOf: Insn.returnReg(0))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: runInstructions, isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertThrowsError(
+            try vm.call(classDescriptor: "LOldImplementation;", method: "run")
+        ) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("requires DEX 037 or newer"), message)
+        }
+    }
+
+    func testVerifierRejectsClassInterfaceInvokeKindMismatches() throws {
+        var interfaceBuilder = DexBuilder(version: 38)
+        let interfaceValue = interfaceBuilder.method(
+            classDescriptor: "LDefault;", name: "value", shorty: "I", ret: "I"
+        )
+        let interfaceObjectInit = interfaceBuilder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        interfaceBuilder.setClass(
+            "LDefault;", superclass: "Ljava/lang/Object;", accessFlags: 0x601
+        )
+        interfaceBuilder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 1) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        interfaceBuilder.setClass(
+            "LInterfaceCaller;", superclass: "Ljava/lang/Object;",
+            interfaces: ["LDefault;"]
+        )
+        let callerType = interfaceBuilder.typeIdx("LInterfaceCaller;")
+        var interfaceInstructions: [UInt16] = []
+        interfaceInstructions.append(contentsOf: Insn.newInstance(0, callerType))
+        interfaceInstructions.append(contentsOf: Insn.invokeDirect(interfaceObjectInit, [0]))
+        interfaceInstructions.append(contentsOf: Insn.invokeVirtual(interfaceValue, [0]))
+        interfaceInstructions.append(contentsOf: Insn.returnVoid())
+        interfaceBuilder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: interfaceInstructions, isStatic: true
+        ))
+        let interfaceVM = DexInterpreter(dex: try DexFile(interfaceBuilder.build()))
+        XCTAssertThrowsError(
+            try interfaceVM.call(classDescriptor: "LInterfaceCaller;", method: "run")
+        ) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("invoke-virtual target LDefault; is an interface"), message)
+        }
+
+        var classBuilder = DexBuilder(version: 38)
+        let classValue = classBuilder.method(
+            classDescriptor: "LClassTarget;", name: "value", shorty: "I", ret: "I"
+        )
+        let classObjectInit = classBuilder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        classBuilder.setClass("LClassTarget;", superclass: "Ljava/lang/Object;")
+        classBuilder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 1) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        let targetType = classBuilder.typeIdx("LClassTarget;")
+        var classInstructions: [UInt16] = []
+        classInstructions.append(contentsOf: Insn.newInstance(0, targetType))
+        classInstructions.append(contentsOf: Insn.invokeDirect(classObjectInit, [0]))
+        classInstructions.append(contentsOf: Insn.invokeInterface(classValue, [0]))
+        classInstructions.append(contentsOf: Insn.returnVoid())
+        classBuilder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: classInstructions, isStatic: true
+        ))
+        let classVM = DexInterpreter(dex: try DexFile(classBuilder.build()))
+        XCTAssertThrowsError(
+            try classVM.call(classDescriptor: "LClassTarget;", method: "run")
+        ) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("invoke-interface target LClassTarget; is not an interface"), message)
+        }
+    }
+
+    func testVerifierRejectsUnrelatedInvokeSuperTarget() throws {
+        var builder = DexBuilder(version: 38)
+        let otherValue = builder.method(
+            classDescriptor: "LOther;", name: "value", shorty: "I", ret: "I"
+        )
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;", name: "<init>"
+        )
+        builder.setClass("LOther;", superclass: "Ljava/lang/Object;")
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 3) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass("LParent;", superclass: "Ljava/lang/Object;")
+        builder.setClass("LChild;", superclass: "LParent;")
+        var badInstructions: [UInt16] = []
+        badInstructions.append(contentsOf: Insn.invokeSuper(otherValue, [1]))
+        badInstructions.append(contentsOf: Insn.moveResult(0))
+        badInstructions.append(contentsOf: Insn.returnReg(0))
+        let badCall = builder.addMethod(.init(
+            name: "badCall", registers: 2, ins: 1, outs: 1,
+            insns: badInstructions, isStatic: false, returnType: "I"
+        ))
+        let childType = builder.typeIdx("LChild;")
+        var runInstructions: [UInt16] = []
+        runInstructions.append(contentsOf: Insn.newInstance(0, childType))
+        runInstructions.append(contentsOf: Insn.invokeDirect(objectInit, [0]))
+        runInstructions.append(contentsOf: Insn.invokeVirtual(badCall, [0]))
+        runInstructions.append(contentsOf: Insn.moveResult(0))
+        runInstructions.append(contentsOf: Insn.returnReg(0))
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 1,
+            insns: runInstructions, isStatic: true, returnType: "I"
+        ))
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        XCTAssertThrowsError(try vm.call(classDescriptor: "LChild;", method: "run")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("LOther; is not a supertype of LChild;"), message)
+        }
+    }
+
     func testInstanceMethodAndField() throws {
         var b = DexBuilder()
         let objectInit = b.method(
