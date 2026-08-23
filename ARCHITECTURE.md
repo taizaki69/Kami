@@ -36,9 +36,9 @@ MihonCompatKit, never in the app.
 
 ## Key decisions
 
-- **`KamiSource` is the seam.** Native sources and the pinned BatCave
-  DEX-backed source implement the same protocol; the registry hides which is
-  which. Future profiles must preserve this boundary.
+- **`KamiSource` is the seam.** Native sources and the pinned BatCave and Kawii
+  Manga DEX-backed sources implement the same protocol; the registry hides
+  which is which. Future profiles must preserve this boundary.
   The protocol mirrors tachiyomix semantics (popular/latest/search/details/
   chapters/pages + image requests with headers) so the bridge is 1:1.
 - **Compat kit stays host-portable.** No UIKit/Combine/URLSession-only APIs
@@ -63,7 +63,9 @@ MihonCompatKit, never in the app.
   `ExtensionSourceFactory` is the only capability consumer: it reads one
   bounded immutable buffer, repeats those checks on the bytes it will execute,
   selects an exact measured profile, and verifies every runtime source ID was
-  declared by the repository. Startup failures are disabled rather than run.
+  declared by the repository. Measured profiles route stable public source API
+  wrappers from either the generated entry class or its local superclass chain;
+  startup failures and unmeasured profiles are disabled rather than run.
 - **Untrusted code boundary.** Extension APKs are data until the interpreter
   runs them; even then they only reach iOS capabilities through explicit
   bridges (HTTP, preferences, cookies, WebView) with budgets and isolation

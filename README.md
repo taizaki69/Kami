@@ -18,8 +18,8 @@ and constructor state, resolved reference assignability and joins, and resolved
 catch types. Runtime dispatch resolves virtual overrides, lexical
 `invoke-super`, and maximally specific interface defaults across the parsed DEX
 class graph while leaving incomplete external graphs explicitly unresolved.
-Pinned real-APK tests execute the Akuma, MangaDex, and BatCave entry
-constructors plus BatCave's `getBaseUrl`, `getLang`, `getName`, and `getId`
+Pinned real-APK tests execute the Akuma, MangaDex, BatCave, and Kawii Manga
+entry constructors plus BatCave's `getBaseUrl`, `getLang`, `getName`, and `getId`
 methods. BatCave's real popular-manga path now runs through Kotlin class
 initialization, filters, collections, iteration, coroutine setup, and a bounded
 OkHttp model. It constructs the exact BatCave popular POST request, crosses an
@@ -49,6 +49,16 @@ requests through the same `KamiSource` contract as native sources. One actor
 owns and serializes each mutable VM and transport across suspension, and
 KamiCore can register it without source-kind branches.
 
+The runtime now routes app-facing calls through stable public `KeiSource`
+wrappers whether R8 leaves them on a local superclass or vertically merges them
+into the generated entry class. A second current profile, Kawii Manga 1.6.1,
+uses that path end to end: its exact popular/latest/search/detail+chapter/page
+JSON operations run from the locked unmodified APK, its dynamic `HttpUrl`
+queries are encoded and bounded, its custom `x-app-key` header reaches every
+request, and nullable/boolean serialization, `distinct`, character-delimiter
+substring helpers, and Kotlin `Instant` conversion execute through the
+deny-by-default host bridge.
+
 A bounded APK verifier now authenticates v2, v3/v3.1, and a conservative v1
 fallback, including signed content digests, X.509 signer keys, v3 certificate
 rotation, and signature-stripping protection. KamiCore binds the verified
@@ -67,11 +77,12 @@ source IDs or unsupported profiles. Enabled downloaded sources appear beside
 the native MangaDex source in Browse.
 
 This is still not a claim of broad extension execution: the runtime profile
-catalog currently recognizes only the exact measured BatCave 1.6.9 build.
-General inherited `KeiSource`/`HttpSource` profile discovery, filtered search,
-preferences, custom image-request behavior, and much of the Kotlin/Java surface
-remain open (`docs/EXTENSION_RUNTIME.md`). Kami starts with native MangaDex and
-can additionally restore a supported, authenticated downloaded source.
+catalog currently recognizes only the exact measured BatCave 1.6.9 and Kawii
+Manga 1.6.1 builds. Automatic profile discovery beyond that exact catalog,
+filtered-search semantics, preferences, custom image-request behavior, and much
+of the Kotlin/Java surface remain open (`docs/EXTENSION_RUNTIME.md`). Kami starts
+with native MangaDex and can additionally restore a supported, authenticated
+downloaded source.
 
 ## Layout
 
@@ -103,14 +114,14 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 171 tests run on Windows with Swift 6.3, together
+The compatibility kit and all 179 tests run on Windows with Swift 6.3, together
 with 7 portable KamiCore tests (`scripts/windows_dev_test.bat`). GitHub Actions
 runs the pinned real-APK suite plus all 18 macOS KamiCore tests, compiles both
 Simulator and unsigned device targets, and publishes an unsigned IPA artifact.
-Exact implementation commit `4d42def` passed
-[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32668016125),
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32668016122), and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32668016110).
+Exact implementation commit `3802653` passed
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32670599504),
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32670599479), and
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32670599498).
 The `compat-audit` CLI produced the measured compatibility matrix from the
 locked corpus.
 

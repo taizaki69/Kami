@@ -19,7 +19,9 @@ work was recovered, completed, verified, and pushed.
   Do not add a project license without the creator's explicit decision; see
   `LICENSES.md` and issue #5.
 - Default branch: `main`
-- Current code/test checkpoint: `4d42def9dec5a9d884f2fb78982ba538b381114c`
+- Current code/test checkpoint: `3802653cf89ed102b13de6e357e13b139ead3b6d`
+- Second current interpreted-profile baseline: `3802653cf89ed102b13de6e357e13b139ead3b6d`
+- Stable public-wrapper routing baseline: `fcc89f89ad4f36e48166fc09a6611220577c1fb2`
 - Trusted installation/source-factory baseline: `4d42def9dec5a9d884f2fb78982ba538b381114c`
 - Signer-authenticated admission baseline: `a902d064af4c55edcb59a0048cbc87feb4292202`
 - Pinned interpreted `KamiSource` baseline: `3708aa1e9deff88b24db767c4b19e18bca738b16`
@@ -54,6 +56,27 @@ and contains documentation only.
 
 Stop state on 2026-08-23 (America/Lima):
 
+- Commit `3802653` is pushed to `main`. The exact Kawii Manga 1.6.1 APK is the
+  second current source profile to cross every measured app-facing core
+  operation: metadata, popular, latest, text search, combined details/chapters,
+  and pages. Its deterministic regression asserts every exact JSON GET and the
+  source's `x-app-key` header on all five requests. The profile is locked by
+  package/version, SHA-256, signer fingerprint, manifest/entry class, and source
+  ID just like BatCave.
+- The same commit closes the measured runtime gaps Kawii reached: bounded
+  `HttpUrl.Builder` query construction, exact custom `headersBuilder` execution,
+  nullable and boolean generated serialization, nullable case-aware string
+  equality, ordered `distinct` with a comparison budget, character-delimiter
+  substring defaults, and Kotlin `Instant` epoch conversion. The DEX verifier
+  accepts R8's unreachable payload-alignment NOP only behind a terminal
+  instruction with no branch, switch, or handler entry.
+- Earlier commit `fcc89f8` routes profiles through stable public
+  `KeiSource`/`HttpSource` wrappers found on either a local superclass or the
+  generated entry after R8 vertical merging, so app-facing profiles no longer
+  map R8-private worker names. It passed
+  [Swift CI 32668840038](https://github.com/taizaki69/Kami/actions/runs/32668840038),
+  [iOS Build 32668840056](https://github.com/taizaki69/Kami/actions/runs/32668840056),
+  and [IPA Package 32668840065](https://github.com/taizaki69/Kami/actions/runs/32668840065).
 - Commit `4d42def` is pushed to `main`. Kami now has a durable, capability-gated
   extension product flow. `ExtensionInstallationService` downloads repository
   entries into content-addressed app storage, validates repository metadata,
@@ -77,16 +100,17 @@ Stop state on 2026-08-23 (America/Lima):
   in Browse. Downloaded updates replace the old runtime; disabling removes it;
   the protected native source ID cannot be shadowed. Browse text search now
   actually calls the selected source's search operation.
-- The exact measured profile catalog still contains only BatCave 1.6.9. An
+- The exact measured profile catalog contains BatCave 1.6.9 and Kawii Manga
+  1.6.1. An
   arbitrary authenticated extension can be stored securely, but it cannot be
   enabled or heuristically executed until a measured profile exists.
-- Exact implementation-head `4d42def` passes
-  [Swift CI 32668016125](https://github.com/taizaki69/Kami/actions/runs/32668016125),
-  [iOS Build 32668016122](https://github.com/taizaki69/Kami/actions/runs/32668016122),
-  and [IPA Package 32668016110](https://github.com/taizaki69/Kami/actions/runs/32668016110).
-  This verifies 171 MihonCompatKit tests, the optimized CLI, all 18 macOS
+- Exact implementation-head `3802653` passes
+  [Swift CI 32670599504](https://github.com/taizaki69/Kami/actions/runs/32670599504),
+  [iOS Build 32670599479](https://github.com/taizaki69/Kami/actions/runs/32670599479),
+  and [IPA Package 32670599498](https://github.com/taizaki69/Kami/actions/runs/32670599498).
+  This verifies 179 MihonCompatKit tests, the optimized CLI, all 18 macOS
   KamiCore tests, Simulator/device targets, and the unsigned IPA artifact.
-  Locally, 171 MihonCompatKit and 7 portable KamiCore tests pass on
+  Locally, 179 MihonCompatKit and 7 portable KamiCore tests pass on
   Windows/Swift 6.3.3.
 - Earlier commit `a902d06` established the signer gate. `APKSignatureVerifier` performs bounded
   APK v2, v3/v3.1, and conservative v1/JAR verification with RSA PKCS#1/PSS and
@@ -171,11 +195,11 @@ Stop state on 2026-08-23 (America/Lima):
 - Commit `d6530fe` is pushed to `main`. It rewrites one synthetic async DEX test
   fixture as incremental array appends so Swift 6 on macOS can type-check it in
   reasonable time; runtime behavior and fixture bytes are unchanged.
-- All 171 MihonCompatKit tests pass locally on Windows/Swift 6.3.3, including 6
-  signer regressions and 17
-  pinned real-extension paths, 7 focused HTML/parser-limit tests, bounded Java
-  URL-encoding and Kotlin string/collection regressions, and 4 async
-  interpreter/transport tests plus 3 pinned adapter regressions. KamiCore's 7
+- All 179 MihonCompatKit tests pass locally on Windows/Swift 6.3.3, including 6
+  signer regressions, 18 pinned real-extension source/execution paths, 7 focused
+  HTML/parser-limit tests, bounded Java URL-encoding and Kotlin
+  string/collection/time regressions, and 4 async interpreter/transport tests
+  plus 3 BatCave adapter regressions and the complete Kawii profile. KamiCore's 7
   portable Windows tests pass; exact-head macOS CI passes all 18, including the
   SQLite admission, repository persistence, install/restore/factory, enabled
   state, and update-policy suite. The optimized
@@ -201,8 +225,8 @@ Stop state on 2026-08-23 (America/Lima):
 - GitHub CLI is installed and authenticated as `taizaki69`; repository and
   workflow access were working. No authentication setup should be needed on
   this computer.
-- The three pinned APKs are present locally and still match the lock file:
-  Akuma 1.4.10, MangaDex 1.4.212, and BatCave 1.6.9.
+- The four pinned APKs are present locally and still match the lock file:
+  Akuma 1.4.10, MangaDex 1.4.212, BatCave 1.6.9, and Kawii Manga 1.6.1.
 - Issue #1 has the completed dispatch-milestone evidence in
   [progress comment 5384204450](https://github.com/taizaki69/Kami/issues/1#issuecomment-5384204450)
   and remains open intentionally.
@@ -214,7 +238,7 @@ Stop state on 2026-08-23 (America/Lima):
   records exact local and CI evidence. The issue is closed as completed at
   `3708aa1`; general compatibility remains separate work.
 
-### Completed trusted install/factory milestone and next frontier
+### Completed stable-wrapper/second-profile milestone and next frontier
 
 The first interpreted `KamiSource`, signer-authenticated admission gate, durable
 installation/selection flow, and exact-byte source factory are complete under
@@ -234,13 +258,14 @@ selected extension store + declared signing identity
 ```
 
 Issue #3's valid, tampered, wrong-signer, rotated-signer, unsigned, and stripped
-fixtures plus the install/restore/factory regressions enforce this order. The
-next high-leverage milestone is general profile discovery: implement the
-inherited public `KeiSource`/`HttpSource` wrapper path so extensions do not need
-per-version mappings to R8-private workers, then prove a second current lib 1.6
-extension end to end. Do not let profile discovery create a parallel admission
-bypass. Filtered search, preferences, and custom image requests still need
-separately measured implementations. Keep `HostBridge` deny-by-default and
+fixtures plus the install/restore/factory regressions enforce this order. Stable
+public wrapper routing and a second current lib 1.6 profile are now complete.
+The next high-leverage milestone is automatic profile discovery beyond the
+two-entry exact catalog: derive candidate metadata and stable public entrypoints
+from authenticated APK evidence, then prove a third current source without
+mapping R8-private workers. Do not let discovery create a parallel admission
+bypass. Filtered-search semantics, preferences, and custom image requests still
+need separately measured implementations. Keep `HostBridge` deny-by-default and
 never execute extension native libraries.
 
 Start with:
@@ -344,40 +369,54 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 171 Swift tests passed locally on Windows/Swift 6.3.3 and exact-head macOS CI, including 6 APK-signature regressions |
+| MihonCompatKit | 179 Swift tests passed locally on Windows/Swift 6.3.3 and exact-head macOS CI, including 6 APK-signature regressions and the full Kawii profile |
 | KamiCore | 7 portable tests passed locally on Windows/Swift 6.3.3; all 18 tests passed on macOS with SQLite repository/trust persistence, install/restore/factory, enabled-state, update-policy, and registry lifecycle coverage |
-| Optimized package build | `scripts\windows_dev_test.bat Packages\MihonCompatKit release` compiled and linked SwiftSoup, Swift Crypto, MihonCompatKit, and `compat-audit.exe` in 253.21 seconds on the first release build |
-| Real APK constructors | Akuma, MangaDex, and BatCave passed |
-| Structural verifier | 9 focused regressions cover instruction geometry, branch/fallthrough boundaries, and aligned, bounded, correctly typed payloads and switch targets |
+| Optimized package builds | Windows release builds passed for both MihonCompatKit/`compat-audit.exe` and KamiCore |
+| Real APK constructors | Akuma, MangaDex, BatCave, and Kawii Manga passed |
+| Structural verifier | 10 focused regressions cover instruction geometry, branch/fallthrough boundaries, R8's unreachable alignment NOP, and aligned, bounded, correctly typed payloads and switch targets |
 | Exception/control verifier | 13 focused regressions cover strict try/catch decoding, resolved `Throwable` validation, typed handler state/execution, and AOSP branch/result/exception-entry rules |
 | Register dataflow verifier | 21 focused regressions cover dead-code bounds, parameter seeding, common-supertype joins, polymorphic constants, exact primitive/wide/reference assignments, array covariance, result/invoke types, wide-pair clobbering, exception edges, and constructor/uninitialized-object state |
 | Runtime reference semantics | 4 focused regressions cover resolved and unresolved typed-catch dispatch plus hierarchy-aware `check-cast` and `instance-of` |
 | Binary opcode semantics | 1 focused regression covers AOSP operation/type-major ordering across int, long, float, double, and `/2addr` forms |
 | Method resolution and receiver dispatch | 15 focused regressions cover virtual/class override selection, lexical normal/range class-super dispatch, inherited/maximally-specific interface defaults, abstract masking, default conflicts, DEX 037 interface-super gating, strict interface receivers, typed linkage failures, and conservative unresolved boundaries |
-| Request/model host regressions | 7 focused tests cover request construction, duration/cache conversion, URL scheme rejection, CRLF-header rejection, body bounds, Java URL encoding, and bounded Kotlin split/regex/affix/string/collection helpers |
+| Request/model host regressions | 13 focused tests cover request construction, bounded `HttpUrl.Builder`, duration/cache/time conversion, URL scheme rejection, CRLF-header rejection, body/work bounds, Java URL encoding, nullable equality, and bounded Kotlin split/regex/affix/string/collection helpers |
 | HTTP transport regressions | 8 focused tests cover source isolation, bounded deterministic encoding, redirect secret stripping/downgrade rejection, streamed response limits, cancellation, and cookie scope |
 | Async interpreter/response regressions | 4 focused tests cover nested frame resumption, sync-entry diagnostics, typed DEX handler re-entry, cancellation, injected transport, charset decoding, one-shot reads, and close state |
 | HTML/selector hardening | 7 focused tests cover BatCave CSS/URL semantics, modern direct-child and `:containsData` selectors, input, base-URL, node, depth, attribute, selector length/result/work, and extracted-string limits |
 | BatCave execution | Exact metadata getters pass; popular, paginated text search, and latest updates return exact `MangasPage`; core details return exact `SManga`; combined updates return exact chapters; page list returns exact image URLs; malformed chapter/page payloads are typed failures; a 503 maps to `HttpException(code: 503)` |
-| Pinned source adapter | 3 focused regressions cover every claimed `KamiSource` method/default image request, pre-parse SHA tamper rejection, and serialized concurrent VM/transport entry; 1 KamiCore regression covers registry insertion/deduplication |
+| Kawii Manga execution | Exact metadata, popular/latest/search, combined details/chapters, and pages pass from the locked APK; all five exact GETs carry the custom `x-app-key` header |
+| Pinned source adapters | 3 BatCave regressions cover every claimed `KamiSource` method/default image request, pre-parse SHA tamper rejection, and serialized concurrent VM/transport entry; 1 Kawii regression covers its complete measured contract; 1 KamiCore regression covers registry insertion/deduplication |
 | APK signer verification | 6 focused regressions cover real Keiyoushi v2, AOSP v1/v3 and verified rotation, content/signature tampering, unsigned input, fingerprint normalization, and scheme stripping |
 | Persisted extension admission | 3 focused macOS test methods cover repository/user trust, unrelated-signer rejection, declared source-ID capability registration, verified signer rotation, and downgrade/same-version replacement rejection |
 | Install/restore/source factory | 3 macOS install tests plus 4 portable factory tests cover repository-key install, explicit legacy confirmation, cancellation, startup restoration, exact-file replacement rejection, declared source-ID enforcement, real source registration, and refusal to guess an unmeasured profile |
-| Swift CI | Exact implementation head `4d42def` [run 32668016125](https://github.com/taizaki69/Kami/actions/runs/32668016125) passed 171 MihonCompatKit tests, optimized CLI build, 18 KamiCore tests, and artifact upload |
-| iOS Simulator and unsigned device builds | Exact implementation head `4d42def` [run 32668016122](https://github.com/taizaki69/Kami/actions/runs/32668016122) passed both targets |
-| Unsigned IPA packaging | Exact implementation head `4d42def` [run 32668016110](https://github.com/taizaki69/Kami/actions/runs/32668016110) passed and uploaded `Kami-unsigned-ipa` |
+| Swift CI | Exact implementation head `3802653` [run 32670599504](https://github.com/taizaki69/Kami/actions/runs/32670599504) passed 179 MihonCompatKit tests, optimized CLI build, 18 KamiCore tests, and artifact upload |
+| iOS Simulator and unsigned device builds | Exact implementation head `3802653` [run 32670599479](https://github.com/taizaki69/Kami/actions/runs/32670599479) passed both targets |
+| Unsigned IPA packaging | Exact implementation head `3802653` [run 32670599498](https://github.com/taizaki69/Kami/actions/runs/32670599498) passed and uploaded `Kami-unsigned-ipa` |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
 The successful exact-head public-repository runs validate every implementation
-checkpoint through `4d42def`, including the app-facing source adapter,
+checkpoint through `3802653`, including both app-facing source profiles,
 signer-authenticated admission gate, durable install/restore flow, exact-byte
 factory, source selection UI, and Browse registration, and produced both
 `compat-audit` and `Kami-unsigned-ipa` artifacts.
 
 ## What the latest continuation completed
 
-Commit `4d42def` completes trusted extension installation, restoration, source
-construction, and selection:
+Commits `fcc89f8` and `3802653` complete stable public-wrapper routing and the
+second exact current source profile:
+
+- Profile operations now call public `KeiSource` wrappers found on either the
+  entry class or its local superclass chain. This tolerates the two measured R8
+  layouts without mapping private worker names.
+- Kawii Manga 1.6.1 is locked into the exact profile catalog and executes every
+  core source operation under deterministic transport with its exact custom
+  header and URL construction.
+- New host/runtime support is limited to methods reached by the real APK and is
+  independently bounded; focused tests cover URL expansion and quadratic
+  collection work limits.
+
+Earlier commit `4d42def` completed trusted extension installation, restoration,
+source construction, and selection:
 
 - `ExtensionInstallationService` owns content-addressed durable APK storage.
   Repository-keyed first installs complete without a prompt; legacy stores
@@ -391,14 +430,14 @@ construction, and selection:
 - `ExtensionSourceFactory` is the only admission consumer. It authenticates the
   same immutable buffer it passes to `InterpretedExtensionProfileCatalog`,
   requires repository-declared source IDs, and rejects unsupported profiles.
-  The catalog currently contains only exact BatCave 1.6.9.
+  The catalog now contains exact BatCave 1.6.9 and Kawii Manga 1.6.1 profiles.
 - Repositories and their normalized signing keys persist. Key removal or
   substitution is rejected; unavailable repositories remain listed and can be
   removed. The Extensions UI installs/updates and enables/disables; AppModel
   restores safely on startup; SourceRegistry replaces/removes downloaded
   runtimes without allowing the native source to be shadowed; Browse displays
   source origin and now performs nonblank source search correctly.
-- Exact-head workflows prove 171 MihonCompatKit tests, 18 macOS KamiCore tests,
+- Exact-head workflows prove 179 MihonCompatKit tests, 18 macOS KamiCore tests,
   optimized CLI output, both iOS build destinations, and the unsigned IPA.
 
 Earlier commits `86125f9` through `a902d06` completed signer-authenticated
@@ -860,9 +899,12 @@ Proven today:
   details plus combined chapter-update and page-list paths through exact request
   construction, bounded async response delivery, production selectors,
   generated DTO encoding/decoding, and exact compatibility-model conversion.
-- The locked BatCave profile exposes those operations, metadata, and default
-  page image requests through `KamiSource`; source-scoped actor ownership
-  serializes VM entry, and KamiCore's existing registry accepts the source.
+- The locked Kawii Manga profile independently exposes metadata, popular,
+  latest, text search, combined details/chapters, and pages through its real
+  stable public wrappers, exact JSON requests, and custom source header.
+- The locked BatCave and Kawii profiles expose those measured operations through
+  `KamiSource`; source-scoped actor ownership serializes VM entry, and KamiCore's
+  existing registry accepts an admitted measured source.
 - Repository and APK persistence, repository-key or explicit-user first trust,
   install/update and enable/disable UI, startup exact-file re-authentication,
   capability-only source construction, failure-to-disabled behavior, and active
@@ -881,8 +923,8 @@ Proven today:
 Not proven or implemented:
 
 - A general downloaded-extension-to-`KamiSource` bridge beyond the exact
-  BatCave profile, filtered search, or a measured custom reader image-request
-  override.
+  BatCave and Kawii profiles, filtered-search semantics, or a measured custom
+  reader image-request override.
 - Broad Jsoup coverage beyond the measured subset, kotlinx serialization beyond
   the bounded generated encoder/decoder slice,
   persistent source preferences and cookies, rate limiting, dynamic source
@@ -896,13 +938,13 @@ Not proven or implemented:
   dispatch, maximally specific interface defaults, and lexical class/interface
   `invoke-super` across parsed DEX graphs are working. Equivalent resolution
   across incomplete external hierarchy data remains open.
-- General inherited `KeiSource`/`HttpSource` wrapper discovery and construction
-  without per-extension mappings to R8-private workers; a second current
-  extension has not yet crossed the full app-facing path.
+- Automatic safe profile discovery and construction beyond the two-entry exact
+  catalog; a third current extension has not yet crossed the full app-facing
+  path.
 - A signed installation on a physical iPhone or iPad.
 - Production compatibility telemetry or a final distribution/licensing model.
 
-Do not generalize the one pinned BatCave adapter into broad extension support.
+Do not generalize the two pinned adapters into broad extension support.
 
 ## Security and trust boundary
 
@@ -967,12 +1009,13 @@ The rest of the product backlog is in `TODO.md`.
 ## Recommended next implementation sequence
 
 1. Generalize profile discovery incrementally from measured corpus evidence.
-   Implement the public inherited `KeiSource`/`HttpSource` wrapper path so a
-   profile can use stable API entrypoints instead of mapping R8-private worker
-   names, while preserving the existing exact-byte factory and admission gate.
-2. Select a current lib 1.6 extension whose reached surface is close to the
-   implemented BatCave subset and prove it end to end through install, restore,
-   factory, registry, Browse, details, chapters, pages, and image requests.
+   The stable public wrapper route is complete; now derive bounded candidate
+   metadata and wrapper entrypoints from the authenticated APK while preserving
+   the exact-byte factory, admission capability, and declared source-ID gate.
+2. Select a third current extension whose reached surface expands a useful
+   compatibility axis (filters, preferences, or custom image requests) and
+   prove it end to end through install, restore, factory, registry, Browse,
+   details, chapters, pages, and image requests.
 3. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
    plus canonical unresolved diagnostics for every new bridge decision.
 4. Continue issue #1 with broader external hierarchy and super/default
@@ -1013,7 +1056,7 @@ an exact real-APK assertion when reachable, and CI coverage.
 | Async VM/response regressions | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/AsyncInterpreterTests.swift` |
 | HTML compatibility and limits | `Packages/MihonCompatKit/Sources/MihonCompatKit/HTML/CompatHTML.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/HTMLCompatibilityTests.swift` |
 | Real APK execution frontier | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/RealExtensionExecutionTests.swift` |
-| End-to-end adapter proof | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/PinnedInterpretedSourceTests.swift`, `Packages/KamiCore/Tests/KamiCoreTests/SourceRegistryTests.swift` |
+| End-to-end adapter proof | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/PinnedInterpretedSourceTests.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/KawiiMangaInterpretedSourceTests.swift`, `Packages/KamiCore/Tests/KamiCoreTests/SourceRegistryTests.swift` |
 | Repository client | `Packages/MihonCompatKit/Sources/MihonCompatKit/Repository/ExtensionRepository.swift` |
 | App source seam | `Packages/MihonCompatKit/Sources/MihonCompatKit/Models/CompatModels.swift` (`KamiSource`) |
 | Persistence | `Packages/KamiCore/Sources/KamiCore/Database/` |

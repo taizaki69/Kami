@@ -41,11 +41,17 @@ serializer, sends the exact JSON POST, decodes its response DTOs from a bounded
 Okio source, and returns normalized page image URLs. All of these tests remain
 offline.
 
-The pinned BatCave `KamiSource` owns that transport together with one mutable
+The pinned Kawii Manga path independently proves bounded dynamic
+`HttpUrl.Builder` queries for search/details/pages and executes the source's
+exact `headersBuilder` override so `x-app-key` reaches every deterministic JSON
+GET. Percent-encoded query growth is charged against the final 8 KiB URL limit
+before intermediate output can grow past it.
+
+Each pinned `KamiSource` owns its transport together with one mutable
 interpreter behind a bounded actor queue, so a suspended request cannot permit
-another caller to enter the same VM concurrently. Its production transport
-disallows plain HTTP by default; the deterministic injected transport remains
-the only path used by the corpus tests.
+another caller to enter the same VM concurrently. Production transport
+disallows plain HTTP by default; deterministic injected transports remain the
+only paths used by the corpus tests.
 
 ## Remaining extension-facing stack
 

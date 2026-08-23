@@ -16,7 +16,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       external-list indirection — validated against live Keiyoushi index
       (1372 extensions parsed)
 - [x] Backup reader for legacy (zlib) `.tachibk` + proto schema decode
-- [x] `compat-audit` CLI (inspect/missing/index/methods) — run on 3 real APKs
+- [x] `compat-audit` CLI (inspect/missing/index/methods/disasm) — run on 4 real APKs
 
 ## P0 — App foundation
 
@@ -46,18 +46,20 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       [#1](https://github.com/taizaki69/Kami/issues/1)
 - [~] Kotlin/Java class library M2 — Object/String/StringBuilder, core Kotlin
       ABI, bounded collections, atomics, reflection, and Mihon filters cover
-      the pinned BatCave request path; bounded form/header/URL/cache/request/
+      the pinned BatCave and Kawii request paths; bounded form/header/URL/cache/request/
       call models, Kotlin duration shims, async frame resumption, source-scoped
       transport, response/body/Okio values, bounded Jsoup document/element/CSS
       selectors (including modern direct-child and `:containsData` semantics),
       bounded Kotlin string/collection helpers, generated-serializer JSON decode,
       the reached Java-time subset, and `SManga`/`MangasPage`/`SChapter`/
       `SMangaUpdate` models now cover BatCave popular, text search, latest,
-      details, and chapters; measured long tail remains
+      details, and chapters, while Kawii also proves nullable/boolean JSON,
+      bounded `HttpUrl.Builder`, custom source headers, Kotlin `Instant`, and
+      stable-wrapper execution; measured long tail remains
 - [~] tachiyomix API bridge M3 (`HttpSource` → `KamiSource`) — the exact pinned
-      BatCave 1.6.9 profile now implements the app-facing contract; general
-      profile discovery, filters, preferences, and broader runtime coverage
-      remain
+      BatCave 1.6.9 and Kawii Manga 1.6.1 profiles implement the app-facing
+      contract through stable public wrappers; automatic profile discovery,
+      filters, preferences, and broader runtime coverage remain
 - [x] First pinned real extension executing
       popular→search→details→chapters→pages — BatCave's unmodified locked APK
       now crosses deterministic transport and its real parsing/serialization
@@ -76,9 +78,15 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       signer confirmation establish trust, every startup re-authenticates the
       exact bytes, and enabled downloaded sources appear in Browse. The factory
       intentionally supports only exact measured profiles today.
-- [ ] General interpreted profile discovery: replace per-extension private
-      worker mappings with a measured inherited `KeiSource`/`HttpSource`
-      wrapper path and prove a second current extension end to end
+- [x] Stable interpreted wrapper routing and a second current extension:
+      app-facing calls use measured public `KeiSource` wrappers from either a
+      local superclass or an R8-merged entry class, and Kawii Manga 1.6.1 runs
+      popular→search→details→chapters→pages from its locked APK with its custom
+      request header
+- [ ] General interpreted profile discovery beyond the exact catalog: derive
+      safe candidate metadata/wrappers from authenticated APKs, onboard a third
+      current extension without R8-private worker mappings, and preserve the
+      existing admission/source-ID gates
 - [ ] Privacy-safe unresolved API/opcode telemetry and exportable compatibility
       report — [#4](https://github.com/taizaki69/Kami/issues/4)
 - [ ] zstd decompression for current-Mihon backups (schema work done)
