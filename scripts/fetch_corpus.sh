@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Fetches the pinned real-extension corpus used by execution tests. APKs stay
-# ignored by Git; immutable URLs plus SHA-256 checks keep CI reproducible.
+# Fetches the pinned real-extension corpus used by execution tests. Real
+# extension APKs stay ignored by Git. Small AOSP conformance APKs are tracked,
+# while immutable URLs plus SHA-256 checks can restore them if needed.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

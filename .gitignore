@@ -1,6 +1,7 @@
 .build/
 dist/
 Tests/corpus/*.apk
+!Tests/corpus/aosp-*.apk
 Tests/corpus/index.pb
 *.xcodeproj
 *.ipa
