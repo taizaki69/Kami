@@ -2293,16 +2293,11 @@ public final class HostBridge {
     }
 
     private static func isInstance(_ descriptor: String, of expected: String, dex: DexFile) -> Bool {
-        var current: String? = descriptor
-        var visited: Set<String> = []
-        while let candidate = current, visited.insert(candidate).inserted {
-            if candidate == expected { return true }
-            guard let index = dex.classIndexByDescriptor[candidate] else { return false }
-            let superclassIndex = dex.classDefs[index].superclassIndex
-            guard superclassIndex >= 0, superclassIndex < dex.typeDescriptors.count else { return false }
-            current = dex.typeDescriptors[superclassIndex]
-        }
-        return false
+        DexTypeHierarchy(dex: dex).assignability(
+            from: descriptor,
+            to: expected,
+            strict: true
+        ) == .yes
     }
 }
 

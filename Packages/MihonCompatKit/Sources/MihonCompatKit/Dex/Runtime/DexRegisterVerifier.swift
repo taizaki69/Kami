@@ -9,8 +9,8 @@ import Foundation
 /// zero/null fallbacks. This pass tracks exact primitive families, narrow
 /// integral types, polymorphic constants, typed wide pairs, initialized and
 /// allocation-site-specific uninitialized references, undefined values, and
-/// merge conflicts. Exact resolved-class assignability is deliberately left to
-/// the reference-hierarchy verifier milestone.
+/// merge conflicts. Resolved references retain their common supertype and are
+/// checked against assignment targets through the shared DEX/host hierarchy.
 enum DexRegisterVerifier {
     static let maximumDataflowStates = 250_000
     static let maximumDataflowCells = 8_000_000
@@ -129,10 +129,14 @@ enum DexRegisterVerifier {
             }
         }
 
-        mutating func merge(_ incoming: RegisterLine) -> Bool {
+        mutating func merge(_ incoming: RegisterLine, hierarchy: DexTypeHierarchy) -> Bool {
             var changed = false
             for index in values.indices {
-                let merged = DexRegisterVerifier.merge(values[index], incoming.values[index])
+                let merged = DexRegisterVerifier.merge(
+                    values[index],
+                    incoming.values[index],
+                    hierarchy: hierarchy
+                )
                 if merged != values[index] {
                     values[index] = merged
                     changed = true
@@ -171,6 +175,7 @@ enum DexRegisterVerifier {
         context: String
     ) throws {
         let registerCount = Int(code.registersSize)
+        let hierarchy = DexTypeHierarchy(dex: dex)
         guard instructions.count <= maximumDataflowStates else {
             throw VMError.verify(
                 "register dataflow for \(context) has \(instructions.count) instructions; "
@@ -214,6 +219,10 @@ enum DexRegisterVerifier {
         var queued: Set<Int> = [0]
         var cursor = 0
         var mergeCount = 0
+        let exceptionTypesByHandler = caughtExceptionTypes(
+            in: tryBlocks,
+            hierarchy: hierarchy
+        )
 
         var exceptionSuccessors: [Int: [Int]] = [:]
         var tryIndex = 0
@@ -250,7 +259,7 @@ enum DexRegisterVerifier {
             }
             let changed: Bool
             if var existing = incoming[address] {
-                changed = existing.merge(line)
+                changed = existing.merge(line, hierarchy: hierarchy)
                 if changed { incoming[address] = existing }
             } else {
                 incoming[address] = line
@@ -288,6 +297,8 @@ enum DexRegisterVerifier {
                 dex: dex,
                 units: units,
                 instructionEndingAt: byEndAddress,
+                exceptionTypesByHandler: exceptionTypesByHandler,
+                hierarchy: hierarchy,
                 context: context
             )
             for successor in normalSuccessors(
@@ -344,7 +355,34 @@ enum DexRegisterVerifier {
         }
     }
 
-    private static func merge(_ lhs: RegisterType, _ rhs: RegisterType) -> RegisterType {
+    private static func caughtExceptionTypes(
+        in tryBlocks: [DexTryBlock],
+        hierarchy: DexTypeHierarchy
+    ) -> [Int: RegisterType] {
+        var descriptors: [Int: String] = [:]
+        for block in tryBlocks {
+            for handler in block.handlers {
+                let descriptor = handler.type ?? DexTypeHierarchy.throwable
+                if let existing = descriptors[handler.address] {
+                    let merged = hierarchy.commonSupertype(existing, descriptor)
+                    descriptors[handler.address] = hierarchy.assignability(
+                        from: merged,
+                        to: DexTypeHierarchy.throwable,
+                        strict: true
+                    ) == .yes ? merged : DexTypeHierarchy.throwable
+                } else {
+                    descriptors[handler.address] = descriptor
+                }
+            }
+        }
+        return descriptors.mapValues(RegisterType.reference)
+    }
+
+    private static func merge(
+        _ lhs: RegisterType,
+        _ rhs: RegisterType,
+        hierarchy: DexTypeHierarchy
+    ) -> RegisterType {
         if lhs == rhs { return lhs }
         if lhs == .undefined || rhs == .undefined { return .undefined }
         if lhs == .conflict || rhs == .conflict { return .conflict }
@@ -367,8 +405,9 @@ enum DexRegisterVerifier {
         case let (.constant32(.zero), .reference(descriptor)),
              let (.reference(descriptor), .constant32(.zero)):
             return .reference(descriptor)
-        case (.reference, .reference):
-            return .reference(nil)
+        case let (.reference(left), .reference(right)):
+            guard let left, let right else { return .reference(nil) }
+            return .reference(hierarchy.commonSupertype(left, right))
         default:
             return .conflict
         }
@@ -671,6 +710,8 @@ enum DexRegisterVerifier {
         dex: DexFile,
         units: [UInt16],
         instructionEndingAt: [Int: DexCodeVerifier.InstructionInfo],
+        exceptionTypesByHandler: [Int: RegisterType],
+        hierarchy: DexTypeHierarchy,
         context: String
     ) throws {
         let pc = instruction.address
@@ -707,7 +748,7 @@ enum DexRegisterVerifier {
         func compatible(_ register: Int, descriptor: String, label: String) throws {
             try require(
                 line: line, register: register, descriptor: descriptor,
-                label: label, pc: pc, context: context
+                label: label, pc: pc, hierarchy: hierarchy, context: context
             )
         }
 
@@ -754,7 +795,10 @@ enum DexRegisterVerifier {
             }
             try write(descriptor: produced, to: destination, line: &line, context: context)
         case 0x0d:
-            line.write(.reference("Ljava/lang/Throwable;"), to: Int(first >> 8))
+            guard let exceptionType = exceptionTypesByHandler[pc] else {
+                throw VMError.verify("move-exception at pc \(pc) has no caught type in \(context)")
+            }
+            line.write(exceptionType, to: Int(first >> 8))
         case 0x0e:
             try verifyConstructorReturn(line: line, method: method, dex: dex, pc: pc, context: context)
             guard dex.methodIds[method.methodIndex].prototype.returnType == "V" else {
@@ -868,7 +912,16 @@ enum DexRegisterVerifier {
                 }
             }
         case 0x27:
-            try reference(Int(first >> 8), "throw operand")
+            try require(
+                line: line,
+                register: Int(first >> 8),
+                descriptor: DexTypeHierarchy.throwable,
+                label: "throw operand",
+                pc: pc,
+                hierarchy: hierarchy,
+                strictReference: true,
+                context: context
+            )
         case 0x28...0x2a:
             break
         case 0x2b, 0x2c:
@@ -904,16 +957,19 @@ enum DexRegisterVerifier {
         case 0x3a...0x3d:
             try integral(Int(first >> 8), "if operand")
         case 0x44...0x51:
-            try transferArrayAccess(op: op, first: first, units: units, pc: pc, line: &line, context: context)
+            try transferArrayAccess(
+                op: op, first: first, units: units, pc: pc, line: &line,
+                hierarchy: hierarchy, context: context
+            )
         case 0x52...0x6d:
             try transferFieldAccess(
                 op: op, first: first, units: units, pc: pc, line: &line,
-                method: method, dex: dex, context: context
+                method: method, dex: dex, hierarchy: hierarchy, context: context
             )
         case 0x6e...0x72, 0x74...0x78:
             try verifyInvocation(
                 op: op, first: first, units: units, pc: pc, line: &line,
-                dex: dex, context: context
+                dex: dex, hierarchy: hierarchy, context: context
             )
         case 0x7b...0x8f:
             try transferUnary(op: op, first: first, line: &line, pc: pc, context: context)
@@ -1031,6 +1087,7 @@ enum DexRegisterVerifier {
         pc: Int,
         line: inout RegisterLine,
         dex: DexFile,
+        hierarchy: DexTypeHierarchy,
         context: String
     ) throws {
         let methodIndex = Int(units[pc + 1])
@@ -1073,14 +1130,37 @@ enum DexRegisterVerifier {
                         context: context
                     )
                 }
+                let receiverDescriptor: String
+                switch receiver {
+                case let .uninitializedReference(descriptor, _),
+                     let .uninitializedThis(descriptor):
+                    receiverDescriptor = descriptor
+                default:
+                    preconditionFailure("validated uninitialized constructor receiver")
+                }
+                if hierarchy.assignability(
+                    from: receiverDescriptor,
+                    to: reference.declaringClass,
+                    strict: true
+                ) == .no {
+                    throw typeError(
+                        register,
+                        expected: "uninitialized reference assignable to \(reference.declaringClass)",
+                        actual: receiver,
+                        label: "invoke receiver",
+                        pc: pc,
+                        context: context
+                    )
+                }
                 constructorReceiver = receiver
             } else {
-                try requireReference(
+                try require(
                     line: line,
                     register: register,
-                    allowUninitialized: false,
+                    descriptor: reference.declaringClass,
                     label: "invoke receiver",
                     pc: pc,
+                    hierarchy: hierarchy,
                     context: context
                 )
             }
@@ -1094,6 +1174,7 @@ enum DexRegisterVerifier {
                 descriptor: descriptor,
                 label: "invoke argument \(argument)",
                 pc: pc,
+                hierarchy: hierarchy,
                 context: context
             )
             if wordCount(for: descriptor) == 2 {
@@ -1118,6 +1199,7 @@ enum DexRegisterVerifier {
         line: inout RegisterLine,
         method: DexFile.EncodedMethod,
         dex: DexFile,
+        hierarchy: DexTypeHierarchy,
         context: String
     ) throws {
         let field = dex.fieldIds[Int(units[pc + 1])]
@@ -1127,7 +1209,17 @@ enum DexRegisterVerifier {
         if isInstance {
             let receiver = Int(first >> 12)
             let receiverType = line.values[receiver]
-            if !isReference(receiverType) {
+            if isReference(receiverType) {
+                try require(
+                    line: line,
+                    register: receiver,
+                    descriptor: field.declaringClass,
+                    label: "field receiver",
+                    pc: pc,
+                    hierarchy: hierarchy,
+                    context: context
+                )
+            } else {
                 let enclosing = dex.methodIds[method.methodIndex]
                 let ownUninitializedThis: Bool
                 if case let .uninitializedThis(descriptor) = receiverType {
@@ -1157,7 +1249,11 @@ enum DexRegisterVerifier {
         if isGet {
             try write(descriptor: field.type, to: register, line: &line, context: context)
         } else {
-            try require(line: line, register: register, descriptor: field.type, label: "field value", pc: pc, context: context)
+            try require(
+                line: line, register: register, descriptor: field.type,
+                label: "field value", pc: pc, hierarchy: hierarchy,
+                context: context
+            )
         }
     }
 
@@ -1188,6 +1284,7 @@ enum DexRegisterVerifier {
         units: [UInt16],
         pc: Int,
         line: inout RegisterLine,
+        hierarchy: DexTypeHierarchy,
         context: String
     ) throws {
         let valueRegister = Int(first >> 8)
@@ -1221,6 +1318,7 @@ enum DexRegisterVerifier {
                     descriptor: component,
                     label: "array value",
                     pc: pc,
+                    hierarchy: hierarchy,
                     context: context
                 )
             } else {
@@ -1597,6 +1695,8 @@ enum DexRegisterVerifier {
         descriptor: String,
         label: String,
         pc: Int,
+        hierarchy: DexTypeHierarchy,
+        strictReference: Bool = false,
         context: String
     ) throws {
         let expected = try descriptorType(descriptor, context: context)
@@ -1614,6 +1714,21 @@ enum DexRegisterVerifier {
             try requireWide(line: line, register: register, expectedLow: .doubleLow, label: label, pc: pc, context: context)
         case .reference:
             try requireReference(line: line, register: register, allowUninitialized: false, label: label, pc: pc, context: context)
+            if case let .reference(actualDescriptor?) = line.values[register],
+               hierarchy.assignability(
+                   from: actualDescriptor,
+                   to: descriptor,
+                   strict: strictReference
+               ) == .no {
+                throw typeError(
+                    register,
+                    expected: "reference assignable to \(descriptor)",
+                    actual: line.values[register],
+                    label: label,
+                    pc: pc,
+                    context: context
+                )
+            }
         default:
             preconditionFailure("non-value descriptor")
         }

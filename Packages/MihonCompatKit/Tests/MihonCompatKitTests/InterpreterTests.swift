@@ -841,6 +841,350 @@ final class InterpreterTests: XCTestCase {
         }
     }
 
+    func testRegisterVerifierRejectsResolvedUnrelatedReturnAndThrow() throws {
+        var returned = DexBuilder()
+        let returnedText = returned.string("not throwable")
+        returned.setClass("LTest;")
+        returned.addMethod(.init(
+            name: "badReturn", registers: 1, ins: 0, outs: 0,
+            insns: Insn.constString(0, returnedText) + Insn.returnObjectReg(0),
+            isStatic: true,
+            returnType: "Ljava/lang/Throwable;"
+        ))
+        XCTAssertThrowsError(try run(returned, method: "badReturn")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("reference assignable to Ljava/lang/Throwable;"), message)
+            XCTAssertTrue(message.contains("Ljava/lang/String;"), message)
+        }
+
+        var thrown = DexBuilder()
+        let thrownText = thrown.string("also not throwable")
+        thrown.setClass("LTest;")
+        thrown.addMethod(.init(
+            name: "badThrow", registers: 1, ins: 0, outs: 0,
+            insns: Insn.constString(0, thrownText) + Insn.throwReg(0),
+            isStatic: true
+        ))
+        XCTAssertThrowsError(try run(thrown, method: "badThrow")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("throw operand v0"), message)
+            XCTAssertTrue(message.contains("reference assignable to Ljava/lang/Throwable;"), message)
+        }
+    }
+
+    func testRegisterVerifierChecksResolvedInvokeReceiverAndArgument() throws {
+        var receiver = DexBuilder()
+        let length = receiver.method(
+            classDescriptor: "Ljava/lang/StringBuilder;",
+            name: "length",
+            shorty: "I",
+            ret: "I"
+        )
+        let receiverText = receiver.string("String is not StringBuilder")
+        receiver.setClass("LTest;")
+        receiver.addMethod(.init(
+            name: "badReceiver", registers: 1, ins: 0, outs: 1,
+            insns: Insn.constString(0, receiverText)
+                + Insn.invokeVirtual(length, [0])
+                + Insn.returnVoid(),
+            isStatic: true
+        ))
+        XCTAssertThrowsError(try run(receiver, method: "badReceiver")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("invoke receiver v0"), message)
+            XCTAssertTrue(message.contains("Ljava/lang/StringBuilder;"), message)
+        }
+
+        var argument = DexBuilder()
+        let accept = argument.method(
+            classDescriptor: "LHost;",
+            name: "accept",
+            shorty: "VL",
+            ret: "V",
+            parameters: ["Ljava/lang/Throwable;"]
+        )
+        let argumentText = argument.string("String is not Throwable")
+        argument.setClass("LTest;")
+        argument.addMethod(.init(
+            name: "badArgumentType", registers: 1, ins: 0, outs: 1,
+            insns: Insn.constString(0, argumentText)
+                + Insn.invokeStatic(accept, [0])
+                + Insn.returnVoid(),
+            isStatic: true
+        ))
+        XCTAssertThrowsError(try run(argument, method: "badArgumentType")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("invoke argument 0 v0"), message)
+            XCTAssertTrue(message.contains("Ljava/lang/Throwable;"), message)
+        }
+    }
+
+    func testRegisterVerifierJoinsResolvedReferencesAtCommonSuperclass() throws {
+        var builder = DexBuilder()
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;",
+            name: "<init>"
+        )
+        let npeInit = builder.method(
+            classDescriptor: "Ljava/lang/NullPointerException;",
+            name: "<init>"
+        )
+        builder.setClass("LTest;", superclass: "Ljava/lang/RuntimeException;")
+        let testType = builder.typeIdx("LTest;")
+        let npeType = builder.typeIdx("Ljava/lang/NullPointerException;")
+        var instructions = Insn.const4Units(2, 0)                    // pc 0
+        instructions.append(contentsOf: Insn.ifEqz(2, 8))            // pc 1...2 -> pc 9
+        instructions.append(contentsOf: Insn.newInstance(0, npeType)) // pc 3...4
+        instructions.append(contentsOf: Insn.invokeDirect(npeInit, [0])) // pc 5...7
+        instructions.append(contentsOf: Insn.goto(6))                // pc 8 -> pc 14
+        instructions.append(contentsOf: Insn.newInstance(0, testType)) // pc 9...10
+        instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0])) // pc 11...13
+        instructions.append(contentsOf: Insn.returnObjectReg(0))     // pc 14
+        builder.addMethod(.init(
+            name: "joinedException", registers: 3, ins: 0, outs: 1,
+            insns: instructions,
+            isStatic: true,
+            returnType: "Ljava/lang/Exception;"
+        ))
+
+        guard case let .obj(object) = try run(builder, method: "joinedException") else {
+            return XCTFail("expected joined exception object")
+        }
+        XCTAssertEqual(object.dexType, "LTest;")
+    }
+
+    func testRegisterVerifierAppliesReferenceArrayCovariance() throws {
+        var covariant = DexBuilder()
+        covariant.setClass("LTest;")
+        covariant.addMethod(.init(
+            name: "widenArray", registers: 1, ins: 1, outs: 0,
+            insns: Insn.returnObjectReg(0),
+            isStatic: true,
+            returnType: "[Ljava/lang/Object;",
+            parameters: ["[Ljava/lang/String;"]
+        ))
+        let strings = RVal.arr(ArrInstance(elemDescriptor: "Ljava/lang/String;", elements: []))
+        guard case let .arr(result) = try run(covariant, method: "widenArray", args: [strings]) else {
+            return XCTFail("expected array result")
+        }
+        XCTAssertEqual(result.elemDescriptor, "Ljava/lang/String;")
+
+        var primitiveMismatch = DexBuilder()
+        primitiveMismatch.setClass("LTest;")
+        primitiveMismatch.addMethod(.init(
+            name: "badPrimitiveArray", registers: 1, ins: 1, outs: 0,
+            insns: Insn.returnObjectReg(0),
+            isStatic: true,
+            returnType: "[J",
+            parameters: ["[I"]
+        ))
+        let integers = RVal.arr(ArrInstance(elemDescriptor: "I", elements: []))
+        XCTAssertThrowsError(try run(primitiveMismatch, method: "badPrimitiveArray", args: [integers])) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("reference assignable to [J"), message)
+            XCTAssertTrue(message.contains("[I"), message)
+        }
+    }
+
+    func testVerifierRejectsResolvedNonThrowableCatchType() throws {
+        var builder = DexBuilder()
+        let stringType = builder.typeIdx("Ljava/lang/String;")
+        builder.setClass("LTest;")
+        let handlers = [UInt8(1), UInt8(1)]
+            + DexBuilder.ULEB.encode(UInt64(stringType))
+            + DexBuilder.ULEB.encode(2)
+        let tryItems = tryItem(start: 1, count: 1, handlerOffset: 1) + handlers
+        builder.addMethod(.init(
+            name: "badCatch", registers: 1, ins: 0, outs: 0,
+            insns: Insn.const4Units(0, 0)
+                + Insn.throwReg(0)
+                + [0x000d]
+                + Insn.returnVoid(),
+            isStatic: true,
+            triesCount: 1,
+            tryItems: tryItems
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "badCatch")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("catch handler 0 type Ljava/lang/String;"), message)
+            XCTAssertTrue(message.contains("not assignable to java.lang.Throwable"), message)
+        }
+    }
+
+    func testMoveExceptionUsesCommonResolvedCaughtType() throws {
+        var builder = DexBuilder()
+        let objectInit = builder.method(
+            classDescriptor: "Ljava/lang/Object;",
+            name: "<init>"
+        )
+        builder.setClass("LTest;", superclass: "Ljava/lang/RuntimeException;")
+        let testType = builder.typeIdx("LTest;")
+        let handlers = [UInt8(1), UInt8(1)]
+            + DexBuilder.ULEB.encode(UInt64(testType))
+            + DexBuilder.ULEB.encode(6)
+        let tryItems = tryItem(start: 5, count: 1, handlerOffset: 1) + handlers
+        var instructions = Insn.newInstance(0, testType)            // pc 0...1
+        instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0])) // pc 2...4
+        instructions.append(contentsOf: Insn.throwReg(0))           // pc 5
+        instructions.append(0x010d)                                 // pc 6: move-exception v1
+        instructions.append(contentsOf: Insn.returnObjectReg(1))    // pc 7
+        builder.addMethod(.init(
+            name: "typedMoveException", registers: 2, ins: 0, outs: 1,
+            insns: instructions,
+            isStatic: true,
+            returnType: "Ljava/lang/Exception;",
+            triesCount: 1,
+            tryItems: tryItems
+        ))
+
+        guard case let .obj(object) = try run(builder, method: "typedMoveException") else {
+            return XCTFail("expected caught exception object")
+        }
+        XCTAssertEqual(object.dexType, "LTest;")
+    }
+
+    func testRuntimeCatchDispatchUsesResolvedThrowableHierarchy() throws {
+        var builder = DexBuilder()
+        let errorType = builder.typeIdx("Ljava/lang/Error;")
+        builder.setClass("LTest;")
+        let handlers = [UInt8(1), UInt8(0x7f)]
+            + DexBuilder.ULEB.encode(UInt64(errorType))
+            + DexBuilder.ULEB.encode(6)
+            + DexBuilder.ULEB.encode(9)
+        let tryItems = tryItem(start: 2, count: 2, handlerOffset: 1) + handlers
+        var instructions = Insn.const4Units(0, 1)                   // pc 0
+        instructions.append(contentsOf: Insn.const4Units(1, 0))    // pc 1
+        instructions.append(contentsOf: Insn.binop(0x93, 0, 0, 1)) // pc 2...3
+        instructions.append(contentsOf: Insn.const4Units(0, 0))    // pc 4
+        instructions.append(contentsOf: Insn.returnReg(0))         // pc 5
+        instructions.append(0x010d)                                // pc 6: Error handler
+        instructions.append(contentsOf: Insn.const4Units(0, 1))    // pc 7
+        instructions.append(contentsOf: Insn.returnReg(0))         // pc 8
+        instructions.append(0x010d)                                // pc 9: catch-all
+        instructions.append(contentsOf: Insn.const4Units(0, 2))    // pc 10
+        instructions.append(contentsOf: Insn.returnReg(0))         // pc 11
+        builder.addMethod(.init(
+            name: "specificCatch", registers: 2, ins: 0, outs: 0,
+            insns: instructions,
+            isStatic: true,
+            returnType: "I",
+            triesCount: 1,
+            tryItems: tryItems
+        ))
+
+        XCTAssertEqual(int(try run(builder, method: "specificCatch")), 2)
+    }
+
+    func testRuntimeCatchDispatchLetsThrowableCatchUnresolvedExternalException() throws {
+        var builder = DexBuilder()
+        let errorType = builder.typeIdx("Ljava/lang/Error;")
+        let throwableType = builder.typeIdx("Ljava/lang/Throwable;")
+        builder.setClass("LTest;")
+        let handlers = [UInt8(1), UInt8(2)]
+            + DexBuilder.ULEB.encode(UInt64(errorType))
+            + DexBuilder.ULEB.encode(1)
+            + DexBuilder.ULEB.encode(UInt64(throwableType))
+            + DexBuilder.ULEB.encode(4)
+        let tryItems = tryItem(start: 0, count: 1, handlerOffset: 1) + handlers
+        var instructions = Insn.throwReg(1)                         // pc 0
+        instructions.append(0x000d)                                // pc 1: Error handler
+        instructions.append(contentsOf: Insn.const4Units(0, 1))    // pc 2
+        instructions.append(contentsOf: Insn.returnReg(0))         // pc 3
+        instructions.append(0x000d)                                // pc 4: Throwable handler
+        instructions.append(contentsOf: Insn.const4Units(0, 2))    // pc 5
+        instructions.append(contentsOf: Insn.returnReg(0))         // pc 6
+        builder.addMethod(.init(
+            name: "unresolvedCatch", registers: 2, ins: 1, outs: 0,
+            insns: instructions,
+            isStatic: true,
+            returnType: "I",
+            parameters: ["Lvendor/ExternalException;"],
+            triesCount: 1,
+            tryItems: tryItems
+        ))
+
+        let external = RVal.obj(ObjInstance(dexType: "Lvendor/ExternalException;"))
+        XCTAssertEqual(int(try run(builder, method: "unresolvedCatch", args: [external])), 2)
+    }
+
+    func testRuntimeCheckCastUsesResolvedHierarchyAndAcceptsNull() throws {
+        var invalid = DexBuilder()
+        let throwableType = invalid.typeIdx("Ljava/lang/Throwable;")
+        let text = invalid.string("Kami")
+        invalid.setClass("LTest;")
+        invalid.addMethod(.init(
+            name: "badCast", registers: 1, ins: 0, outs: 0,
+            insns: Insn.constString(0, text)
+                + [0x001f, UInt16(throwableType)]
+                + Insn.returnObjectReg(0),
+            isStatic: true,
+            returnType: "Ljava/lang/Throwable;"
+        ))
+        XCTAssertThrowsError(try run(invalid, method: "badCast")) { error in
+            guard let thrown = error as? DEXThrowable,
+                  case let .obj(object) = thrown.value else {
+                return XCTFail("expected ClassCastException, got \(error)")
+            }
+            XCTAssertEqual(object.dexType, "Ljava/lang/ClassCastException;")
+        }
+
+        var nullCast = DexBuilder()
+        let nullThrowableType = nullCast.typeIdx("Ljava/lang/Throwable;")
+        nullCast.setClass("LTest;")
+        nullCast.addMethod(.init(
+            name: "nullCast", registers: 1, ins: 0, outs: 0,
+            insns: Insn.const4Units(0, 0)
+                + [0x001f, UInt16(nullThrowableType)]
+                + Insn.returnObjectReg(0),
+            isStatic: true,
+            returnType: "Ljava/lang/Throwable;"
+        ))
+        XCTAssertTrue(try run(nullCast, method: "nullCast").isNull)
+    }
+
+    func testRuntimeInstanceOfDoesNotTreatEveryObjectAsThrowable() throws {
+        var throwableCheck = DexBuilder()
+        let throwableType = throwableCheck.typeIdx("Ljava/lang/Throwable;")
+        let text = throwableCheck.string("Kami")
+        throwableCheck.setClass("LTest;")
+        throwableCheck.addMethod(.init(
+            name: "isThrowable", registers: 2, ins: 0, outs: 0,
+            insns: Insn.constString(0, text)
+                + [0x0120, UInt16(throwableType)]
+                + Insn.returnReg(1),
+            isStatic: true,
+            returnType: "Z"
+        ))
+        XCTAssertEqual(int(try run(throwableCheck, method: "isThrowable")), 0)
+
+        var sequenceCheck = DexBuilder()
+        let sequenceType = sequenceCheck.typeIdx("Ljava/lang/CharSequence;")
+        let sequenceText = sequenceCheck.string("Kami")
+        sequenceCheck.setClass("LTest;")
+        sequenceCheck.addMethod(.init(
+            name: "isSequence", registers: 2, ins: 0, outs: 0,
+            insns: Insn.constString(0, sequenceText)
+                + [0x0120, UInt16(sequenceType)]
+                + Insn.returnReg(1),
+            isStatic: true,
+            returnType: "Z"
+        ))
+        XCTAssertEqual(int(try run(sequenceCheck, method: "isSequence")), 1)
+    }
+
     func testAOSPBinaryOpcodeOrderingAcrossTypes() throws {
         var integer = DexBuilder()
         integer.setClass("LTest;")
@@ -1079,14 +1423,14 @@ final class InterpreterTests: XCTestCase {
         let handlers = [UInt8(1), UInt8(1)]
             + DexBuilder.ULEB.encode(UInt64(exceptionType))
             + DexBuilder.ULEB.encode(8)
-        let instructions: [UInt16] = Insn.newInstance(0, exceptionType) // pc 0...1
-            + Insn.invokeDirect(objectInit, [0])                       // pc 2...4
-            + Insn.throwReg(0)                                         // pc 5
-            + Insn.const4Units(0, 0)                                   // pc 6
-            + Insn.returnReg(0)                                        // pc 7
-            + [0x010d]                                                  // pc 8: move-exception v1
-            + Insn.const4Units(0, 7)                                   // pc 9
-            + Insn.returnReg(0)                                        // pc 10
+        var instructions = Insn.newInstance(0, exceptionType)          // pc 0...1
+        instructions.append(contentsOf: Insn.invokeDirect(objectInit, [0])) // pc 2...4
+        instructions.append(contentsOf: Insn.throwReg(0))              // pc 5
+        instructions.append(contentsOf: Insn.const4Units(0, 0))        // pc 6
+        instructions.append(contentsOf: Insn.returnReg(0))             // pc 7
+        instructions.append(0x010d)                                    // pc 8: move-exception v1
+        instructions.append(contentsOf: Insn.const4Units(0, 7))        // pc 9
+        instructions.append(contentsOf: Insn.returnReg(0))             // pc 10
         let tryItems = tryItem(start: 5, count: 1, handlerOffset: 1) + handlers
         builder.addMethod(.init(
             name: "typedCatch", registers: 2, ins: 0, outs: 1,

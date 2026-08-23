@@ -13,9 +13,9 @@ struct DexTryBlock {
 
 /// Bounded structural verification for one DEX `code_item` before execution.
 ///
-/// Geometry, exception tables, control flow, register bounds, and register
-/// category dataflow are all checked before the interpreter can execute the
-/// method. Reference-hierarchy assignability remains a later M1 milestone.
+/// Geometry, exception tables, control flow, register bounds, and typed
+/// register dataflow are all checked before the interpreter can execute the
+/// method. Resolved catch classes must also derive from `Throwable`.
 enum DexCodeVerifier {
     static let maximumCodeUnits = 2_000_000
     static let maximumEncodedHandlers = 65_535
@@ -483,6 +483,7 @@ enum DexCodeVerifier {
                 )
             }
             let listSize = Int(listSizeRaw)
+            let hierarchy = DexTypeHierarchy(dex: dex)
             var handlersByOffset: [Int: [DexCatchHandler]] = [:]
             handlersByOffset.reserveCapacity(listSize)
             var allHandlerEntries: Set<Int> = []
@@ -517,6 +518,16 @@ enum DexCodeVerifier {
                     guard descriptor.hasPrefix("L"), descriptor.hasSuffix(";") else {
                         throw VMError.verify(
                             "catch handler \(index) type \(descriptor) is not a class in \(context)"
+                        )
+                    }
+                    if hierarchy.assignability(
+                        from: descriptor,
+                        to: DexTypeHierarchy.throwable,
+                        strict: true
+                    ) == .no {
+                        throw VMError.verify(
+                            "catch handler \(index) type \(descriptor) is not assignable to "
+                                + "java.lang.Throwable in \(context)"
                         )
                     }
                     let address = try exceptionHandlerAddress(

@@ -45,6 +45,7 @@ public final class DexInterpreter {
 
     public let dex: DexFile
     public let bridge: HostBridge
+    private let typeHierarchy: DexTypeHierarchy
     public var maxInstructions: Int
     public var cancelled: () -> Bool
     /// Trace sink for the runtime trace mode (§33); nil = off.
@@ -83,6 +84,7 @@ public final class DexInterpreter {
                 cancelled: @escaping () -> Bool = { false }) {
         self.dex = dex
         self.bridge = bridge
+        self.typeHierarchy = DexTypeHierarchy(dex: dex)
         self.maxInstructions = maxInstructions
         self.cancelled = cancelled
         for def in dex.classDefs {
@@ -396,34 +398,26 @@ public final class DexInterpreter {
             } catch let ret as FrameReturn {
                 return try validatedReturn(ret.value, prototype: ref.prototype, context: ref.signature)
             } catch let thrown as DEXThrowable {
-                guard let handler = Self.handler(for: thrown.value, at: pc, in: tries) else { throw thrown }
-                pendingException = thrown.value
+                let value = typeHierarchy.normalizedThrowable(thrown.value)
+                guard let handler = handler(for: value, at: pc, in: tries) else {
+                    throw DEXThrowable(value)
+                }
+                pendingException = value
                 pc = handler
             }
         }
         throw VMError.verify("method \(dex.methodIds[method.methodIndex].name) fell off the end of its code item")
     }
 
-    static func handler(for value: RVal, at pc: Int, in tries: [DexTryBlock]) -> Int? {
+    private func handler(for value: RVal, at pc: Int, in tries: [DexTryBlock]) -> Int? {
         for t in tries where pc >= t.startAddress && pc < t.endAddress {
             for h in t.handlers {
-                if h.type == nil || thrownValue(value, isCaughtBy: h.type!) {
+                if h.type == nil || typeHierarchy.catches(value, as: h.type!) {
                     return h.address
                 }
             }
         }
         return nil
-    }
-
-    static func thrownValue(_ value: RVal, isCaughtBy descriptor: String) -> Bool {
-        switch descriptor {
-        case "Ljava/lang/Throwable;", "Ljava/lang/Exception;", "Ljava/lang/RuntimeException;",
-             "Ljava/lang/Error;", "Ljava/lang/Object;":
-            return true // approximation until the class hierarchy exists
-        default:
-            if case let .obj(o) = value { return o.dexType == descriptor }
-            return false
-        }
     }
 
     // MARK: - Safe table access
@@ -559,10 +553,27 @@ public final class DexInterpreter {
 
         case 0x1d, 0x1e: return pc + 1 // monitor-enter/exit (single-threaded M1)
 
-        case 0x1f: return pc + 2 // category-verified; exact hierarchy check remains M1 work
+        case 0x1f: return try { // check-cast vAA, type@BBBB
+            let register = Int(u[0] >> 8)
+            let value = reg(register)
+            let target = try typeAt(Int(u[1]))
+            if !Self.isNullReference(value) {
+                let actual = typeHierarchy.runtimeDescriptor(of: value) ?? "non-reference"
+                if typeHierarchy.assignability(
+                    from: actual,
+                    to: target,
+                    strict: true
+                ) == .no {
+                    throw DEXThrowable(HostBridge.string(
+                        "ClassCastException: \(actual) cannot be cast to \(target)"
+                    ))
+                }
+            }
+            return pc + 2
+        }()
         case 0x20: return try { // instance-of vA, vB, type@CCCC
             let target = try typeAt(Int(u[1]))
-            let result = Self.typeCheck(reg(Int(u[0] >> 12)), ofType: target)
+            let result = typeHierarchy.isInstance(reg(Int(u[0] >> 12)), of: target)
             setReg(Int(u[0] >> 8 & 0x0F), .int(result ? 1 : 0)); return pc + 2
         }()
         case 0x21: return try { // array-length vA, vB
@@ -606,7 +617,11 @@ public final class DexInterpreter {
             setReg(Int(u[0] >> 8), .arr(a)); return pc + 3
         }()
         case 0x27: // throw vAA
-            throw DEXThrowable(reg(Int(u[0] >> 8)))
+            let value = reg(Int(u[0] >> 8))
+            if Self.isNullReference(value) {
+                throw DEXThrowable(HostBridge.string("NullPointerException"))
+            }
+            throw DEXThrowable(value)
 
         // ---- goto / switch (0x28–0x2c) ----
         case 0x28: return pc + Int(Int8(bitPattern: UInt8(u[0] >> 8)))
@@ -937,10 +952,13 @@ public final class DexInterpreter {
             word += descriptor == "J" || descriptor == "D" ? 2 : 1
         }
 
-        let receiverDescriptor = args.first.flatMap(Self.runtimeDescriptor)
+        let receiverDescriptor = args.first.flatMap(typeHierarchy.runtimeDescriptor)
         if kind.usesReceiverDispatch, let receiverDescriptor,
-           let assignable = knownAssignable(receiverDescriptor, to: ref.declaringClass),
-           !assignable {
+           typeHierarchy.assignability(
+               from: receiverDescriptor,
+               to: ref.declaringClass,
+               strict: false
+           ) == .no {
             throw VMError.verify(
                 "\(ref.signature) receiver \(receiverDescriptor) is not assignable to \(ref.declaringClass)"
             )
@@ -999,43 +1017,6 @@ public final class DexInterpreter {
         throw VMError.unresolvedMethod(class: ref.declaringClass, signature: ref.signature)
     }
 
-    private static func runtimeDescriptor(_ value: RVal) -> String? {
-        switch value {
-        case let .obj(object): return object.dexType
-        case let .arr(array): return "[" + array.elemDescriptor
-        case let .host(box):
-            return "L" + box.className.replacingOccurrences(of: ".", with: "/") + ";"
-        case .null, .int, .long, .float, .double: return nil
-        }
-    }
-
-    /// Returns nil when the receiver's hierarchy leaves the parsed DEX and
-    /// assignability therefore cannot be proven locally.
-    private func knownAssignable(_ candidate: String, to expected: String) -> Bool? {
-        guard dex.classIndexByDescriptor[candidate] != nil else { return nil }
-        var pending = [candidate]
-        var visited: Set<String> = []
-        var reachedExternalType = false
-
-        while let descriptor = pending.popLast() {
-            if descriptor == expected { return true }
-            guard visited.insert(descriptor).inserted else { continue }
-            guard let classIndex = dex.classIndexByDescriptor[descriptor] else {
-                reachedExternalType = true
-                continue
-            }
-            let def = dex.classDefs[classIndex]
-            if def.superclassIndex >= 0,
-               def.superclassIndex < dex.typeDescriptors.count {
-                pending.append(dex.typeDescriptors[def.superclassIndex])
-            }
-            for interfaceIndex in def.interfaceIndices
-                where interfaceIndex >= 0 && interfaceIndex < dex.typeDescriptors.count {
-                pending.append(dex.typeDescriptors[interfaceIndex])
-            }
-        }
-        return reachedExternalType ? nil : false
-    }
 
     /// Selects the most-specific DEX override for invoke-virtual/interface.
     /// Exact name + prototype identity is retained at every hierarchy level.
@@ -1250,24 +1231,7 @@ public final class DexInterpreter {
         }
     }
 
-    // MARK: - type checks / narrowing
-
-    static func typeCheck(_ value: RVal, ofType target: String) -> Bool {
-        if value.isNull { return false }
-        switch value {
-        case let .obj(o):
-            if o.dexType == target { return true }
-            // Approximation until the host class hierarchy lands (M2).
-            switch target {
-            case "Ljava/lang/Object;", "Ljava/lang/Throwable;", "Ljava/lang/Exception;",
-                 "Ljava/lang/RuntimeException;", "Ljava/lang/Error;", "Ljava/lang/CharSequence;":
-                return true
-            default: return false
-            }
-        case .arr: return target.hasPrefix("[")
-        default: return false
-        }
-    }
+    // MARK: - numeric narrowing
 
     private func javaCmp(_ a: Int64, _ b: Int64) -> Int32 { a < b ? -1 : (a == b ? 0 : 1) }
     private func javaCmpF(_ a: Double, _ b: Double, nanIsLess: Bool) -> Int32 {
