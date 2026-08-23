@@ -15,11 +15,15 @@ struct DexBuilder {
         let isVirtual: Bool
         let returnType: String
         let parameters: [String]
-        let tryItems: [UInt8]   // tries appended raw after insns (advanced tests)
+        let triesCount: Int
+        let tryPadding: UInt16
+        /// Raw `try_item[]` plus `encoded_catch_handler_list` bytes.
+        let tryItems: [UInt8]
 
         init(name: String, registers: Int, ins: Int, outs: Int,
              insns: [UInt16], isStatic: Bool, returnType: String = "V",
-             parameters: [String] = [], tryItems: [UInt8] = [],
+             parameters: [String] = [], triesCount: Int = 0,
+             tryPadding: UInt16 = 0, tryItems: [UInt8] = [],
              isVirtual: Bool? = nil) {
             self.name = name
             self.registers = registers
@@ -30,6 +34,8 @@ struct DexBuilder {
             self.isVirtual = isVirtual ?? (!isStatic && name != "<init>")
             self.returnType = returnType
             self.parameters = parameters
+            self.triesCount = triesCount
+            self.tryPadding = tryPadding
             self.tryItems = tryItems
         }
     }
@@ -207,16 +213,17 @@ struct DexBuilder {
 
         struct CodeItemLayout {
             let offset: Int
-            let headerSize: Int
             let spec: MethodSpec
         }
         var codeLayouts: [CodeItemLayout] = []
         var codeCursor = 0
         for m in methods {
-            let headerSize = 16 + m.insns.count * 2
-            codeLayouts.append(CodeItemLayout(offset: codeCursor, headerSize: headerSize, spec: m))
-            codeCursor += headerSize
-            if m.insns.count % 2 == 1 { codeCursor += 2 } // u32-align next
+            precondition((0...Int(UInt16.max)).contains(m.triesCount))
+            codeLayouts.append(CodeItemLayout(offset: codeCursor, spec: m))
+            codeCursor += 16 + m.insns.count * 2
+            if m.triesCount > 0, m.insns.count % 2 == 1 { codeCursor += 2 }
+            codeCursor += m.tryItems.count
+            codeCursor = (codeCursor + 3) & ~3 // every code_item begins on a u32 boundary
         }
 
         let directLayouts = codeLayouts.enumerated().filter { !$0.element.spec.isVirtual }
@@ -334,16 +341,23 @@ struct DexBuilder {
         out.append(contentsOf: classData)
         out.append(contentsOf: [UInt8](repeating: 0, count: codePadding))
 
-        for layout in codeLayouts {
+        for (index, layout) in codeLayouts.enumerated() {
             let m = layout.spec
             u16(UInt16(m.registers))
             u16(UInt16(m.ins))
             u16(UInt16(m.outs))
-            u16(0)                 // tries
+            u16(UInt16(m.triesCount))
             u32(0)                 // debug info off
             u32(UInt32(m.insns.count))
             for unit in m.insns { u16(unit) }
-            if m.insns.count % 2 == 1 { u16(0) } // padding to u32
+            if m.triesCount > 0, m.insns.count % 2 == 1 { u16(m.tryPadding) }
+            out.append(contentsOf: m.tryItems)
+            let nextOffset = index + 1 < codeLayouts.count
+                ? codeLayouts[index + 1].offset
+                : codeCursor
+            let expectedSize = codeOff + nextOffset
+            precondition(out.count <= expectedSize)
+            out.append(contentsOf: [UInt8](repeating: 0, count: expectedSize - out.count))
         }
 
         var a: UInt32 = 1

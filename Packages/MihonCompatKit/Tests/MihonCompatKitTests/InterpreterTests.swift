@@ -27,6 +27,18 @@ final class InterpreterTests: XCTestCase {
         return nil
     }
 
+    private func tryItem(start: Int, count: Int, handlerOffset: Int) -> [UInt8] {
+        let start = UInt32(start)
+        let count = UInt16(count)
+        let handlerOffset = UInt16(handlerOffset)
+        return [
+            UInt8(start & 0xff), UInt8(start >> 8 & 0xff),
+            UInt8(start >> 16 & 0xff), UInt8(start >> 24),
+            UInt8(count & 0xff), UInt8(count >> 8),
+            UInt8(handlerOffset & 0xff), UInt8(handlerOffset >> 8),
+        ]
+    }
+
     // MARK: arithmetic
 
     func testAddInt() throws {
@@ -372,6 +384,84 @@ final class InterpreterTests: XCTestCase {
         }
     }
 
+    func testVerifierRejectsForbiddenZeroBranchOffsets() throws {
+        var shortGoto = DexBuilder()
+        shortGoto.setClass("LTest;")
+        shortGoto.addMethod(.init(
+            name: "shortGoto", registers: 0, ins: 0, outs: 0,
+            insns: [0x0028, 0x000e], isStatic: true
+        ))
+        XCTAssertThrowsError(try run(shortGoto, method: "shortGoto")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("forbidden zero offset"), message)
+        }
+
+        var conditional = DexBuilder()
+        conditional.setClass("LTest;")
+        conditional.addMethod(.init(
+            name: "conditional", registers: 1, ins: 0, outs: 0,
+            insns: [0x0038, 0x0000, 0x000e], isStatic: true
+        ))
+        XCTAssertThrowsError(try run(conditional, method: "conditional")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("forbidden zero offset"), message)
+        }
+    }
+
+    func testVerifierRejectsInvalidMoveResultControlFlow() throws {
+        var misplaced = DexBuilder()
+        misplaced.setClass("LTest;")
+        misplaced.addMethod(.init(
+            name: "misplacedResult", registers: 1, ins: 0, outs: 0,
+            insns: [0x000a, 0x000e], isStatic: true
+        ))
+        XCTAssertThrowsError(try run(misplaced, method: "misplacedResult")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("is not immediately after a matching producer"), message)
+        }
+
+        var branchTarget = DexBuilder()
+        branchTarget.setClass("LTest;")
+        branchTarget.addMethod(.init(
+            name: "branchResult", registers: 1, ins: 0, outs: 0,
+            insns: [
+                0x0428,                   // pc 0: goto +4
+                0x0071, 0x0000, 0x0000,   // pc 1: invoke-static method@0
+                0x000a,                   // pc 4: valid adjacent move-result
+                0x000e,
+            ],
+            isStatic: true
+        ))
+        XCTAssertThrowsError(try run(branchTarget, method: "branchResult")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("targets move-result pc 4"), message)
+        }
+    }
+
+    func testVerifierRejectsOversizedOutsRegisterWindow() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "badOuts", registers: 1, ins: 0, outs: 6,
+            insns: [0x000e], isStatic: true
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "badOuts")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("outs_size 6 exceeds registers_size 1"), message)
+        }
+    }
+
     func testVerifierAcceptsAlignedPackedSwitchAndChecksCaseTargets() throws {
         var builder = DexBuilder()
         builder.setClass("LTest;")
@@ -532,6 +622,331 @@ final class InterpreterTests: XCTestCase {
                 return XCTFail("expected verification error, got \(error)")
             }
             XCTAssertTrue(message.contains("element width 3"), message)
+        }
+    }
+
+    func testVerifiedTypedExceptionHandlerExecutes() throws {
+        var builder = DexBuilder()
+        let exceptionType = builder.type("Ljava/lang/RuntimeException;")
+        builder.setClass("LTest;")
+        let handlers = [UInt8(1), UInt8(1)]
+            + DexBuilder.ULEB.encode(UInt64(exceptionType))
+            + DexBuilder.ULEB.encode(5)
+        builder.addMethod(.init(
+            name: "typedCatch", registers: 2, ins: 0, outs: 0,
+            insns: [
+                0x0022, UInt16(exceptionType), // pc 0: new-instance v0
+                0x0027,                       // pc 2: throw v0
+                0x0012,                       // pc 3: normal result 0
+                0x000f,                       // pc 4: return v0
+                0x010d,                       // pc 5: move-exception v1
+                0x7012,                       // pc 6: caught result 7
+                0x000f,                       // pc 7: return v0
+            ],
+            isStatic: true, returnType: "I",
+            triesCount: 1,
+            tryItems: tryItem(start: 2, count: 1, handlerOffset: 1) + handlers
+        ))
+
+        XCTAssertEqual(int(try run(builder, method: "typedCatch")), 7)
+    }
+
+    func testVerifiedCatchAllExceptionHandlerExecutes() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "catchAll", registers: 2, ins: 0, outs: 0,
+            insns: [
+                0x0012, // pc 0: const/4 v0, 0
+                0x0027, // pc 1: throw v0
+                0x0012, // pc 2: normal result 0
+                0x000f, // pc 3: return v0
+                0x010d, // pc 4: move-exception v1
+                0x7012, // pc 5: caught result 7
+                0x000f, // pc 6: return v0
+                0x010d, // pc 7: valid but unreferenced encoded handler
+                0x000e,
+            ],
+            isStatic: true, returnType: "I",
+            triesCount: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 1)
+                + [0x02, 0x00, 0x04, 0x00, 0x07]
+        ))
+
+        XCTAssertEqual(int(try run(builder, method: "catchAll")), 7)
+    }
+
+    func testVerifierRejectsTryRangeThatSplitsInstruction() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "splitTry", registers: 1, ins: 0, outs: 0,
+            insns: [
+                0x0013, 0x0000, // pc 0: const/16 occupies pc 0...1
+                0x000e,         // pc 2: return-void
+                0x000d,         // pc 3: move-exception v0
+                0x000e,
+            ],
+            isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 0, count: 1, handlerOffset: 1)
+                + [0x01, 0x00, 0x03]
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "splitTry")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("splits an instruction or payload"), message)
+        }
+    }
+
+    func testVerifierRejectsOverlappingTryItems() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        let items = tryItem(start: 0, count: 2, handlerOffset: 1)
+            + tryItem(start: 1, count: 1, handlerOffset: 1)
+        builder.addMethod(.init(
+            name: "overlappingTries", registers: 1, ins: 0, outs: 0,
+            insns: [0x0000, 0x0000, 0x000e, 0x000d, 0x000e],
+            isStatic: true,
+            triesCount: 2,
+            tryItems: items + [0x01, 0x00, 0x03]
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "overlappingTries")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("unsorted or overlapping"), message)
+        }
+    }
+
+    func testVerifierRejectsInvalidCatchTypeAndHandlerOffset() throws {
+        let instructions: [UInt16] = [0x0012, 0x0027, 0x000e, 0x000d, 0x000e]
+
+        var badType = DexBuilder()
+        badType.setClass("LTest;")
+        badType.addMethod(.init(
+            name: "badType", registers: 1, ins: 0, outs: 0,
+            insns: instructions, isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 1)
+                + [0x01, 0x01, 0x7f, 0x03]
+        ))
+        XCTAssertThrowsError(try run(badType, method: "badType")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("invalid type index 127"), message)
+        }
+
+        var badOffset = DexBuilder()
+        badOffset.setClass("LTest;")
+        badOffset.addMethod(.init(
+            name: "badOffset", registers: 1, ins: 0, outs: 0,
+            insns: instructions, isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 2)
+                + [0x01, 0x00, 0x03]
+        ))
+        XCTAssertThrowsError(try run(badOffset, method: "badOffset")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("invalid handler offset 2"), message)
+        }
+    }
+
+    func testVerifierAppliesMoveExceptionHandlerEntryRules() throws {
+        var ignoredException = DexBuilder()
+        ignoredException.setClass("LTest;")
+        ignoredException.addMethod(.init(
+            name: "ignoredException", registers: 1, ins: 0, outs: 0,
+            insns: [0x0012, 0x0027, 0x000e], isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 1)
+                + [0x01, 0x00, 0x02]
+        ))
+        XCTAssertNoThrow(try run(ignoredException, method: "ignoredException"))
+
+        var resultHandler = DexBuilder()
+        resultHandler.setClass("LTest;")
+        resultHandler.addMethod(.init(
+            name: "resultHandler", registers: 1, ins: 0, outs: 0,
+            insns: [0x0027, 0x0071, 0x0000, 0x0000, 0x000a, 0x000e],
+            isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 0, count: 1, handlerOffset: 1)
+                + [0x01, 0x00, 0x04]
+        ))
+        XCTAssertThrowsError(try run(resultHandler, method: "resultHandler")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("begins with move-result"), message)
+        }
+
+        var strayMove = DexBuilder()
+        strayMove.setClass("LTest;")
+        strayMove.addMethod(.init(
+            name: "strayMove", registers: 1, ins: 0, outs: 0,
+            insns: [0x000d, 0x000e], isStatic: true
+        ))
+        XCTAssertThrowsError(try run(strayMove, method: "strayMove")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("is not an exception handler entry"), message)
+        }
+
+        var entryHandler = DexBuilder()
+        entryHandler.setClass("LTest;")
+        entryHandler.addMethod(.init(
+            name: "entryHandler", registers: 1, ins: 0, outs: 0,
+            insns: [0x000d, 0x0027, 0x000e], isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 1)
+                + [0x01, 0x00, 0x00]
+        ))
+        XCTAssertThrowsError(try run(entryHandler, method: "entryHandler")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("may not start at method entry pc 0"), message)
+        }
+    }
+
+    func testVerifierRejectsOrdinaryControlFlowIntoMoveException() throws {
+        var builder = DexBuilder()
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "branchToHandler", registers: 1, ins: 0, outs: 0,
+            insns: [0x0328, 0x0027, 0x000e, 0x000d, 0x000e],
+            isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 1)
+                + [0x01, 0x00, 0x03]
+        ))
+
+        XCTAssertThrowsError(try run(builder, method: "branchToHandler")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("targets move-exception pc 3"), message)
+        }
+
+        var fallthroughBuilder = DexBuilder()
+        fallthroughBuilder.setClass("LTest;")
+        fallthroughBuilder.addMethod(.init(
+            name: "fallthroughToHandler", registers: 1, ins: 0, outs: 0,
+            insns: [0x0027, 0x0000, 0x000d, 0x000e],
+            isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 0, count: 1, handlerOffset: 1)
+                + [0x01, 0x00, 0x02]
+        ))
+        XCTAssertThrowsError(try run(fallthroughBuilder, method: "fallthroughToHandler")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("falls through into move-exception handler pc 2"), message)
+        }
+
+        var ordinaryHandler = DexBuilder()
+        ordinaryHandler.setClass("LTest;")
+        ordinaryHandler.addMethod(.init(
+            name: "ordinaryHandler", registers: 1, ins: 0, outs: 0,
+            insns: [0x0328, 0x0027, 0x000e, 0x0000, 0x000e],
+            isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 1)
+                + [0x01, 0x00, 0x03]
+        ))
+        XCTAssertNoThrow(try run(ordinaryHandler, method: "ordinaryHandler"))
+    }
+
+    func testVerifierRejectsMalformedExceptionTableEncoding() throws {
+        let instructions: [UInt16] = [0x0012, 0x0027, 0x000e, 0x000d, 0x000e]
+
+        var emptyHandlers = DexBuilder()
+        emptyHandlers.setClass("LTest;")
+        emptyHandlers.addMethod(.init(
+            name: "emptyHandlers", registers: 1, ins: 0, outs: 0,
+            insns: instructions, isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 1) + [0x00]
+        ))
+        XCTAssertThrowsError(try run(emptyHandlers, method: "emptyHandlers")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("outside 1...65535"), message)
+        }
+
+        var badPadding = DexBuilder()
+        badPadding.setClass("LTest;")
+        badPadding.addMethod(.init(
+            name: "badPadding", registers: 1, ins: 0, outs: 0,
+            insns: instructions, isStatic: true,
+            triesCount: 1, tryPadding: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 1)
+                + [0x01, 0x00, 0x03]
+        ))
+        XCTAssertThrowsError(try run(badPadding, method: "badPadding")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("nonzero try-table padding"), message)
+        }
+
+        var overlongCount = DexBuilder()
+        overlongCount.setClass("LTest;")
+        overlongCount.addMethod(.init(
+            name: "overlongCount", registers: 1, ins: 0, outs: 0,
+            insns: instructions, isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 1)
+                + [UInt8](repeating: 0x80, count: 10)
+        ))
+        XCTAssertThrowsError(try run(overlongCount, method: "overlongCount")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("malformed exception table"), message)
+        }
+
+        let outside32 = [UInt8](arrayLiteral: 0x80, 0x80, 0x80, 0x80, 0x10)
+        var wideSignedSize = DexBuilder()
+        wideSignedSize.setClass("LTest;")
+        wideSignedSize.addMethod(.init(
+            name: "wideSignedSize", registers: 1, ins: 0, outs: 0,
+            insns: instructions, isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 1)
+                + [0x01] + outside32
+        ))
+        XCTAssertThrowsError(try run(wideSignedSize, method: "wideSignedSize")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("size is outside SLEB32"), message)
+        }
+
+        var wideAddress = DexBuilder()
+        wideAddress.setClass("LTest;")
+        wideAddress.addMethod(.init(
+            name: "wideAddress", registers: 1, ins: 0, outs: 0,
+            insns: instructions, isStatic: true,
+            triesCount: 1,
+            tryItems: tryItem(start: 1, count: 1, handlerOffset: 1)
+                + [0x01, 0x00] + outside32
+        ))
+        XCTAssertThrowsError(try run(wideAddress, method: "wideAddress")) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected verification error, got \(error)")
+            }
+            XCTAssertTrue(message.contains("address is outside ULEB32"), message)
         }
     }
 
@@ -829,9 +1244,9 @@ final class InterpreterTests: XCTestCase {
     func testRunawayLoopHitsBudget() throws {
         var b = DexBuilder()
         b.setClass("LTest;")
-        // infinite loop: pc0 goto 0
+        // `goto/32` is the one AOSP branch form that permits a zero-offset spin.
         b.addMethod(.init(name: "spin", registers: 1, ins: 0, outs: 0,
-                          insns: Insn.goto(0), isStatic: true))
+                          insns: [0x002a, 0x0000, 0x0000], isStatic: true))
         let dex = try DexFile(b.build())
         let vm = DexInterpreter(dex: dex, maxInstructions: 10_000)
         XCTAssertThrowsError(try vm.call(classDescriptor: "LTest;", method: "spin")) { error in

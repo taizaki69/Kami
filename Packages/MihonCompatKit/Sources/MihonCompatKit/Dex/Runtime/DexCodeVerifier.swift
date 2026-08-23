@@ -1,5 +1,16 @@
 import Foundation
 
+struct DexCatchHandler {
+    let type: String?
+    let address: Int
+}
+
+struct DexTryBlock {
+    let startAddress: Int
+    let endAddress: Int
+    let handlers: [DexCatchHandler]
+}
+
 /// Bounded structural verification for one DEX `code_item` before execution.
 ///
 /// This pass deliberately focuses on geometry and control flow. Register-type
@@ -8,6 +19,8 @@ import Foundation
 /// the wrong payload family merely because that path was not taken at runtime.
 enum DexCodeVerifier {
     static let maximumCodeUnits = 2_000_000
+    static let maximumEncodedHandlers = 65_535
+    static let maximumCatchTypesPerHandler = 65_536
 
     private enum PayloadKind: String {
         case packedSwitch = "packed-switch"
@@ -30,6 +43,7 @@ enum DexCodeVerifier {
         let source: Int
         let offset: Int64
         let name: String
+        let allowsZeroOffset: Bool
     }
 
     private struct PayloadReference {
@@ -38,15 +52,25 @@ enum DexCodeVerifier {
         let expectedKind: PayloadKind
     }
 
+    private struct ExceptionTable {
+        let tryBlocks: [DexTryBlock]
+        let handlerEntries: Set<Int>
+    }
+
     static func verify(
         code: DexFile.CodeItem,
         method: DexFile.EncodedMethod,
         dex: DexFile
-    ) throws {
+    ) throws -> [DexTryBlock] {
         let reference = dex.methodIds[method.methodIndex]
         let context = "\(reference.declaringClass)->\(reference.signature)"
         guard code.insnsCount > 0 else {
             throw VMError.verify("empty code item for \(context)")
+        }
+        guard code.outsSize <= 5 || code.outsSize <= code.registersSize else {
+            throw VMError.verify(
+                "outs_size \(code.outsSize) exceeds registers_size \(code.registersSize) for \(context)"
+            )
         }
         guard code.insnsCount <= maximumCodeUnits else {
             throw VMError.verify(
@@ -105,31 +129,36 @@ enum DexCodeVerifier {
                 branches.append(BranchReference(
                     source: pc,
                     offset: Int64(Int8(bitPattern: UInt8(word >> 8))),
-                    name: "goto"
+                    name: "goto",
+                    allowsZeroOffset: false
                 ))
             case 0x29:
                 branches.append(BranchReference(
                     source: pc,
                     offset: Int64(Int16(bitPattern: units[pc + 1])),
-                    name: "goto/16"
+                    name: "goto/16",
+                    allowsZeroOffset: false
                 ))
             case 0x2a:
                 branches.append(BranchReference(
                     source: pc,
                     offset: signed32(units[pc + 1], units[pc + 2]),
-                    name: "goto/32"
+                    name: "goto/32",
+                    allowsZeroOffset: true
                 ))
             case 0x32...0x37:
                 branches.append(BranchReference(
                     source: pc,
                     offset: Int64(Int16(bitPattern: units[pc + 1])),
-                    name: "if-test"
+                    name: "if-test",
+                    allowsZeroOffset: false
                 ))
             case 0x38...0x3d:
                 branches.append(BranchReference(
                     source: pc,
                     offset: Int64(Int16(bitPattern: units[pc + 1])),
-                    name: "if-testz"
+                    name: "if-testz",
+                    allowsZeroOffset: false
                 ))
             case 0x26:
                 payloadReferences.append(PayloadReference(
@@ -155,6 +184,47 @@ enum DexCodeVerifier {
             pc += width
         }
 
+        var codeBoundaries = instructionStarts
+        codeBoundaries.insert(units.count)
+        let exceptions = try exceptionTable(
+            code: code,
+            dex: dex,
+            units: units,
+            instructionStarts: instructionStarts,
+            codeBoundaries: codeBoundaries,
+            context: context
+        )
+        let tryBlocks = exceptions.tryBlocks
+        let handlerEntries = exceptions.handlerEntries
+        let moveExceptionEntries = Set(handlerEntries.filter { address in
+            UInt8(units[address] & 0xff) == 0x0d
+        })
+        let moveResultEntries = Set(instructions.compactMap { instruction in
+            (0x0a...0x0c).contains(instruction.opcode) ? instruction.address : nil
+        })
+
+        var instructionEndingAt: [Int: InstructionInfo] = [:]
+        instructionEndingAt.reserveCapacity(instructions.count)
+        for instruction in instructions {
+            instructionEndingAt[instruction.address + instruction.width] = instruction
+        }
+        for instruction in instructions where (0x0a...0x0c).contains(instruction.opcode) {
+            guard let producer = instructionEndingAt[instruction.address],
+                  producesResult(producer.opcode, for: instruction.opcode) else {
+                throw VMError.verify(
+                    "move-result opcode 0x\(String(instruction.opcode, radix: 16)) at pc "
+                        + "\(instruction.address) is not immediately after a matching producer in \(context)"
+                )
+            }
+        }
+
+        for instruction in instructions where instruction.opcode == 0x0d
+            && !handlerEntries.contains(instruction.address) {
+            throw VMError.verify(
+                "move-exception at pc \(instruction.address) is not an exception handler entry in \(context)"
+            )
+        }
+
         for instruction in instructions where hasFallthrough(instruction.opcode) {
             let next = instruction.address + instruction.width
             guard next < units.count, instructionStarts.contains(next) else {
@@ -164,14 +234,27 @@ enum DexCodeVerifier {
                         + "falls through to \(destination) in \(context)"
                 )
             }
+            guard !moveExceptionEntries.contains(next) else {
+                throw VMError.verify(
+                    "opcode 0x\(String(instruction.opcode, radix: 16)) at pc \(instruction.address) "
+                        + "falls through into move-exception handler pc \(next) in \(context)"
+                )
+            }
         }
 
         for branch in branches {
+            guard branch.allowsZeroOffset || branch.offset != 0 else {
+                throw VMError.verify(
+                    "\(branch.name) at pc \(branch.source) has forbidden zero offset in \(context)"
+                )
+            }
             _ = try executableTarget(
                 source: branch.source,
                 offset: branch.offset,
                 name: branch.name,
                 instructionStarts: instructionStarts,
+                moveExceptionEntries: moveExceptionEntries,
+                moveResultEntries: moveResultEntries,
                 codeUnitCount: units.count,
                 context: context
             )
@@ -197,9 +280,12 @@ enum DexCodeVerifier {
                 payloadAddress: payloadAddress,
                 units: units,
                 instructionStarts: instructionStarts,
+                moveExceptionEntries: moveExceptionEntries,
+                moveResultEntries: moveResultEntries,
                 context: context
             )
         }
+        return tryBlocks
     }
 
     private static func instructionWidth(
@@ -301,11 +387,214 @@ enum DexCodeVerifier {
         }
     }
 
+    private static func producesResult(_ producer: UInt8, for moveResult: UInt8) -> Bool {
+        let isInvoke = (0x6e...0x72).contains(producer)
+            || (0x74...0x78).contains(producer)
+            || (0xfa...0xfd).contains(producer)
+        if moveResult == 0x0c {
+            return isInvoke || producer == 0x24 || producer == 0x25
+        }
+        return isInvoke
+    }
+
+    private static func exceptionTable(
+        code: DexFile.CodeItem,
+        dex: DexFile,
+        units: [UInt16],
+        instructionStarts: Set<Int>,
+        codeBoundaries: Set<Int>,
+        context: String
+    ) throws -> ExceptionTable {
+        guard code.triesCount > 0 else {
+            return ExceptionTable(tryBlocks: [], handlerEntries: [])
+        }
+
+        do {
+            let instructionBytes = code.insnsCount * 2
+            var triesOffset = code.insnsOffset + instructionBytes
+            if code.insnsCount % 2 == 1 {
+                guard triesOffset <= dex.source.count - 2 else {
+                    throw VMError.verify("truncated try-table padding in \(context)")
+                }
+                let padding = UInt16(dex.source[triesOffset])
+                    | UInt16(dex.source[triesOffset + 1]) << 8
+                guard padding == 0 else {
+                    throw VMError.verify("nonzero try-table padding in \(context)")
+                }
+                triesOffset += 2
+            }
+
+            let tryCount = Int(code.triesCount)
+            let (tryBytes, tryBytesOverflow) = tryCount.multipliedReportingOverflow(by: 8)
+            guard !tryBytesOverflow, triesOffset >= 0,
+                  tryBytes <= dex.source.count,
+                  triesOffset <= dex.source.count - tryBytes else {
+                throw VMError.verify("truncated try-item array in \(context)")
+            }
+
+            var reader = ByteReader(dex.source)
+            try reader.seek(triesOffset)
+            var rawItems: [(start: Int, end: Int, handlerOffset: Int)] = []
+            rawItems.reserveCapacity(tryCount)
+            var previousEnd = 0
+            for index in 0..<tryCount {
+                let startRaw = try reader.u32()
+                let count = Int(try reader.u16())
+                let handlerOffset = Int(try reader.u16())
+                guard UInt64(startRaw) <= UInt64(Int.max) else {
+                    throw VMError.verify("try item \(index) start is too large in \(context)")
+                }
+                let start = Int(startRaw)
+                let (end, endOverflow) = start.addingReportingOverflow(count)
+                guard count > 0, !endOverflow, start < units.count, end <= units.count else {
+                    throw VMError.verify(
+                        "try item \(index) range [\(start), \(end)) is outside the code item in \(context)"
+                    )
+                }
+                guard instructionStarts.contains(start), codeBoundaries.contains(end) else {
+                    throw VMError.verify(
+                        "try item \(index) range [\(start), \(end)) splits an instruction or payload in \(context)"
+                    )
+                }
+                guard index == 0 || start >= previousEnd else {
+                    throw VMError.verify("try items are unsorted or overlapping at pc \(start) in \(context)")
+                }
+                previousEnd = end
+                rawItems.append((start, end, handlerOffset))
+            }
+
+            let handlersBase = reader.offset
+            let listSizeRaw = try reader.uleb128()
+            guard listSizeRaw > 0,
+                  listSizeRaw <= UInt64(UInt32.max),
+                  listSizeRaw <= UInt64(maximumEncodedHandlers),
+                  listSizeRaw <= UInt64(reader.remaining) else {
+                throw VMError.verify(
+                    "encoded catch-handler count \(listSizeRaw) is outside 1...\(maximumEncodedHandlers) in \(context)"
+                )
+            }
+            let listSize = Int(listSizeRaw)
+            var handlersByOffset: [Int: [DexCatchHandler]] = [:]
+            handlersByOffset.reserveCapacity(listSize)
+            var allHandlerEntries: Set<Int> = []
+
+            for index in 0..<listSize {
+                let handlerStart = reader.offset - handlersBase
+                let sizeRaw = try reader.sleb128()
+                guard sizeRaw >= Int64(Int32.min), sizeRaw <= Int64(Int32.max) else {
+                    throw VMError.verify("catch handler \(index) size is outside SLEB32 in \(context)")
+                }
+                let typedCountRaw = sizeRaw < 0 ? -sizeRaw : sizeRaw
+                guard typedCountRaw <= Int64(maximumCatchTypesPerHandler),
+                      typedCountRaw <= Int64(reader.remaining / 2) else {
+                    throw VMError.verify("catch handler \(index) has too many typed entries in \(context)")
+                }
+                let typedCount = Int(typedCountRaw)
+                let hasCatchAll = sizeRaw <= 0
+                var handlers: [DexCatchHandler] = []
+                handlers.reserveCapacity(typedCount + (hasCatchAll ? 1 : 0))
+
+                for _ in 0..<typedCount {
+                    let typeIndexRaw = try reader.uleb128()
+                    let addressRaw = try reader.uleb128()
+                    guard typeIndexRaw <= UInt64(UInt32.max),
+                          typeIndexRaw < UInt64(dex.typeDescriptors.count) else {
+                        throw VMError.verify(
+                            "catch handler \(index) has invalid type index \(typeIndexRaw) in \(context)"
+                        )
+                    }
+                    let typeIndex = Int(typeIndexRaw)
+                    let descriptor = dex.typeDescriptors[typeIndex]
+                    guard descriptor.hasPrefix("L"), descriptor.hasSuffix(";") else {
+                        throw VMError.verify(
+                            "catch handler \(index) type \(descriptor) is not a class in \(context)"
+                        )
+                    }
+                    let address = try exceptionHandlerAddress(
+                        addressRaw,
+                        handlerIndex: index,
+                        units: units,
+                        instructionStarts: instructionStarts,
+                        context: context
+                    )
+                    allHandlerEntries.insert(address)
+                    handlers.append(DexCatchHandler(type: descriptor, address: address))
+                }
+
+                if hasCatchAll {
+                    let addressRaw = try reader.uleb128()
+                    let address = try exceptionHandlerAddress(
+                        addressRaw,
+                        handlerIndex: index,
+                        units: units,
+                        instructionStarts: instructionStarts,
+                        context: context
+                    )
+                    allHandlerEntries.insert(address)
+                    handlers.append(DexCatchHandler(type: nil, address: address))
+                }
+                handlersByOffset[handlerStart] = handlers
+            }
+
+            var result: [DexTryBlock] = []
+            result.reserveCapacity(rawItems.count)
+            for (index, item) in rawItems.enumerated() {
+                guard let handlers = handlersByOffset[item.handlerOffset], !handlers.isEmpty else {
+                    throw VMError.verify(
+                        "try item \(index) references invalid handler offset \(item.handlerOffset) in \(context)"
+                    )
+                }
+                result.append(DexTryBlock(
+                    startAddress: item.start,
+                    endAddress: item.end,
+                    handlers: handlers
+                ))
+            }
+            return ExceptionTable(tryBlocks: result, handlerEntries: allHandlerEntries)
+        } catch let error as VMError {
+            throw error
+        } catch {
+            throw VMError.verify("malformed exception table in \(context): \(error)")
+        }
+    }
+
+    private static func exceptionHandlerAddress(
+        _ rawAddress: UInt64,
+        handlerIndex: Int,
+        units: [UInt16],
+        instructionStarts: Set<Int>,
+        context: String
+    ) throws -> Int {
+        guard rawAddress <= UInt64(UInt32.max), rawAddress <= UInt64(Int.max) else {
+            throw VMError.verify("catch handler \(handlerIndex) address is outside ULEB32 in \(context)")
+        }
+        let address = Int(rawAddress)
+        guard address < units.count, instructionStarts.contains(address) else {
+            throw VMError.verify(
+                "catch handler \(handlerIndex) targets non-instruction pc \(address) in \(context)"
+            )
+        }
+        let opcode = UInt8(units[address] & 0xff)
+        guard !(0x0a...0x0c).contains(opcode) else {
+            throw VMError.verify(
+                "catch handler \(handlerIndex) at pc \(address) begins with move-result in \(context)"
+            )
+        }
+        if opcode == 0x0d, address == 0 {
+            throw VMError.verify(
+                "move-exception handler \(handlerIndex) may not start at method entry pc 0 in \(context)"
+            )
+        }
+        return address
+    }
+
     private static func verifyPayloadTargets(
         _ reference: PayloadReference,
         payloadAddress: Int,
         units: [UInt16],
         instructionStarts: Set<Int>,
+        moveExceptionEntries: Set<Int>,
+        moveResultEntries: Set<Int>,
         context: String
     ) throws {
         switch reference.expectedKind {
@@ -320,6 +609,8 @@ enum DexCodeVerifier {
                     offset: signed32(units[offsetAddress], units[offsetAddress + 1]),
                     name: "packed-switch case",
                     instructionStarts: instructionStarts,
+                    moveExceptionEntries: moveExceptionEntries,
+                    moveResultEntries: moveResultEntries,
                     codeUnitCount: units.count,
                     context: context
                 )
@@ -344,6 +635,8 @@ enum DexCodeVerifier {
                     offset: signed32(units[offsetAddress], units[offsetAddress + 1]),
                     name: "sparse-switch case",
                     instructionStarts: instructionStarts,
+                    moveExceptionEntries: moveExceptionEntries,
+                    moveResultEntries: moveResultEntries,
                     codeUnitCount: units.count,
                     context: context
                 )
@@ -356,6 +649,8 @@ enum DexCodeVerifier {
         offset: Int64,
         name: String,
         instructionStarts: Set<Int>,
+        moveExceptionEntries: Set<Int>,
+        moveResultEntries: Set<Int>,
         codeUnitCount: Int,
         context: String
     ) throws -> Int {
@@ -369,6 +664,16 @@ enum DexCodeVerifier {
         guard instructionStarts.contains(target) else {
             throw VMError.verify(
                 "\(name) at pc \(source) targets non-instruction pc \(target) in \(context)"
+            )
+        }
+        guard !moveExceptionEntries.contains(target) else {
+            throw VMError.verify(
+                "\(name) at pc \(source) targets move-exception pc \(target) in \(context)"
+            )
+        }
+        guard !moveResultEntries.contains(target) else {
+            throw VMError.verify(
+                "\(name) at pc \(source) targets move-result pc \(target) in \(context)"
             )
         }
         return target

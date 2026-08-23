@@ -60,8 +60,9 @@ public final class DexInterpreter {
         case failed(String)
     }
     private var classInitialization: [String: ClassInitializationState] = [:]
-    /// Method indexes whose complete code-item geometry was verified once.
-    private var verifiedCodeMethods: Set<Int> = []
+    /// Method indexes whose complete code-item and exception geometry was
+    /// verified once, mapped to the decoded handlers used during execution.
+    private var verifiedMethods: [Int: [DexTryBlock]] = [:]
     private var lastResult: RVal = .null
     /// Current interpreted-frame depth (recursion guard).
     private var depth = 0
@@ -327,12 +328,6 @@ public final class DexInterpreter {
 
     // MARK: - Execution
 
-    struct TryBlock {
-        let startAddr: Int
-        let endAddr: Int
-        let handlers: [(type: String?, addr: Int)]
-    }
-
     @discardableResult
     func execute(def: DexFile.ClassDef, method: DexFile.EncodedMethod, args: [RVal]) throws -> RVal {
         let ref = dex.methodIds[method.methodIndex]
@@ -368,9 +363,13 @@ public final class DexInterpreter {
         }
         if isRootFrame, entryDepth == 0 { remainingInstructions = maxInstructions }
 
-        if !verifiedCodeMethods.contains(method.methodIndex) {
-            try DexCodeVerifier.verify(code: code, method: method, dex: dex)
-            verifiedCodeMethods.insert(method.methodIndex)
+        let tries: [DexTryBlock]
+        if let verified = verifiedMethods[method.methodIndex] {
+            tries = verified
+        } else {
+            let verified = try DexCodeVerifier.verify(code: code, method: method, dex: dex)
+            verifiedMethods[method.methodIndex] = verified
+            tries = verified
         }
 
         var regs = [RVal](repeating: .int(0), count: Int(code.registersSize))
@@ -384,7 +383,6 @@ public final class DexInterpreter {
             cursor += value.isWide ? 2 : 1
         }
 
-        let tries = Self.parseTries(code, dex: dex)
         var pc = 0
         var pendingException: RVal?
 
@@ -406,11 +404,11 @@ public final class DexInterpreter {
         throw VMError.verify("method \(dex.methodIds[method.methodIndex].name) fell off the end of its code item")
     }
 
-    static func handler(for value: RVal, at pc: Int, in tries: [TryBlock]) -> Int? {
-        for t in tries where pc >= t.startAddr && pc < t.endAddr {
+    static func handler(for value: RVal, at pc: Int, in tries: [DexTryBlock]) -> Int? {
+        for t in tries where pc >= t.startAddress && pc < t.endAddress {
             for h in t.handlers {
                 if h.type == nil || thrownValue(value, isCaughtBy: h.type!) {
-                    return h.addr
+                    return h.address
                 }
             }
         }
@@ -1250,56 +1248,6 @@ public final class DexInterpreter {
             }
             arr.elements[i] = raw
         }
-    }
-
-    // MARK: - try blocks
-
-    static func parseTries(_ code: DexFile.CodeItem, dex: DexFile) -> [TryBlock] {
-        guard code.triesCount > 0 else { return [] }
-        var reader = ByteReader(dex.source)
-        var triesOffset = code.insnsOffset + code.insnsCount * 2
-        if code.insnsCount % 2 == 1 { triesOffset += 2 } // u32 alignment padding
-        guard (try? reader.seek(triesOffset)) != nil else { return [] }
-
-        var items: [TryBlock] = []
-        var handlerOffsets: [Int: [(type: String?, addr: Int)]] = [:]
-        // First pass: raw try items {u4 start, u2 count, u2 handler_off}.
-        var raw: [(start: Int, count: Int, handlerOff: Int)] = []
-        for _ in 0..<code.triesCount {
-            guard let start = try? reader.u32(),
-                  let count = try? reader.u16(),
-                  let handlerOff = try? reader.u16() else { return [] }
-            raw.append((Int(start), Int(count), Int(handlerOff)))
-        }
-        let handlersBase = reader.offset
-        // encoded_catch_handler_list starts with an unsigned handler count.
-        guard let listSizeRaw = try? reader.uleb128(), listSizeRaw <= UInt64(reader.remaining) else { return [] }
-        let listSize = Int(listSizeRaw)
-        for _ in 0..<listSize {
-            let handlerStart = reader.offset - handlersBase
-            guard let sizeRaw = try? reader.sleb128() else { return [] }
-            guard sizeRaw != Int64.min else { return [] }
-            let hasCatchAll = sizeRaw <= 0
-            let typedCount = abs(Int(sizeRaw))
-            var handlers: [(String?, Int)] = []
-            for _ in 0..<typedCount {
-                guard let typeIdx = try? reader.uleb128(),
-                      let addr = try? reader.uleb128() else { return [] }
-                let typeIdxInt = Int(typeIdx)
-                handlers.append((typeIdxInt < dex.typeDescriptors.count ? dex.typeDescriptors[typeIdxInt] : nil, Int(addr)))
-            }
-            if hasCatchAll {
-                guard let addr = try? reader.uleb128() else { return [] }
-                handlers.append((nil, Int(addr)))
-            }
-            handlerOffsets[handlerStart] = handlers
-        }
-        for item in raw {
-            if let handlers = handlerOffsets[item.handlerOff] {
-                items.append(TryBlock(startAddr: item.start, endAddr: item.start + item.count, handlers: handlers))
-            }
-        }
-        return items
     }
 
     // MARK: - type checks / narrowing
