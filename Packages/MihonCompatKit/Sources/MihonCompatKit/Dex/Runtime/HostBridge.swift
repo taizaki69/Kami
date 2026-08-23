@@ -169,6 +169,10 @@ public final class HostBridge {
         }
     }
 
+    private struct KotlinMatchResultBox {
+        let value: String
+    }
+
     private final class ResponseBodyBox {
         let bytes: [UInt8]
         let contentType: String?
@@ -206,6 +210,16 @@ public final class HostBridge {
 
         init(_ value: SChapterCompat = .init()) {
             self.value = value
+        }
+    }
+
+    private final class PageBox {
+        var value: PageCompat
+        var uri: RVal
+
+        init(value: PageCompat, uri: RVal = .null) {
+            self.value = value
+            self.uri = uri
         }
     }
 
@@ -260,6 +274,44 @@ public final class HostBridge {
 
     private struct ArrayListSerializerBox {
         let elementSerializer: RVal
+    }
+
+    private struct JSONStringSerializerBox {}
+
+    private indirect enum JSONEncodedValue {
+        case null
+        case string(String)
+        case int(Int32)
+        case float(Float)
+        case array([JSONEncodedValue])
+        case object([(key: String, value: JSONEncodedValue)])
+    }
+
+    private final class JSONEncodingState {
+        var value: JSONEncodedValue?
+    }
+
+    private final class JSONValueEncoderBox {
+        let state: JSONEncodingState
+        let depth: Int
+
+        init(state: JSONEncodingState, depth: Int) {
+            self.state = state
+            self.depth = depth
+        }
+    }
+
+    private final class JSONCompositeEncoderBox {
+        let state: JSONEncodingState
+        let descriptor: SerialDescriptorBox
+        let depth: Int
+        var values: [Int: JSONEncodedValue] = [:]
+
+        init(state: JSONEncodingState, descriptor: SerialDescriptorBox, depth: Int) {
+            self.state = state
+            self.descriptor = descriptor
+            self.depth = depth
+        }
     }
 
     private struct LocalDateBox {
@@ -464,6 +516,42 @@ public final class HostBridge {
             prototype: "(Ljava/lang/Object;)Ljava/lang/Object;",
             isStatic: true
         ) { _, _ in .null }
+        bridge.register(
+            class: "Lkotlin/io/CloseableKt;",
+            "closeFinally",
+            prototype: "(Ljava/io/Closeable;Ljava/lang/Throwable;)V",
+            isStatic: true
+        ) { vm, args in
+            let operation = "CloseableKt.closeFinally"
+            let closeable = try argument(args, 0, operation)
+            if closeable.isNull { return .null }
+            guard case let .obj(object) = closeable else {
+                throw VMError.verify("\(operation) receiver")
+            }
+            guard let close = bridge.resolve(
+                class: object.dexType,
+                "close",
+                prototype: "()V",
+                isStatic: false
+            ) else {
+                throw VMError.unresolvedMethod(
+                    class: object.dexType,
+                    signature: "close()V"
+                )
+            }
+            let cause = try argument(args, 1, operation)
+            if cause.isNull {
+                _ = try close(vm, [closeable])
+            } else {
+                // Kotlin preserves the primary throwable when cleanup fails.
+                // The suppressed exception list is not otherwise observable
+                // through the current bounded extension surface.
+                do {
+                    _ = try close(vm, [closeable])
+                } catch is DEXThrowable {}
+            }
+            return .null
+        }
 
         // Object identity basics.
         bridge.register(class: "Ljava/lang/Object;", "<init>", prototype: "()V") { _, _ in .null }
@@ -749,6 +837,134 @@ public final class HostBridge {
                 return string(result)
             }
         }
+        for (name, backwards) in [
+            ("startsWith$default", false),
+            ("endsWith$default", true),
+        ] {
+            bridge.register(
+                class: "Lkotlin/text/StringsKt;",
+                name,
+                prototype: "(Ljava/lang/String;Ljava/lang/String;ZILjava/lang/Object;)Z",
+                isStatic: true
+            ) { _, args in
+                let operation = "StringsKt.\(name)"
+                let source = try requiredString(args, 0, operation)
+                let affix = try requiredString(args, 1, operation)
+                guard case let .int(rawIgnoreCase) = try argument(args, 2, operation),
+                      case let .int(mask) = try argument(args, 3, operation) else {
+                    throw VMError.verify("\(operation) arguments")
+                }
+                let maximumBytes = bridge.htmlPolicy.maximumExtractedStringBytes
+                guard source.utf8.count <= maximumBytes,
+                      affix.utf8.count <= maximumBytes else {
+                    throw hostThrowable(
+                        "Ljava/lang/IllegalArgumentException;",
+                        "prefix or suffix input is too long"
+                    )
+                }
+                let ignoreCase = mask & 0x02 != 0 ? false : rawIgnoreCase != 0
+                var options: String.CompareOptions = [.anchored]
+                if ignoreCase { options.insert(.caseInsensitive) }
+                let searchRange: Range<String.Index>
+                if backwards {
+                    options.insert(.backwards)
+                    searchRange = source.startIndex..<source.endIndex
+                } else {
+                    searchRange = source.startIndex..<source.endIndex
+                }
+                let matches = source.range(
+                    of: affix,
+                    options: options,
+                    range: searchRange
+                ) != nil
+                return .int(matches ? 1 : 0)
+            }
+        }
+        bridge.register(
+            class: "Lkotlin/text/StringsKt;",
+            "split$default",
+            prototype: "(Ljava/lang/CharSequence;[Ljava/lang/String;ZIILjava/lang/Object;)Ljava/util/List;",
+            isStatic: true
+        ) { _, args in
+            let operation = "StringsKt.split$default"
+            let source = try requiredString(args, 0, operation)
+            guard case let .arr(delimiterArray) = try argument(args, 1, operation),
+                  case let .int(rawIgnoreCase) = try argument(args, 2, operation),
+                  case let .int(rawLimit) = try argument(args, 3, operation),
+                  case let .int(mask) = try argument(args, 4, operation) else {
+                throw VMError.verify("\(operation) arguments")
+            }
+            try requireCollectionCapacity(delimiterArray.elements.count, operation)
+            let maximumBytes = bridge.htmlPolicy.maximumExtractedStringBytes
+            guard source.utf8.count <= maximumBytes else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "split input is too long"
+                )
+            }
+            let delimiters = try delimiterArray.elements.enumerated().map { index, value in
+                guard let delimiter = stringPayload(value),
+                      delimiter.utf8.count <= bridge.htmlPolicy.maximumSelectorBytes else {
+                    throw VMError.verify("\(operation) delimiter \(index)")
+                }
+                return delimiter
+            }
+            let ignoreCase = mask & 0x02 != 0 ? false : rawIgnoreCase != 0
+            let limit = mask & 0x04 != 0 ? 0 : Int(rawLimit)
+            guard limit >= 0 else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "split limit must be non-negative"
+                )
+            }
+            guard !delimiters.isEmpty else {
+                return hostList([string(source)], isMutable: false)
+            }
+
+            let options: String.CompareOptions = ignoreCase ? [.caseInsensitive] : []
+            var pieces: [RVal] = []
+            var pieceStart = source.startIndex
+            var searchStart = source.startIndex
+            var searchExhausted = false
+            while !searchExhausted && (limit == 0 || pieces.count < limit - 1) {
+                var match: Range<String.Index>?
+                var matchedDelimiterIndex = Int.max
+                for (index, delimiter) in delimiters.enumerated() {
+                    let range: Range<String.Index>?
+                    if delimiter.isEmpty {
+                        range = searchStart..<searchStart
+                    } else {
+                        range = source.range(
+                            of: delimiter,
+                            options: options,
+                            range: searchStart..<source.endIndex
+                        )
+                    }
+                    guard let range else { continue }
+                    if match == nil || range.lowerBound < match!.lowerBound ||
+                        (range.lowerBound == match!.lowerBound && index < matchedDelimiterIndex) {
+                        match = range
+                        matchedDelimiterIndex = index
+                    }
+                }
+                guard let match else { break }
+                pieces.append(string(String(source[pieceStart..<match.lowerBound])))
+                try requireCollectionCapacity(pieces.count + 1, operation)
+                pieceStart = match.upperBound
+                if match.isEmpty {
+                    if searchStart < source.endIndex {
+                        searchStart = source.index(after: searchStart)
+                    } else {
+                        searchExhausted = true
+                    }
+                } else {
+                    searchStart = match.upperBound
+                }
+            }
+            pieces.append(string(String(source[pieceStart...])))
+            try requireCollectionCapacity(pieces.count, operation)
+            return hostList(pieces, isMutable: false)
+        }
         bridge.register(
             class: "Ljava/net/URLEncoder;",
             "encode",
@@ -985,7 +1201,13 @@ public final class HostBridge {
             guard case let .obj(object) = try argument(args, 0, "Regex.<init>") else {
                 throw VMError.verify("Regex constructor receiver")
             }
-            let pattern = vmStringValue(try argument(args, 1, "Regex.<init>"))
+            let pattern = try requiredString(args, 1, "Regex.<init>")
+            guard pattern.utf8.count <= bridge.htmlPolicy.maximumSelectorBytes else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "regex pattern is too long"
+                )
+            }
             do {
                 object.payload = KotlinRegexBox(
                     pattern: pattern,
@@ -995,6 +1217,68 @@ public final class HostBridge {
             } catch {
                 throw DEXThrowable(string("PatternSyntaxException: \(error)"))
             }
+        }
+        bridge.register(
+            class: regex,
+            "find$default",
+            prototype: "(Lkotlin/text/Regex;Ljava/lang/CharSequence;IILjava/lang/Object;)Lkotlin/text/MatchResult;",
+            isStatic: true
+        ) { _, args in
+            let operation = "Regex.find$default"
+            guard case let .obj(regexObject) = try argument(args, 0, operation),
+                  let regexBox = regexObject.payload as? KotlinRegexBox,
+                  case let .int(rawStartIndex) = try argument(args, 2, operation),
+                  case let .int(mask) = try argument(args, 3, operation) else {
+                throw VMError.verify("\(operation) arguments")
+            }
+            let input = try requiredString(args, 1, operation)
+            guard input.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "regex input is too long"
+                )
+            }
+            let startIndex = mask & 0x02 != 0 ? 0 : Int(rawStartIndex)
+            let utf16Count = input.utf16.count
+            guard startIndex >= 0, startIndex <= utf16Count else {
+                throw hostThrowable(
+                    "Ljava/lang/IndexOutOfBoundsException;",
+                    "regex start index is out of bounds"
+                )
+            }
+            let searchRange = NSRange(
+                location: startIndex,
+                length: utf16Count - startIndex
+            )
+            guard let match = regexBox.expression.firstMatch(
+                in: input,
+                range: searchRange
+            ), let range = Range(match.range, in: input) else {
+                return .null
+            }
+            let value = String(input[range])
+            guard value.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "regex match is too long"
+                )
+            }
+            return .obj(ObjInstance(
+                dexType: "Lkotlin/text/MatchResult;",
+                payload: KotlinMatchResultBox(value: value),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: "Lkotlin/text/MatchResult;",
+            "getValue",
+            prototype: "()Ljava/lang/String;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "MatchResult.getValue"),
+                  let match = object.payload as? KotlinMatchResultBox else {
+                throw VMError.verify("MatchResult.getValue receiver")
+            }
+            return string(match.value)
         }
         let sortSelection = "Leu/kanade/tachiyomi/source/model/Filter$Sort$Selection;"
         bridge.objectFactories[sortSelection] = { _ in
@@ -1032,6 +1316,8 @@ public final class HostBridge {
     private static func registerSerializationSurface(_ bridge: HostBridge) {
         let decoder = "Lkotlinx/serialization/encoding/Decoder;"
         let compositeDecoder = "Lkotlinx/serialization/encoding/CompositeDecoder;"
+        let encoder = "Lkotlinx/serialization/encoding/Encoder;"
+        let compositeEncoder = "Lkotlinx/serialization/encoding/CompositeEncoder;"
 
         func serializationThrowable(_ message: String) -> DEXThrowable {
             hostThrowable("Lkotlinx/serialization/SerializationException;", message)
@@ -1087,11 +1373,164 @@ public final class HostBridge {
             ))
         }
 
+        func renderJSON(_ root: JSONEncodedValue) throws -> String {
+            let maximumBytes = bridge.htmlPolicy.maximumExtractedStringBytes
+            var output = ""
+            var outputBytes = 0
+            var nodes = 0
+            var objectMembers = 0
+
+            func append(_ value: String) throws {
+                let total = outputBytes.addingReportingOverflow(value.utf8.count)
+                guard !total.overflow, total.partialValue <= maximumBytes else {
+                    throw serializationThrowable("encoded JSON is too long")
+                }
+                output.append(value)
+                outputBytes = total.partialValue
+            }
+
+            func appendString(_ value: String) throws {
+                guard value.utf8.count <= maximumBytes else {
+                    throw serializationThrowable("JSON string is too long")
+                }
+                try append("\"")
+                for scalar in value.unicodeScalars {
+                    switch scalar.value {
+                    case 0x08: try append("\\b")
+                    case 0x09: try append("\\t")
+                    case 0x0A: try append("\\n")
+                    case 0x0C: try append("\\f")
+                    case 0x0D: try append("\\r")
+                    case 0x22: try append("\\\"")
+                    case 0x5C: try append("\\\\")
+                    case 0x00...0x1F:
+                        try append(String(format: "\\u%04x", scalar.value))
+                    default:
+                        try append(String(scalar))
+                    }
+                }
+                try append("\"")
+            }
+
+            func render(_ value: JSONEncodedValue, depth: Int) throws {
+                nodes += 1
+                guard nodes <= bridge.htmlPolicy.maximumNodes else {
+                    throw serializationThrowable("encoded JSON exceeds node limit")
+                }
+                guard depth <= bridge.htmlPolicy.maximumDepth else {
+                    throw serializationThrowable("encoded JSON exceeds depth limit")
+                }
+                switch value {
+                case .null:
+                    try append("null")
+                case let .string(value):
+                    try appendString(value)
+                case let .int(value):
+                    try append(String(value))
+                case let .float(value):
+                    guard value.isFinite else {
+                        throw serializationThrowable("JSON float is out of range")
+                    }
+                    try append(String(value))
+                case let .array(values):
+                    guard values.count <= bridge.htmlPolicy.maximumNodes else {
+                        throw serializationThrowable("encoded JSON array exceeds element limit")
+                    }
+                    try append("[")
+                    for (index, element) in values.enumerated() {
+                        if index > 0 { try append(",") }
+                        try render(element, depth: depth + 1)
+                    }
+                    try append("]")
+                case let .object(entries):
+                    objectMembers += entries.count
+                    guard objectMembers <= bridge.htmlPolicy.maximumAttributes else {
+                        throw serializationThrowable("encoded JSON exceeds member limit")
+                    }
+                    try append("{")
+                    for (index, entry) in entries.enumerated() {
+                        guard entry.key.utf8.count <= bridge.htmlPolicy.maximumSelectorBytes else {
+                            throw serializationThrowable("encoded JSON object key is too long")
+                        }
+                        if index > 0 { try append(",") }
+                        try appendString(entry.key)
+                        try append(":")
+                        try render(entry.value, depth: depth + 1)
+                    }
+                    try append("}")
+                }
+            }
+
+            try render(root, depth: 1)
+            return output
+        }
+
+        func encoderValue(state: JSONEncodingState, depth: Int) -> RVal {
+            .obj(ObjInstance(
+                dexType: encoder,
+                payload: JSONValueEncoderBox(state: state, depth: depth),
+                isHost: true
+            ))
+        }
+
+        func serialize(
+            _ strategy: RVal,
+            value: RVal,
+            vm: DexInterpreter,
+            depth: Int = 1
+        ) throws -> JSONEncodedValue {
+            guard depth <= bridge.htmlPolicy.maximumDepth else {
+                throw serializationThrowable("encoded JSON exceeds depth limit")
+            }
+            if case let .obj(object) = strategy,
+               object.payload is JSONStringSerializerBox {
+                let value = try requiredString([value], 0, "JSON string encode")
+                guard value.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                    throw serializationThrowable("JSON string is too long")
+                }
+                return .string(value)
+            }
+            if case let .obj(object) = strategy,
+               let listSerializer = object.payload as? ArrayListSerializerBox {
+                let list = try listBox([value], "JSON list encode")
+                try requireCollectionCapacity(list.elements.count, "JSON list encode")
+                return .array(try list.elements.map {
+                    try serialize(
+                        listSerializer.elementSerializer,
+                        value: $0,
+                        vm: vm,
+                        depth: depth + 1
+                    )
+                })
+            }
+            guard case let .obj(serializer) = strategy else {
+                throw serializationThrowable("invalid serialization strategy")
+            }
+            let state = JSONEncodingState()
+            _ = try vm.call(
+                classDescriptor: serializer.dexType,
+                method: "serialize",
+                prototype: "(Lkotlinx/serialization/encoding/Encoder;Ljava/lang/Object;)V",
+                args: [strategy, encoderValue(state: state, depth: depth), value]
+            )
+            guard let encoded = state.value else {
+                throw serializationThrowable("serializer produced no JSON value")
+            }
+            return encoded
+        }
+
         func deserialize(
             _ strategy: RVal,
             value: Any,
             vm: DexInterpreter
         ) throws -> RVal {
+            if case let .obj(object) = strategy,
+               object.payload is JSONStringSerializerBox {
+                guard let value = value as? String else {
+                    throw serializationThrowable("expected JSON string")
+                }
+                return string(value)
+            }
             if case let .obj(object) = strategy,
                let listSerializer = object.payload as? ArrayListSerializerBox {
                 guard let array = value as? [Any] else {
@@ -1142,6 +1581,36 @@ public final class HostBridge {
                 throw serializationThrowable("unexpected null JSON element")
             }
             return value
+        }
+
+        func encodingElement(
+            _ args: [RVal],
+            _ method: String
+        ) throws -> (box: JSONCompositeEncoderBox, index: Int) {
+            guard case let .obj(encoderObject) = try argument(args, 0, method),
+                  let box = encoderObject.payload as? JSONCompositeEncoderBox,
+                  case let .obj(descriptorObject) = try argument(args, 1, method),
+                  let descriptor = descriptorObject.payload as? SerialDescriptorBox,
+                  descriptor === box.descriptor,
+                  case let .int(rawIndex) = try argument(args, 2, method),
+                  rawIndex >= 0,
+                  descriptor.elements.indices.contains(Int(rawIndex)) else {
+                throw serializationThrowable("invalid JSON encoding element")
+            }
+            let index = Int(rawIndex)
+            guard box.values[index] == nil else {
+                throw serializationThrowable("JSON element was encoded more than once")
+            }
+            return (box, index)
+        }
+
+        func setEncodedElement(
+            _ args: [RVal],
+            _ method: String,
+            value: JSONEncodedValue
+        ) throws {
+            let target = try encodingElement(args, method)
+            target.box.values[target.index] = value
         }
 
         let scope = RVal.obj(ObjInstance(
@@ -1241,6 +1710,12 @@ public final class HostBridge {
         }
 
         let arrayListSerializer = "Lkotlinx/serialization/internal/ArrayListSerializer;"
+        let stringSerializer = "Lkotlinx/serialization/internal/StringSerializer;"
+        bridge.staticFields["\(stringSerializer)->INSTANCE"] = .obj(ObjInstance(
+            dexType: stringSerializer,
+            payload: JSONStringSerializerBox(),
+            isHost: true
+        ))
         bridge.objectFactories[arrayListSerializer] = { _ in
             .obj(ObjInstance(dexType: arrayListSerializer, isHost: true))
         }
@@ -1258,6 +1733,18 @@ public final class HostBridge {
             return .null
         }
 
+        bridge.register(
+            class: "Lkotlinx/serialization/json/Json;",
+            "encodeToString",
+            prototype: "(Lkotlinx/serialization/SerializationStrategy;Ljava/lang/Object;)Ljava/lang/String;"
+        ) { vm, args in
+            let encoded = try serialize(
+                try argument(args, 1, "Json.encodeToString"),
+                value: try argument(args, 2, "Json.encodeToString"),
+                vm: vm
+            )
+            return string(try renderJSON(encoded))
+        }
         bridge.register(
             class: "Lkotlinx/serialization/json/Json;",
             "decodeFromString",
@@ -1282,6 +1769,195 @@ public final class HostBridge {
                 value: root,
                 vm: vm
             )
+        }
+        bridge.register(
+            class: "Lkotlinx/serialization/json/okio/OkioStreamsKt;",
+            "decodeFromBufferedSource",
+            prototype: "(Lkotlinx/serialization/json/Json;Lkotlinx/serialization/DeserializationStrategy;Lokio/BufferedSource;)Ljava/lang/Object;",
+            isStatic: true
+        ) { vm, args in
+            let operation = "OkioStreamsKt.decodeFromBufferedSource"
+            guard case let .obj(jsonObject) = try argument(args, 0, operation),
+                  jsonObject.dexType == "Lkotlinx/serialization/json/Json;",
+                  case .obj = try argument(args, 1, operation),
+                  case let .obj(sourceObject) = try argument(args, 2, operation),
+                  sourceObject.dexType == "Lokio/BufferedSource;",
+                  let source = sourceObject.payload as? ResponseBodyBox else {
+                throw VMError.verify("\(operation) arguments")
+            }
+            guard !source.isClosed else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalStateException;",
+                    "decodeFromBufferedSource on closed source"
+                )
+            }
+            let remaining = source.bytes.count - source.offset
+            guard remaining <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                throw serializationThrowable("JSON input is too long")
+            }
+            let bytes = Array(source.bytes[source.offset...])
+            source.offset = source.bytes.count
+            guard let text = String(data: Data(bytes), encoding: .utf8) else {
+                throw serializationThrowable("JSON input is not valid UTF-8")
+            }
+            let root: Any
+            do {
+                root = try JSONSerialization.jsonObject(
+                    with: Data(text.utf8),
+                    options: [.fragmentsAllowed]
+                )
+            } catch {
+                throw serializationThrowable("malformed JSON")
+            }
+            try validateJSON(root)
+            return try deserialize(
+                try argument(args, 1, operation),
+                value: root,
+                vm: vm
+            )
+        }
+
+        bridge.register(
+            class: encoder,
+            "beginStructure",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;)Lkotlinx/serialization/encoding/CompositeEncoder;"
+        ) { _, args in
+            guard case let .obj(valueObject) = try argument(args, 0, "Encoder.beginStructure"),
+                  let value = valueObject.payload as? JSONValueEncoderBox,
+                  case let .obj(descriptorObject) = try argument(
+                    args, 1, "Encoder.beginStructure"
+                  ), let descriptor = descriptorObject.payload as? SerialDescriptorBox,
+                  descriptor.elements.count == descriptor.expectedElementCount else {
+                throw serializationThrowable("invalid JSON object structure")
+            }
+            return .obj(ObjInstance(
+                dexType: compositeEncoder,
+                payload: JSONCompositeEncoderBox(
+                    state: value.state,
+                    descriptor: descriptor,
+                    depth: value.depth
+                ),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: compositeEncoder,
+            "shouldEncodeElementDefault",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)Z"
+        ) { _, args in
+            _ = try encodingElement(args, "CompositeEncoder.shouldEncodeElementDefault")
+            return .int(0)
+        }
+        bridge.register(
+            class: compositeEncoder,
+            "encodeStringElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;ILjava/lang/String;)V"
+        ) { _, args in
+            let value = try requiredString(args, 3, "CompositeEncoder.encodeStringElement")
+            guard value.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                throw serializationThrowable("JSON string is too long")
+            }
+            try setEncodedElement(
+                args,
+                "CompositeEncoder.encodeStringElement",
+                value: .string(value)
+            )
+            return .null
+        }
+        bridge.register(
+            class: compositeEncoder,
+            "encodeIntElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;II)V"
+        ) { _, args in
+            guard case let .int(value) = try argument(
+                args, 3, "CompositeEncoder.encodeIntElement"
+            ) else { throw serializationThrowable("expected JSON integer") }
+            try setEncodedElement(
+                args,
+                "CompositeEncoder.encodeIntElement",
+                value: .int(value)
+            )
+            return .null
+        }
+        bridge.register(
+            class: compositeEncoder,
+            "encodeFloatElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;IF)V"
+        ) { _, args in
+            guard case let .float(value) = try argument(
+                args, 3, "CompositeEncoder.encodeFloatElement"
+            ), value.isFinite else { throw serializationThrowable("expected finite JSON float") }
+            try setEncodedElement(
+                args,
+                "CompositeEncoder.encodeFloatElement",
+                value: .float(value)
+            )
+            return .null
+        }
+        bridge.register(
+            class: compositeEncoder,
+            "encodeSerializableElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;ILkotlinx/serialization/SerializationStrategy;Ljava/lang/Object;)V"
+        ) { vm, args in
+            let target = try encodingElement(args, "CompositeEncoder.encodeSerializableElement")
+            let value = try argument(args, 4, "CompositeEncoder.encodeSerializableElement")
+            guard !value.isNull else {
+                throw serializationThrowable("unexpected null JSON element")
+            }
+            target.box.values[target.index] = try serialize(
+                try argument(args, 3, "CompositeEncoder.encodeSerializableElement"),
+                value: value,
+                vm: vm,
+                depth: target.box.depth + 1
+            )
+            return .null
+        }
+        bridge.register(
+            class: compositeEncoder,
+            "encodeNullableSerializableElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;ILkotlinx/serialization/SerializationStrategy;Ljava/lang/Object;)V"
+        ) { vm, args in
+            let target = try encodingElement(
+                args, "CompositeEncoder.encodeNullableSerializableElement"
+            )
+            let value = try argument(args, 4, "CompositeEncoder.encodeNullableSerializableElement")
+            target.box.values[target.index] = value.isNull
+                ? .null
+                : try serialize(
+                    try argument(args, 3, "CompositeEncoder.encodeNullableSerializableElement"),
+                    value: value,
+                    vm: vm,
+                    depth: target.box.depth + 1
+                )
+            return .null
+        }
+        bridge.register(
+            class: compositeEncoder,
+            "endStructure",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;)V"
+        ) { _, args in
+            guard case let .obj(encoderObject) = try argument(
+                args, 0, "CompositeEncoder.endStructure"
+            ), let box = encoderObject.payload as? JSONCompositeEncoderBox,
+                  case let .obj(descriptorObject) = try argument(
+                    args, 1, "CompositeEncoder.endStructure"
+                  ), let descriptor = descriptorObject.payload as? SerialDescriptorBox,
+                  descriptor === box.descriptor,
+                  box.state.value == nil else {
+                throw serializationThrowable("invalid JSON encoder completion")
+            }
+            let entries = try box.values.keys.sorted().map { index -> (
+                key: String,
+                value: JSONEncodedValue
+            ) in
+                guard descriptor.elements.indices.contains(index),
+                      let value = box.values[index] else {
+                    throw serializationThrowable("invalid encoded JSON element")
+                }
+                return (descriptor.elements[index].name, value)
+            }
+            box.state.value = .object(entries)
+            return .null
         }
 
         bridge.register(
@@ -3585,6 +4261,7 @@ public final class HostBridge {
         let chapterCompanion = "Leu/kanade/tachiyomi/source/model/SChapter$Companion;"
         let mangaUpdate = "Leu/kanade/tachiyomi/source/model/SMangaUpdate;"
         let mangasPage = "Leu/kanade/tachiyomi/source/model/MangasPage;"
+        let page = "Leu/kanade/tachiyomi/source/model/Page;"
 
         func mangaBox(_ args: [RVal], _ method: String, index: Int = 0) throws -> SMangaBox {
             guard case let .obj(object) = try argument(args, index, method),
@@ -3602,6 +4279,14 @@ public final class HostBridge {
             guard case let .obj(object) = try argument(args, index, method),
                   let box = object.payload as? SChapterBox else {
                 throw VMError.verify("\(method) chapter argument")
+            }
+            return box
+        }
+
+        func pageBox(_ args: [RVal], _ method: String, index: Int = 0) throws -> PageBox {
+            guard case let .obj(object) = try argument(args, index, method),
+                  let box = object.payload as? PageBox else {
+                throw VMError.verify("\(method) page argument")
             }
             return box
         }
@@ -3808,6 +4493,89 @@ public final class HostBridge {
             return .null
         }
 
+        bridge.objectFactories[page] = { _ in
+            .obj(ObjInstance(dexType: page, isHost: true))
+        }
+        func initializePage(_ args: [RVal], defaultMaskIndex: Int?) throws -> RVal {
+            let operation = "Page.<init>"
+            guard case let .obj(object) = try argument(args, 0, operation),
+                  case let .int(index) = try argument(args, 1, operation) else {
+                throw VMError.verify("\(operation) arguments")
+            }
+            let mask: Int32
+            if let defaultMaskIndex {
+                guard case let .int(value) = try argument(args, defaultMaskIndex, operation) else {
+                    throw VMError.verify("\(operation) default mask")
+                }
+                mask = value
+            } else {
+                mask = 0
+            }
+            let url = mask & 0x02 != 0
+                ? ""
+                : try requiredString(args, 2, operation)
+            let imageURL = mask & 0x04 != 0
+                ? nil
+                : try optionalString(args, 3, operation)
+            let uri = mask & 0x08 != 0
+                ? RVal.null
+                : try argument(args, 4, operation)
+            let maximumBytes = bridge.htmlPolicy.maximumExtractedStringBytes
+            guard url.utf8.count <= maximumBytes,
+                  (imageURL?.utf8.count ?? 0) <= maximumBytes else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "page URL is too long"
+                )
+            }
+            object.payload = PageBox(
+                value: PageCompat(
+                    index: Int(index),
+                    url: url,
+                    imageURL: imageURL
+                ),
+                uri: uri
+            )
+            return .null
+        }
+        bridge.register(
+            class: page,
+            "<init>",
+            prototype: "(ILjava/lang/String;Ljava/lang/String;Landroid/net/Uri;)V"
+        ) { _, args in
+            try initializePage(args, defaultMaskIndex: nil)
+        }
+        bridge.register(
+            class: page,
+            "<init>",
+            prototype: "(ILjava/lang/String;Ljava/lang/String;Landroid/net/Uri;ILkotlin/jvm/internal/DefaultConstructorMarker;)V"
+        ) { _, args in
+            try initializePage(args, defaultMaskIndex: 5)
+        }
+        for name in ["getIndex", "component1"] {
+            bridge.register(class: page, name, prototype: "()I") { _, args in
+                .int(Int32(clamping: try pageBox(args, "Page.\(name)").value.index))
+            }
+        }
+        for name in ["getUrl", "component2"] {
+            bridge.register(class: page, name, prototype: "()Ljava/lang/String;") { _, args in
+                string(try pageBox(args, "Page.\(name)").value.url)
+            }
+        }
+        for name in ["getImageUrl", "component3"] {
+            bridge.register(class: page, name, prototype: "()Ljava/lang/String;") { _, args in
+                guard let imageURL = try pageBox(args, "Page.\(name)").value.imageURL else {
+                    return .null
+                }
+                return string(imageURL)
+            }
+        }
+        for name in ["getUri", "component4"] {
+            bridge.register(class: page, name, prototype: "()Landroid/net/Uri;") { _, args in
+                try pageBox(args, "Page.\(name)").uri
+            }
+        }
+
         bridge.objectFactories[mangaUpdate] = { _ in
             .obj(ObjInstance(dexType: mangaUpdate, isHost: true))
         }
@@ -3907,6 +4675,24 @@ public final class HostBridge {
         guard case let .obj(object) = value,
               let box = object.payload as? SChapterBox else { return nil }
         return box.value
+    }
+
+    public static func pageCompat(from value: RVal) -> PageCompat? {
+        guard case let .obj(object) = value,
+              let box = object.payload as? PageBox else { return nil }
+        return box.value
+    }
+
+    public static func pagesCompat(from value: RVal) -> [PageCompat]? {
+        guard case let .obj(object) = value,
+              let list = object.payload as? HostListBox else { return nil }
+        var pages: [PageCompat] = []
+        pages.reserveCapacity(list.elements.count)
+        for value in list.elements {
+            guard let page = pageCompat(from: value) else { return nil }
+            pages.append(page)
+        }
+        return pages
     }
 
     public static func mangaUpdateCompat(from value: RVal) -> SMangaUpdateCompat? {

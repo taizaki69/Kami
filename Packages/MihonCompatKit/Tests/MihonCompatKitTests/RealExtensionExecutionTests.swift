@@ -103,6 +103,35 @@ final class RealExtensionExecutionTests: XCTestCase {
         return try method(vm, [])
     }
 
+    private func chapter(
+        url: String,
+        name: String,
+        vm: DexInterpreter
+    ) throws -> RVal {
+        let companion = try XCTUnwrap(
+            vm.bridge.staticFields[
+                "Leu/kanade/tachiyomi/source/model/SChapter;->Companion"
+            ]
+        )
+        let create = try XCTUnwrap(vm.bridge.resolve(
+            class: "Leu/kanade/tachiyomi/source/model/SChapter$Companion;",
+            "create",
+            prototype: "()Leu/kanade/tachiyomi/source/model/SChapter;",
+            isStatic: false
+        ))
+        let value = try create(vm, [companion])
+        for (method, propertyValue) in [("setUrl", url), ("setName", name)] {
+            let setter = try XCTUnwrap(vm.bridge.resolve(
+                class: "Leu/kanade/tachiyomi/source/model/SChapter;",
+                method,
+                prototype: "(Ljava/lang/String;)V",
+                isStatic: false
+            ))
+            _ = try setter(vm, [value, HostBridge.string(propertyValue)])
+        }
+        return value
+    }
+
     /// BatCave 1.6.9 (lib 1.6): getBaseUrl() = const-string/return-object —
     /// the first method from a real extension APK executed by Kami's VM.
     func testBatCaveGetBaseUrl() throws {
@@ -549,6 +578,113 @@ final class RealExtensionExecutionTests: XCTestCase {
                 )],
                 testCase.name
             )
+        }
+    }
+
+    func testBatCavePageListBuildsJSONPostAndParsesImages() async throws {
+        let endpoint = "https://batcave.biz/engine/ajax/controller.php?mod=api&action=reader/getChapterData"
+        let json = #"{"data":{"images":[" /uploads/page-one.jpg ","https://cdn.example/page-two.jpg "]}}"#
+        let transport = StaticTransport(response: CompatHTTPResponse(
+            finalURL: endpoint,
+            statusCode: 200,
+            headers: [CompatHTTPHeader(
+                name: "Content-Type",
+                value: "application/json; charset=utf-8"
+            )],
+            body: Array(json.utf8)
+        ))
+        let (vm, _) = try loadVM("batcave", transport: transport)
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = try vm.instantiate(classDescriptor: cls)
+        let sourceChapter = try chapter(
+            url: "/reader/42/7?token=test",
+            name: "Chapter 1.5",
+            vm: vm
+        )
+
+        let result = try await vm.callAsync(
+            classDescriptor: cls,
+            method: "getPageList",
+            prototype: "(Leu/kanade/tachiyomi/source/model/SChapter;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+            args: [receiver, sourceChapter, .null]
+        )
+        let pages = try XCTUnwrap(HostBridge.pagesCompat(from: result))
+        XCTAssertEqual(pages.count, 2)
+        XCTAssertEqual(pages[0].index, 0)
+        XCTAssertEqual(pages[0].url, "")
+        XCTAssertEqual(
+            pages[0].imageURL,
+            "https://batcave.biz/uploads/page-one.jpg"
+        )
+        XCTAssertEqual(pages[1].index, 1)
+        XCTAssertEqual(pages[1].url, "")
+        XCTAssertEqual(pages[1].imageURL, "https://cdn.example/page-two.jpg")
+
+        let expected = CompatHTTPRequest(
+            url: endpoint,
+            method: "POST",
+            body: .text(
+                value: #"{"news_id":"42","chapter_id":"7"}"#,
+                mediaType: "application/json"
+            )
+        )
+        let requests = await transport.requests()
+        XCTAssertEqual(requests, [expected])
+        XCTAssertEqual(vm.bridge.lastPreparedRequest, expected)
+    }
+
+    func testBatCavePageListRejectsMalformedJSONResponses() async throws {
+        let endpoint = "https://batcave.biz/engine/ajax/controller.php?mod=api&action=reader/getChapterData"
+        let cases: [(name: String, body: [UInt8])] = [
+            ("malformed JSON", Array(#"{"data":}"#.utf8)),
+            ("invalid UTF-8", [0xFF]),
+            ("wrong images type", Array(#"{"data":{"images":"not-an-array"}}"#.utf8)),
+        ]
+
+        for testCase in cases {
+            let transport = StaticTransport(response: CompatHTTPResponse(
+                finalURL: endpoint,
+                statusCode: 200,
+                headers: [CompatHTTPHeader(
+                    name: "Content-Type",
+                    value: "application/json"
+                )],
+                body: testCase.body
+            ))
+            let (vm, _) = try loadVM("batcave", transport: transport)
+            let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+            let receiver = try vm.instantiate(classDescriptor: cls)
+            let sourceChapter = try chapter(
+                url: "/reader/42/7",
+                name: "Chapter 1.5",
+                vm: vm
+            )
+
+            do {
+                _ = try await vm.callAsync(
+                    classDescriptor: cls,
+                    method: "getPageList",
+                    prototype: "(Leu/kanade/tachiyomi/source/model/SChapter;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+                    args: [receiver, sourceChapter, .null]
+                )
+                XCTFail("expected SerializationException for \(testCase.name)")
+            } catch let thrown as DEXThrowable {
+                guard case let .obj(object) = thrown.value else {
+                    return XCTFail("expected typed exception for \(testCase.name): \(thrown)")
+                }
+                XCTAssertEqual(
+                    object.dexType,
+                    "Lkotlinx/serialization/SerializationException;",
+                    testCase.name
+                )
+            } catch {
+                XCTFail("unexpected error for \(testCase.name): \(error)")
+            }
+
+            let requests = await transport.requests()
+            XCTAssertEqual(requests.count, 1, testCase.name)
+            XCTAssertEqual(requests.first?.url, endpoint, testCase.name)
+            XCTAssertEqual(requests.first?.method, "POST", testCase.name)
         }
     }
 

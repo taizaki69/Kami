@@ -350,4 +350,164 @@ final class CompatHTTPRequestTests: XCTestCase {
         )
         XCTAssertEqual(vmStringValue(missing), "unchanged")
     }
+
+    func testKotlinSplitRegexAndAffixHelpersMatchPagePathSemantics() throws {
+        let (vm, bridge) = try makeVM()
+        let splitPrototype = "(Ljava/lang/CharSequence;[Ljava/lang/String;ZIILjava/lang/Object;)Ljava/util/List;"
+        let slash = RVal.arr(ArrInstance(
+            elemDescriptor: "Ljava/lang/String;",
+            elements: [HostBridge.string("/")]
+        ))
+        let parts = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "split$default",
+            prototype: splitPrototype,
+            isStatic: true,
+            args: [
+                HostBridge.string("42/7?token=test"),
+                slash,
+                .int(0),
+                .int(2),
+                .int(0),
+                .null,
+            ]
+        )
+        let first = try invoke(
+            bridge, vm,
+            class: "Ljava/util/List;", "get",
+            prototype: "(I)Ljava/lang/Object;",
+            args: [parts, .int(0)]
+        )
+        let second = try invoke(
+            bridge, vm,
+            class: "Ljava/util/List;", "get",
+            prototype: "(I)Ljava/lang/Object;",
+            args: [parts, .int(1)]
+        )
+        XCTAssertEqual(vmStringValue(first), "42")
+        XCTAssertEqual(vmStringValue(second), "7?token=test")
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Ljava/util/List;", "get",
+            prototype: "(I)Ljava/lang/Object;",
+            args: [parts, .int(2)]
+        ))
+
+        let emptyDelimiter = RVal.arr(ArrInstance(
+            elemDescriptor: "Ljava/lang/String;",
+            elements: [HostBridge.string("")]
+        ))
+        let characters = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "split$default",
+            prototype: splitPrototype,
+            isStatic: true,
+            args: [
+                HostBridge.string("ab"),
+                emptyDelimiter,
+                .int(0),
+                .int(0),
+                .int(0x04),
+                .null,
+            ]
+        )
+        for (index, expected) in ["", "a", "b", ""].enumerated() {
+            let value = try invoke(
+                bridge, vm,
+                class: "Ljava/util/List;", "get",
+                prototype: "(I)Ljava/lang/Object;",
+                args: [characters, .int(Int32(index))]
+            )
+            XCTAssertEqual(vmStringValue(value), expected)
+        }
+
+        let affixPrototype = "(Ljava/lang/String;Ljava/lang/String;ZILjava/lang/Object;)Z"
+        let defaultCaseSensitive = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "startsWith$default",
+            prototype: affixPrototype,
+            isStatic: true,
+            args: [
+                HostBridge.string("HTTPS://cdn/PAGE.JPG"),
+                HostBridge.string("http"),
+                .int(1),
+                .int(0x02),
+                .null,
+            ]
+        )
+        let explicitIgnoreCase = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "startsWith$default",
+            prototype: affixPrototype,
+            isStatic: true,
+            args: [
+                HostBridge.string("HTTPS://cdn/PAGE.JPG"),
+                HostBridge.string("http"),
+                .int(1),
+                .int(0),
+                .null,
+            ]
+        )
+        let suffix = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "endsWith$default",
+            prototype: affixPrototype,
+            isStatic: true,
+            args: [
+                HostBridge.string("HTTPS://cdn/PAGE.JPG"),
+                HostBridge.string(".jpg"),
+                .int(1),
+                .int(0),
+                .null,
+            ]
+        )
+        guard case let .int(defaultResult) = defaultCaseSensitive,
+              case let .int(ignoreCaseResult) = explicitIgnoreCase,
+              case let .int(suffixResult) = suffix else {
+            return XCTFail("expected Kotlin boolean results")
+        }
+        XCTAssertEqual(defaultResult, 0)
+        XCTAssertEqual(ignoreCaseResult, 1)
+        XCTAssertEqual(suffixResult, 1)
+
+        let regexDescriptor = "Lkotlin/text/Regex;"
+        let regex = RVal.obj(ObjInstance(dexType: regexDescriptor, isHost: true))
+        _ = try invoke(
+            bridge, vm,
+            class: regexDescriptor, "<init>",
+            prototype: "(Ljava/lang/String;)V",
+            args: [regex, HostBridge.string(#"^\d+"#)]
+        )
+        let findPrototype = "(Lkotlin/text/Regex;Ljava/lang/CharSequence;IILjava/lang/Object;)Lkotlin/text/MatchResult;"
+        let match = try invoke(
+            bridge, vm,
+            class: regexDescriptor, "find$default",
+            prototype: findPrototype,
+            isStatic: true,
+            args: [regex, HostBridge.string("7?token=test"), .int(99), .int(0x02), .null]
+        )
+        let matchValue = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/MatchResult;", "getValue",
+            prototype: "()Ljava/lang/String;",
+            args: [match]
+        )
+        XCTAssertEqual(vmStringValue(matchValue), "7")
+
+        let noMatch = try invoke(
+            bridge, vm,
+            class: regexDescriptor, "find$default",
+            prototype: findPrototype,
+            isStatic: true,
+            args: [regex, HostBridge.string("chapter-7"), .int(0), .int(0), .null]
+        )
+        XCTAssertTrue(noMatch.isNull)
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: regexDescriptor, "find$default",
+            prototype: findPrototype,
+            isStatic: true,
+            args: [regex, HostBridge.string("7"), .int(2), .int(0), .null]
+        ))
+    }
 }
