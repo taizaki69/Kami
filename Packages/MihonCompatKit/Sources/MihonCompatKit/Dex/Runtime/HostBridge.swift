@@ -4663,6 +4663,28 @@ public final class HostBridge {
         }
     }
 
+    /// Creates host-backed tachiyomix inputs for an interpreted source. These
+    /// values remain confined to that source's serialized runtime owner.
+    static func mangaValue(from value: SMangaCompat) -> RVal {
+        .obj(ObjInstance(
+            dexType: "Leu/kanade/tachiyomi/source/model/SManga;",
+            payload: SMangaBox(value),
+            isHost: true
+        ))
+    }
+
+    static func chapterValue(from value: SChapterCompat) -> RVal {
+        .obj(ObjInstance(
+            dexType: "Leu/kanade/tachiyomi/source/model/SChapter;",
+            payload: SChapterBox(value),
+            isHost: true
+        ))
+    }
+
+    static func emptyListValue() -> RVal {
+        hostList([], isMutable: false)
+    }
+
     /// Converts an interpreted tachiyomix `SManga` host value into the public
     /// app-facing compatibility model.
     public static func mangaCompat(from value: RVal) -> SMangaCompat? {

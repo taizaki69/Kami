@@ -206,6 +206,7 @@ public protocol KamiSource: Sendable {
     func getSearchManga(page: Int, query: String, filters: [SourceFilter]) async throws -> MangasPageCompat
     func getMangaDetails(manga: SMangaCompat) async throws -> SMangaCompat
     func getChapterList(manga: SMangaCompat) async throws -> [SChapterCompat]
+    func getMangaUpdate(manga: SMangaCompat) async throws -> SMangaUpdateCompat
     func getPageList(chapter: SChapterCompat) async throws -> [PageCompat]
     func getImageRequest(page: PageCompat) -> ImageRequest?
     func getFilterList() -> [SourceFilter]
@@ -229,6 +230,11 @@ public extension KamiSource {
         MangasPageCompat(mangas: [], hasNextPage: false)
     }
     func getFilterList() -> [SourceFilter] { [] }
+    func getMangaUpdate(manga: SMangaCompat) async throws -> SMangaUpdateCompat {
+        let details = try await getMangaDetails(manga: manga)
+        let chapters = try await getChapterList(manga: details)
+        return SMangaUpdateCompat(manga: details, chapters: chapters)
+    }
     func getImageRequest(page: PageCompat) -> ImageRequest? {
         guard let url = page.imageURL else { return nil }
         return ImageRequest(url: url)

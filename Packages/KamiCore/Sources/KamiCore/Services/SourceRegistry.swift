@@ -1,9 +1,8 @@
 import Foundation
 import MihonCompatKit
 
-/// Registry of all installed/available sources. Today: native sources only.
-/// The DEX compatibility runtime will register bridged sources here without
-/// the app layer knowing the difference.
+/// Registry of all installed/available sources. Native and interpreted sources
+/// share `KamiSource`, so the app layer does not need source-kind branches.
 @MainActor
 public final class SourceRegistry {
     public private(set) var sources: [any KamiSource] = []
@@ -52,9 +51,9 @@ public struct LibraryService {
             description: stored.descriptionText,
             genres: stored.genres
         )
-        let details = try await source.getMangaDetails(manga: compat)
-        let chapters = try await source.getChapterList(manga: details)
-        compat = details
+        let update = try await source.getMangaUpdate(manga: compat)
+        let chapters = update.chapters
+        compat = update.manga
         compat.initialized = true
 
         stored.title = compat.title
