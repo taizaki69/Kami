@@ -1079,19 +1079,21 @@ final class InterpreterTests: XCTestCase {
         let handlers = [UInt8(1), UInt8(1)]
             + DexBuilder.ULEB.encode(UInt64(exceptionType))
             + DexBuilder.ULEB.encode(8)
+        let instructions: [UInt16] = Insn.newInstance(0, exceptionType) // pc 0...1
+            + Insn.invokeDirect(objectInit, [0])                       // pc 2...4
+            + Insn.throwReg(0)                                         // pc 5
+            + Insn.const4Units(0, 0)                                   // pc 6
+            + Insn.returnReg(0)                                        // pc 7
+            + [0x010d]                                                  // pc 8: move-exception v1
+            + Insn.const4Units(0, 7)                                   // pc 9
+            + Insn.returnReg(0)                                        // pc 10
+        let tryItems = tryItem(start: 5, count: 1, handlerOffset: 1) + handlers
         builder.addMethod(.init(
             name: "typedCatch", registers: 2, ins: 0, outs: 1,
-            insns: Insn.newInstance(0, exceptionType) // pc 0...1
-                + Insn.invokeDirect(objectInit, [0])  // pc 2...4
-                + Insn.throwReg(0)                    // pc 5
-                + Insn.const4Units(0, 0)              // pc 6
-                + Insn.returnReg(0)                   // pc 7
-                + [0x010d]                            // pc 8: move-exception v1
-                + Insn.const4Units(0, 7)              // pc 9
-                + Insn.returnReg(0),                  // pc 10
+            insns: instructions,
             isStatic: true, returnType: "I",
             triesCount: 1,
-            tryItems: tryItem(start: 5, count: 1, handlerOffset: 1) + handlers
+            tryItems: tryItems
         ))
 
         XCTAssertEqual(int(try run(builder, method: "typedCatch")), 7)
