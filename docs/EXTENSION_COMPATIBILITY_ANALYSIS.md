@@ -234,8 +234,9 @@ simplest `ParsedHttpSource` shapes; cannot be the general strategy.
 4. **DEX interpreter track** (`MihonCompatKit/Dex/Runtime`): the initial M1
    engine now executes pinned real constructors and metadata getters. A
    bounded pre-execution verifier covers instruction/payload geometry and
-   control-flow targets; register typing, exception-table validation, and
-   growing opcode and host-API coverage remain driven by the audit corpus.
+   control-flow targets plus strict try/catch table decoding; register typing,
+   resolved catch-type assignability, and growing opcode and host-API coverage
+   remain driven by the audit corpus.
    This is the long-running engineering track; see
    `EXTENSION_RUNTIME.md` for the staged plan and honest status.
 5. **Backup import** (.tachibk protobuf+zstd) independent of the runtime, so users
