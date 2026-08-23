@@ -158,34 +158,51 @@ final class RealExtensionExecutionTests: XCTestCase {
     }
 
     /// A deterministic fake response proves that the real suspend call crosses
-    /// the injected transport, resumes its complete DEX call stack, and reaches
-    /// the next honest compatibility boundary without live network traffic.
-    func testBatCavePopularResumesAfterTransportAndStopsAtJsoup() async throws {
+    /// the injected transport, resumes its complete DEX call stack, parses the
+    /// source's production selectors, and returns app-facing manga models.
+    func testBatCavePopularParsesMangasPageAfterTransport() async throws {
+        let html = """
+        <html><body>
+        <div id="dle-content">
+          <article class="readed">
+            <div class="readed__title"><a href="/comic/alpha?from=popular#top">Alpha &amp; Omega</a></div>
+            <img data-src="/uploads/alpha.jpg">
+          </article>
+          <article class="readed">
+            <div class="readed__title"><a href="https://mirror.example/series/beta">Beta</a></div>
+            <img data-src="https://images.example/beta.png">
+          </article>
+        </div>
+        <div class="pagination__pages"><span>1</span><a href="/comix/page/2/">2</a></div>
+        </body></html>
+        """
         let transport = StaticTransport(response: CompatHTTPResponse(
             finalURL: "https://batcave.biz/comix/",
             statusCode: 200,
             headers: [CompatHTTPHeader(name: "Content-Type", value: "text/html; charset=utf-8")],
-            body: Array("<html><body></body></html>".utf8)
+            body: Array(html.utf8)
         ))
         let (vm, _) = try loadVM("batcave", transport: transport)
         let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
         let receiver = try vm.instantiate(classDescriptor: cls)
 
-        do {
-            _ = try await vm.callAsync(
-                classDescriptor: cls,
-                method: "getPopularManga",
-                prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;",
-                args: [receiver, .int(1), .null]
-            )
-            XCTFail("expected the next exact parser boundary")
-        } catch let VMError.unresolvedMethod(classDescriptor, signature) {
-            XCTAssertEqual(classDescriptor, "Leu/kanade/tachiyomi/util/JsoupExtensionsKt;")
-            XCTAssertEqual(
-                signature,
-                "asJsoup$default(Lokhttp3/Response;Ljava/lang/String;ILjava/lang/Object;)Lorg/jsoup/nodes/Document;"
-            )
+        let result = try await vm.callAsync(
+            classDescriptor: cls,
+            method: "getPopularManga",
+            prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+            args: [receiver, .int(1), .null]
+        )
+        guard let page = HostBridge.mangasPageCompat(from: result) else {
+            return XCTFail("expected a converted MangasPage, got \(result)")
         }
+        XCTAssertEqual(page.mangas.count, 2)
+        XCTAssertEqual(page.mangas[0].url, "/comic/alpha?from=popular#top")
+        XCTAssertEqual(page.mangas[0].title, "Alpha & Omega")
+        XCTAssertEqual(page.mangas[0].thumbnailURL, "https://batcave.biz/uploads/alpha.jpg")
+        XCTAssertEqual(page.mangas[1].url, "/series/beta")
+        XCTAssertEqual(page.mangas[1].title, "Beta")
+        XCTAssertEqual(page.mangas[1].thumbnailURL, "https://images.example/beta.png")
+        XCTAssertTrue(page.hasNextPage)
 
         let expected = CompatHTTPRequest(
             url: "https://batcave.biz/comix/",

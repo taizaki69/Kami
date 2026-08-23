@@ -375,6 +375,21 @@ struct DexTypeHierarchy {
         classType("Ljava/util/AbstractSet;", superclass: "Ljava/util/AbstractCollection;", interfaces: ["Ljava/util/Set;"])
         classType("Ljava/util/AbstractMap;", interfaces: ["Ljava/util/Map;"])
         classType("Ljava/util/ArrayList;", superclass: "Ljava/util/AbstractList;", interfaces: [cloneable, serializable])
+        classType(
+            "Lorg/jsoup/select/Elements;",
+            superclass: "Ljava/util/ArrayList;"
+        )
+        classType("Lorg/jsoup/nodes/Element;")
+        classType(
+            "Lorg/jsoup/nodes/Document;",
+            superclass: "Lorg/jsoup/nodes/Element;"
+        )
+        interfaceType(
+            "Leu/kanade/tachiyomi/source/model/SManga;",
+            extends: [serializable]
+        )
+        classType("Leu/kanade/tachiyomi/source/model/SManga$Companion;")
+        classType("Leu/kanade/tachiyomi/source/model/MangasPage;")
         classType("Ljava/util/LinkedList;", superclass: "Ljava/util/AbstractList;", interfaces: ["Ljava/util/List;", cloneable, serializable])
         classType("Ljava/util/HashSet;", superclass: "Ljava/util/AbstractSet;", interfaces: [cloneable, serializable])
         classType("Ljava/util/LinkedHashSet;", superclass: "Ljava/util/HashSet;")

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftSoup
 
 /// Host method bridge: the only path from interpreted DEX to native Swift
 /// (mission §23). Registrations are explicit; the VM never hardcodes classes.
@@ -192,6 +193,19 @@ public final class HostBridge {
         }
     }
 
+    private final class SMangaBox {
+        var value: SMangaCompat
+
+        init(_ value: SMangaCompat = .init()) {
+            self.value = value
+        }
+    }
+
+    private struct MangasPageBox {
+        let mangas: [RVal]
+        let hasNextPage: Bool
+    }
+
     private final class OkHttpClientBox {
         let interceptors: [RVal]
         let networkInterceptors: [RVal]
@@ -224,6 +238,7 @@ public final class HostBridge {
     /// state and share only this bridge's explicitly injected transport.
     private var sourceNetworks: [ObjectIdentifier: RVal] = [:]
     private let transport: (any CompatHTTPTransport)?
+    private let htmlPolicy: CompatHTMLPolicy
 
     /// Most recent request handed to OkHttpClient.newCall. This is an inert,
     /// transport-neutral value: reaching it never performs network I/O.
@@ -235,8 +250,12 @@ public final class HostBridge {
     /// new-instance factories for host classes (StringBuilder, …).
     public var objectFactories: [String: (DexInterpreter) throws -> RVal] = [:]
 
-    public init(transport: (any CompatHTTPTransport)? = nil) {
+    public init(
+        transport: (any CompatHTTPTransport)? = nil,
+        htmlPolicy: CompatHTMLPolicy = .init()
+    ) {
         self.transport = transport
+        self.htmlPolicy = htmlPolicy
     }
 
     public func register(class descriptor: String, _ methodName: String,
@@ -308,8 +327,11 @@ public final class HostBridge {
 
     /// Registers the minimal M1 host surface: Intrinsics null-checks and the
     /// object/String basics that real extension methods hit immediately.
-    public static func minimal(transport: (any CompatHTTPTransport)? = nil) -> HostBridge {
-        let bridge = HostBridge(transport: transport)
+    public static func minimal(
+        transport: (any CompatHTTPTransport)? = nil,
+        htmlPolicy: CompatHTMLPolicy = .init()
+    ) -> HostBridge {
+        let bridge = HostBridge(transport: transport, htmlPolicy: htmlPolicy)
 
         // Kotlin null checks are common in generated extension bytecode. They
         // return void for non-null values and surface a DEX exception for null.
@@ -790,6 +812,8 @@ public final class HostBridge {
         Self.registerKotlinDurationSurface(bridge)
         Self.registerOkHttpRequestSurface(bridge)
         Self.registerOkHttpResponseSurface(bridge)
+        Self.registerHTMLSurface(bridge)
+        Self.registerSourceModelSurface(bridge)
         bridge.register(
             class: "Ljava/time/format/DateTimeFormatter;",
             "ofPattern",
@@ -962,6 +986,16 @@ public final class HostBridge {
             if value.isNull {
                 throw DEXThrowable(string("NullPointerException: \(method) argument \(index)"))
             }
+            throw VMError.verify("\(method) argument \(index) is not java.lang.String")
+        }
+        return result
+    }
+
+    private static func optionalString(_ args: [RVal], _ index: Int,
+                                       _ method: String) throws -> String? {
+        let value = try argument(args, index, method)
+        if value.isNull { return nil }
+        guard let result = stringPayload(value) else {
             throw VMError.verify("\(method) argument \(index) is not java.lang.String")
         }
         return result
@@ -2579,6 +2613,442 @@ public final class HostBridge {
             }
             return .int(code)
         }
+    }
+
+    private static func registerHTMLSurface(_ bridge: HostBridge) {
+        let document = "Lorg/jsoup/nodes/Document;"
+        let element = "Lorg/jsoup/nodes/Element;"
+        let elements = "Lorg/jsoup/select/Elements;"
+        let jsoupExtensions = "Leu/kanade/tachiyomi/util/JsoupExtensionsKt;"
+
+        func box(_ args: [RVal], _ method: String) throws -> CompatHTMLElementBox {
+            guard case let .obj(object) = try argument(args, 0, method),
+                  let value = object.payload as? CompatHTMLElementBox else {
+                throw VMError.verify("\(method) receiver")
+            }
+            return value
+        }
+
+        func value(
+            _ node: SwiftSoup.Element,
+            context: CompatHTMLContext,
+            descriptor: String = element
+        ) -> RVal {
+            .obj(ObjInstance(
+                dexType: descriptor,
+                payload: CompatHTMLElementBox(context: context, element: node),
+                isHost: true
+            ))
+        }
+
+        func list(_ nodes: [SwiftSoup.Element], context: CompatHTMLContext) -> RVal {
+            hostList(
+                nodes.map { value($0, context: context) },
+                isMutable: false,
+                descriptor: elements
+            )
+        }
+
+        func parseResponse(_ responseValue: RVal, htmlOverride: RVal) throws -> RVal {
+            guard case let .obj(responseObject) = responseValue,
+                  let response = responseObject.payload as? ResponseBox else {
+                throw VMError.verify("JsoupExtensions.asJsoup response")
+            }
+
+            let html: String
+            if htmlOverride.isNull {
+                guard case let .obj(bodyObject) = response.body,
+                      let body = bodyObject.payload as? ResponseBodyBox else {
+                    throw VMError.verify("JsoupExtensions.asJsoup response body")
+                }
+                guard !body.isClosed else {
+                    throw hostThrowable(
+                        "Ljava/lang/IllegalStateException;",
+                        "response body is closed"
+                    )
+                }
+                let bytes = Array(body.bytes[body.offset...])
+                body.offset = body.bytes.count
+                body.isClosed = true
+                html = decodeResponseBody(bytes, contentType: body.contentType)
+            } else {
+                html = try requiredString([htmlOverride], 0, "JsoupExtensions.asJsoup html")
+            }
+
+            do {
+                let context = try CompatHTMLParser.parse(
+                    html,
+                    baseURL: response.value.finalURL,
+                    policy: bridge.htmlPolicy
+                )
+                return value(context.document, context: context, descriptor: document)
+            } catch {
+                throw htmlThrowable(error)
+            }
+        }
+
+        bridge.register(
+            class: jsoupExtensions,
+            "asJsoup",
+            prototype: "(Lokhttp3/Response;Ljava/lang/String;)Lorg/jsoup/nodes/Document;",
+            isStatic: true
+        ) { _, args in
+            try parseResponse(
+                try argument(args, 0, "JsoupExtensions.asJsoup"),
+                htmlOverride: try argument(args, 1, "JsoupExtensions.asJsoup")
+            )
+        }
+        bridge.register(
+            class: jsoupExtensions,
+            "asJsoup$default",
+            prototype: "(Lokhttp3/Response;Ljava/lang/String;ILjava/lang/Object;)Lorg/jsoup/nodes/Document;",
+            isStatic: true
+        ) { _, args in
+            guard case let .int(mask) = try argument(args, 2, "JsoupExtensions.asJsoup$default") else {
+                throw VMError.verify("JsoupExtensions.asJsoup$default mask")
+            }
+            let override = mask & 1 == 0
+                ? try argument(args, 1, "JsoupExtensions.asJsoup$default")
+                : RVal.null
+            return try parseResponse(
+                try argument(args, 0, "JsoupExtensions.asJsoup$default"),
+                htmlOverride: override
+            )
+        }
+
+        for descriptor in [document, element] {
+            bridge.register(
+                class: descriptor,
+                "select",
+                prototype: "(Ljava/lang/String;)Lorg/jsoup/select/Elements;"
+            ) { _, args in
+                let receiver = try box(args, "\(descriptor).select")
+                let query = try requiredString(args, 1, "\(descriptor).select")
+                do {
+                    return try list(
+                        receiver.context.select(receiver.element, query: query),
+                        context: receiver.context
+                    )
+                } catch {
+                    throw htmlThrowable(error)
+                }
+            }
+            bridge.register(
+                class: descriptor,
+                "selectFirst",
+                prototype: "(Ljava/lang/String;)Lorg/jsoup/nodes/Element;"
+            ) { _, args in
+                let receiver = try box(args, "\(descriptor).selectFirst")
+                let query = try requiredString(args, 1, "\(descriptor).selectFirst")
+                do {
+                    guard let first = try receiver.context.select(
+                        receiver.element,
+                        query: query
+                    ).first else { return .null }
+                    return value(first, context: receiver.context)
+                } catch {
+                    throw htmlThrowable(error)
+                }
+            }
+        }
+
+        bridge.register(class: document, "location", prototype: "()Ljava/lang/String;") { _, args in
+            let receiver = try box(args, "Document.location")
+            do {
+                return string(try receiver.context.boundedString(
+                    receiver.context.document.location()
+                ))
+            } catch {
+                throw htmlThrowable(error)
+            }
+        }
+
+        let stringMethods: [(name: String, prototype: String, body: (SwiftSoup.Element) throws -> String)] = [
+            ("attr", "(Ljava/lang/String;)Ljava/lang/String;", { _ in "" }),
+            ("absUrl", "(Ljava/lang/String;)Ljava/lang/String;", { _ in "" }),
+            ("data", "()Ljava/lang/String;", { $0.data() }),
+            ("ownText", "()Ljava/lang/String;", { $0.ownText() }),
+            ("tagName", "()Ljava/lang/String;", { $0.tagName() }),
+            ("text", "()Ljava/lang/String;", { try $0.text() }),
+        ]
+        for method in stringMethods {
+            bridge.register(class: element, method.name, prototype: method.prototype) { _, args in
+                let receiver = try box(args, "Element.\(method.name)")
+                do {
+                    let result: String
+                    switch method.name {
+                    case "attr":
+                        result = try receiver.element.attr(
+                            requiredString(args, 1, "Element.attr")
+                        )
+                    case "absUrl":
+                        result = try receiver.element.absUrl(
+                            requiredString(args, 1, "Element.absUrl")
+                        )
+                    default:
+                        result = try method.body(receiver.element)
+                    }
+                    return string(try receiver.context.boundedString(result))
+                } catch {
+                    throw htmlThrowable(error)
+                }
+            }
+        }
+        bridge.register(
+            class: element,
+            "children",
+            prototype: "()Lorg/jsoup/select/Elements;"
+        ) { _, args in
+            let receiver = try box(args, "Element.children")
+            return list(receiver.element.children().array(), context: receiver.context)
+        }
+
+        bridge.register(class: elements, "last", prototype: "()Lorg/jsoup/nodes/Element;") { _, args in
+            try listBox(args, "Elements.last").elements.last ?? .null
+        }
+        bridge.register(class: elements, "first", prototype: "()Lorg/jsoup/nodes/Element;") { _, args in
+            try listBox(args, "Elements.first").elements.first ?? .null
+        }
+        bridge.register(class: elements, "size", prototype: "()I") { _, args in
+            .int(Int32(clamping: try listBox(args, "Elements.size").elements.count))
+        }
+    }
+
+    private static func registerSourceModelSurface(_ bridge: HostBridge) {
+        let smanga = "Leu/kanade/tachiyomi/source/model/SManga;"
+        let companion = "Leu/kanade/tachiyomi/source/model/SManga$Companion;"
+        let mangasPage = "Leu/kanade/tachiyomi/source/model/MangasPage;"
+
+        func mangaBox(_ args: [RVal], _ method: String, index: Int = 0) throws -> SMangaBox {
+            guard case let .obj(object) = try argument(args, index, method),
+                  let box = object.payload as? SMangaBox else {
+                throw VMError.verify("\(method) manga argument")
+            }
+            return box
+        }
+
+        let companionValue = RVal.obj(ObjInstance(dexType: companion, isHost: true))
+        bridge.staticFields["\(smanga)->Companion"] = companionValue
+        bridge.register(class: companion, "create", prototype: "()Leu/kanade/tachiyomi/source/model/SManga;") {
+            _, _ in
+            .obj(ObjInstance(dexType: smanga, payload: SMangaBox(), isHost: true))
+        }
+
+        let stringProperties: [(suffix: String, keyPath: WritableKeyPath<SMangaCompat, String>)] = [
+            ("Url", \.url),
+            ("Title", \.title),
+        ]
+        for property in stringProperties {
+            bridge.register(
+                class: smanga,
+                "set\(property.suffix)",
+                prototype: "(Ljava/lang/String;)V"
+            ) { _, args in
+                let box = try mangaBox(args, "SManga.set\(property.suffix)")
+                box.value[keyPath: property.keyPath] = try requiredString(
+                    args,
+                    1,
+                    "SManga.set\(property.suffix)"
+                )
+                return .null
+            }
+            bridge.register(
+                class: smanga,
+                "get\(property.suffix)",
+                prototype: "()Ljava/lang/String;"
+            ) { _, args in
+                string(try mangaBox(args, "SManga.get\(property.suffix)").value[
+                    keyPath: property.keyPath
+                ])
+            }
+        }
+
+        bridge.register(
+            class: smanga,
+            "setThumbnail_url",
+            prototype: "(Ljava/lang/String;)V"
+        ) { _, args in
+            let box = try mangaBox(args, "SManga.setThumbnail_url")
+            box.value.thumbnailURL = try optionalString(args, 1, "SManga.setThumbnail_url")
+            return .null
+        }
+        bridge.register(
+            class: smanga,
+            "getThumbnail_url",
+            prototype: "()Ljava/lang/String;"
+        ) { _, args in
+            guard let value = try mangaBox(args, "SManga.getThumbnail_url").value.thumbnailURL else {
+                return .null
+            }
+            return string(value)
+        }
+        bridge.register(class: smanga, "setStatus", prototype: "(I)V") { _, args in
+            let box = try mangaBox(args, "SManga.setStatus")
+            guard case let .int(rawValue) = try argument(args, 1, "SManga.setStatus") else {
+                throw VMError.verify("SManga.setStatus value")
+            }
+            box.value.status = MangaStatus(rawValue: Int(rawValue)) ?? .unknown
+            return .null
+        }
+        bridge.register(class: smanga, "getStatus", prototype: "()I") { _, args in
+            .int(Int32(try mangaBox(args, "SManga.getStatus").value.status.rawValue))
+        }
+        bridge.register(class: smanga, "setInitialized", prototype: "(Z)V") { _, args in
+            let box = try mangaBox(args, "SManga.setInitialized")
+            guard case let .int(value) = try argument(args, 1, "SManga.setInitialized") else {
+                throw VMError.verify("SManga.setInitialized value")
+            }
+            box.value.initialized = value != 0
+            return .null
+        }
+        bridge.register(class: smanga, "getInitialized", prototype: "()Z") { _, args in
+            .int(try mangaBox(args, "SManga.getInitialized").value.initialized ? 1 : 0)
+        }
+
+        let optionalProperties: [(suffix: String, keyPath: WritableKeyPath<SMangaCompat, String?>)] = [
+            ("Artist", \.artist),
+            ("Author", \.author),
+            ("Description", \.description),
+        ]
+        for property in optionalProperties {
+            bridge.register(
+                class: smanga,
+                "set\(property.suffix)",
+                prototype: "(Ljava/lang/String;)V"
+            ) { _, args in
+                let box = try mangaBox(args, "SManga.set\(property.suffix)")
+                box.value[keyPath: property.keyPath] = try optionalString(
+                    args,
+                    1,
+                    "SManga.set\(property.suffix)"
+                )
+                return .null
+            }
+            bridge.register(
+                class: smanga,
+                "get\(property.suffix)",
+                prototype: "()Ljava/lang/String;"
+            ) { _, args in
+                guard let value = try mangaBox(args, "SManga.get\(property.suffix)").value[
+                    keyPath: property.keyPath
+                ] else { return .null }
+                return string(value)
+            }
+        }
+        bridge.register(class: smanga, "setGenre", prototype: "(Ljava/lang/String;)V") { _, args in
+            let box = try mangaBox(args, "SManga.setGenre")
+            box.value.genres = try optionalString(args, 1, "SManga.setGenre")?.split(
+                separator: ","
+            ).map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            }.filter { !$0.isEmpty } ?? []
+            return .null
+        }
+        bridge.register(class: smanga, "getGenre", prototype: "()Ljava/lang/String;") { _, args in
+            let genres = try mangaBox(args, "SManga.getGenre").value.genres
+            return genres.isEmpty ? .null : string(genres.joined(separator: ", "))
+        }
+
+        bridge.register(
+            class: "Leu/kanade/tachiyomi/source/online/HttpSource;",
+            "setUrlWithoutDomain",
+            prototype: "(Leu/kanade/tachiyomi/source/model/SManga;Ljava/lang/String;)V"
+        ) { _, args in
+            let box = try mangaBox(args, "HttpSource.setUrlWithoutDomain", index: 1)
+            let rawURL = try requiredString(args, 2, "HttpSource.setUrlWithoutDomain")
+            guard rawURL.utf8.count <= 8_192 else {
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "manga URL is too long")
+            }
+            box.value.url = urlWithoutDomain(rawURL)
+            return .null
+        }
+
+        bridge.objectFactories[mangasPage] = { _ in
+            .obj(ObjInstance(dexType: mangasPage, isHost: true))
+        }
+        bridge.register(
+            class: mangasPage,
+            "<init>",
+            prototype: "(Ljava/util/List;Z)V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "MangasPage.<init>"),
+                  case let .int(hasNextPage) = try argument(args, 2, "MangasPage.<init>") else {
+                throw VMError.verify("MangasPage constructor arguments")
+            }
+            let mangas = try listBox(args, "MangasPage.<init>", index: 1).elements
+            try requireCollectionCapacity(mangas.count, "MangasPage.<init>")
+            object.payload = MangasPageBox(
+                mangas: mangas,
+                hasNextPage: hasNextPage != 0
+            )
+            return .null
+        }
+        for name in ["getMangas", "component1"] {
+            bridge.register(
+                class: mangasPage,
+                name,
+                prototype: "()Ljava/util/List;"
+            ) { _, args in
+                guard case let .obj(object) = try argument(args, 0, "MangasPage.\(name)"),
+                      let box = object.payload as? MangasPageBox else {
+                    throw VMError.verify("MangasPage.\(name) receiver")
+                }
+                return hostList(box.mangas, isMutable: false)
+            }
+        }
+        for name in ["getHasNextPage", "component2"] {
+            bridge.register(class: mangasPage, name, prototype: "()Z") { _, args in
+                guard case let .obj(object) = try argument(args, 0, "MangasPage.\(name)"),
+                      let box = object.payload as? MangasPageBox else {
+                    throw VMError.verify("MangasPage.\(name) receiver")
+                }
+                return .int(box.hasNextPage ? 1 : 0)
+            }
+        }
+    }
+
+    /// Converts an interpreted tachiyomix `SManga` host value into the public
+    /// app-facing compatibility model.
+    public static func mangaCompat(from value: RVal) -> SMangaCompat? {
+        guard case let .obj(object) = value,
+              let box = object.payload as? SMangaBox else { return nil }
+        return box.value
+    }
+
+    /// Converts an interpreted tachiyomix `MangasPage` host value into the
+    /// public app-facing compatibility model without silently dropping entries.
+    public static func mangasPageCompat(from value: RVal) -> MangasPageCompat? {
+        guard case let .obj(object) = value,
+              let box = object.payload as? MangasPageBox else { return nil }
+        var mangas: [SMangaCompat] = []
+        mangas.reserveCapacity(box.mangas.count)
+        for manga in box.mangas {
+            guard let converted = mangaCompat(from: manga) else { return nil }
+            mangas.append(converted)
+        }
+        return MangasPageCompat(mangas: mangas, hasNextPage: box.hasNextPage)
+    }
+
+    private static func hostThrowable(_ descriptor: String, _ message: String) -> DEXThrowable {
+        DEXThrowable(.obj(ObjInstance(
+            dexType: descriptor,
+            payload: message,
+            isHost: true
+        )))
+    }
+
+    private static func htmlThrowable(_ error: Swift.Error) -> DEXThrowable {
+        let message = (error as? CompatHTMLError)?.description ?? "HTML operation failed"
+        return hostThrowable("Ljava/lang/IllegalArgumentException;", message)
+    }
+
+    private static func urlWithoutDomain(_ rawURL: String) -> String {
+        let escaped = rawURL.replacingOccurrences(of: " ", with: "%20")
+        guard let components = URLComponents(string: escaped) else { return rawURL }
+        var result = components.path
+        if let query = components.query { result += "?" + query }
+        if let fragment = components.fragment { result += "#" + fragment }
+        return result
     }
 
     private static func execute(

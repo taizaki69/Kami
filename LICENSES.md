@@ -12,9 +12,13 @@ all Swift sources in this repository.
   action for analysis/testing; never bundled.
 
 ## Runtime dependencies
-None. SQLite via the system library; no third-party SPM packages. If a zstd
-decoder or HTML parser is vendored later, their licenses must be recorded
-here before merge (candidates under review: Apache-2.0 or MIT options only).
+- **SwiftSoup 2.9.6** — MIT license. Used as the bounded HTML parser and CSS
+  selector engine behind the Jsoup compatibility bridge. Source:
+  <https://github.com/scinfu/SwiftSoup/tree/2.9.6>.
+- SQLite via the system library.
+
+If a zstd decoder or another runtime dependency is added later, its license
+must be recorded here before merge (Apache-2.0 or MIT options only).
 
 ## Notes
 - This project is not affiliated with Mihon, Tachiyomi, or Keiyoushi.
