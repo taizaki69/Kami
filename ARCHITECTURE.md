@@ -13,7 +13,8 @@ MihonCompatKit, never in the app.
 ┌──────────────┴───────────────────────────────┐
 │ KamiCore                                     │
 │  Models · LibraryStore (actor, SQLite)       │
-│  SourceRegistry · LibraryService             │
+│  ExtensionAdmissionService · SourceRegistry  │
+│  LibraryService                              │
 │  Native sources: MangaDex                    │
 └──────────────┬───────────────────────────────┘
                │ SMangaCompat/SChapterCompat/PageCompat
@@ -21,7 +22,8 @@ MihonCompatKit, never in the app.
 │ MihonCompatKit (pure Swift, no Apple-only    │
 │ frameworks — builds on iOS/macOS/Linux/      │
 │ Windows)                                     │
-│  APK: ZipArchive · Inflate · BinaryXML       │
+│  APK: ZipArchive · Inflate · BinaryXML ·     │
+│       APKSignatureVerifier                   │
 │  Dex: DexFile + bounded M1 interpreter       │
 │  Sources: pinned interpreted profiles        │
 │  Repository: index.pb/index.min.json client  │
@@ -42,6 +44,13 @@ MihonCompatKit, never in the app.
   Windows during development and keeps the parsers unit-testable anywhere.
 - **One database actor.** All persistence goes through `LibraryStore`
   (SQLite, WAL, versioned migrations). Views never see SQL.
+- **Downloaded sources require a persisted capability.** APK v1/v2/v3 signer
+  verification runs before manifest/DEX work. `ExtensionAdmissionService`
+  binds package, version, APK digest, source IDs, signer history, and the
+  initial repository or explicit-user trust decision in SQLite. The only
+  downloaded-source registry path requires the resulting internal-init
+  capability; updates must preserve signing identity and cannot downgrade or
+  replace bytes under the same version code.
 - **Untrusted code boundary.** Extension APKs are data until the interpreter
   runs them; even then they only reach iOS capabilities through explicit
   bridges (HTTP, preferences, cookies, WebView) with budgets and isolation

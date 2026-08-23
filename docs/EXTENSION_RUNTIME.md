@@ -11,6 +11,15 @@ crosses the app-facing `KamiSource` boundary end to end under deterministic
 offline fixtures. This is not yet a complete verifier, Java or Kotlin runtime,
 general tachiyomix source bridge, or arbitrary-extension implementation.
 
+The signer-authenticated admission layer is now complete. Before any downloaded
+APK can become registry-eligible, Kami verifies its APK v2/v3/v3.1 signature or
+conservative v1 fallback, signed content digest, X.509 signer key, and any v3
+proof-of-rotation chain. Kami then matches the exact Mihon-format certificate
+fingerprint against selected-store metadata or an explicit user decision and
+atomically persists the package, version, APK hash/path, source IDs, signer
+history, and trust origin. Dynamic source construction and app installation/
+selection still need to be wired through that gate.
+
 Measured real-APK behavior today:
 
 - Akuma 1.4.10, MangaDex 1.4.212, and BatCave 1.6.9 entry constructors return
@@ -208,12 +217,12 @@ synthetic and pinned-corpus tests:
   real APK.
 - Kotlin duration encoding/conversion reached by OkHttp cache-control setup.
 
-The measured next layer is signer-authenticated extension admission and app
-installation/selection, followed by filtered search and a real custom
-image-request override. The longer tail remains additional Jsoup DOM behavior,
-string/collection overloads, broader serialization, preferences, and Android
-context/UI shims. A class appearing in
-the analyzer's
+Signer-authenticated extension admission is now measured and persisted. The
+next layer is app installation/selection plus dynamic source-profile
+construction through that capability, followed by filtered search and a real
+custom image-request override. The longer tail remains additional Jsoup DOM
+behavior, string/collection overloads, broader serialization, preferences, and
+Android context/UI shims. A class appearing in the analyzer's
 `implementedClasses` set is only a coarse prioritization signal; it does not
 mean every method on that class is callable.
 
@@ -247,29 +256,37 @@ array-size, host-collection-size, and cancellation limits. Native host calls
   Extracted JSON is byte-capped before parsing and independently bounded by
   decoded nodes, depth, members, key/string size, and collection capacity.
 
-Checksums establish corruption detection, not publisher identity. APK signer
-verification must land before downloaded extensions are enabled for execution;
-that gate is tracked in
-[GitHub issue #3](https://github.com/taizaki69/Kami/issues/3).
+Checksums establish corruption detection, not publisher identity. The completed
+signer gate verifies v1/v2/v3 signatures and APK content digests, normalizes
+certificate identities exactly as Mihon does, verifies v3 rotation lineage, and
+rejects unsigned, tampered, wrong-signer, stripped-scheme, downgraded, or
+same-version-replaced APKs. Initial repository or explicit-user trust is sticky
+and persisted before the only downloaded-source registry path can be called.
+[GitHub issue #3](https://github.com/taizaki69/Kami/issues/3) records the
+implementation and exact-head evidence. The shipping app still has no general
+downloaded-APK source factory or installation/selection flow, so this security
+gate does not itself claim arbitrary extension compatibility.
 
 ## Verification
 
-`MihonCompatKit` currently has 165 passing tests locally on Windows/Swift 6.3.3.
-They include 17 pinned real-extension executions, 7 focused HTML/parser-limit
-regressions, Java URL-encoding and bounded Kotlin string/collection-helper
+`MihonCompatKit` currently has 171 passing tests locally on Windows/Swift 6.3.3.
+They include 6 focused signer regressions, 17 pinned real-extension executions,
+7 focused HTML/parser-limit regressions, Java URL-encoding and bounded Kotlin
+string/collection-helper
 regressions, generated chapter/page JSON success/failure paths, and 4 focused
 async interpreter/transport regressions, plus 3 end-to-end adapter/tamper/
-concurrency regressions, alongside the existing parser, verifier,
-request-model, repository, and compression coverage. KamiCore has 2 passing
-Windows tests, including interpreted-source registry/deduplication. GitHub
-Swift CI fetches the SHA-256-locked APK corpus before running it.
+concurrency regressions, alongside the existing parser, bytecode verifier,
+request-model, repository, and compression coverage. KamiCore has 2 portable
+Windows tests; macOS CI runs all 8, including SQLite signer persistence,
+wrong-signer and update-policy rejection, rotation, and downloaded registry
+admission. Swift CI verifies the SHA-256-locked APK corpus before running it.
 
-Exact-head commit `3708aa1` passes
-[Swift CI 32662751000](https://github.com/taizaki69/Kami/actions/runs/32662751000),
-[iOS Build 32662750970](https://github.com/taizaki69/Kami/actions/runs/32662750970),
-and [IPA Package 32662751023](https://github.com/taizaki69/Kami/actions/runs/32662751023).
-Those runs cover the 165-test pinned adapter suite, optimized CLI build,
-KamiCore registry test, Simulator/device compilation, and unsigned IPA artifact.
+Exact-head commit `a902d06` passes
+[Swift CI 32665870013](https://github.com/taizaki69/Kami/actions/runs/32665870013),
+[iOS Build 32665869921](https://github.com/taizaki69/Kami/actions/runs/32665869921),
+and [IPA Package 32665869959](https://github.com/taizaki69/Kami/actions/runs/32665869959).
+Those runs cover the 171-test compatibility suite, optimized CLI build, 8
+KamiCore tests, Simulator/device compilation, and unsigned IPA artifact.
 
 The compatibility matrix records the exact versions, hashes, and methods. New
 runtime behavior is complete only when it has a focused regression test and,

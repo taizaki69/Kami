@@ -4,9 +4,9 @@
 
 | Component | Verified how |
 |---|---|
-| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 — **165/165 tests pass**, including 17 real-APK paths, 3 pinned adapter/tamper/concurrency paths, 7 bounded HTML/selector regressions, 46 pre-execution-verifier tests, and async HTTP/DEX coverage; exact-head macOS [Swift CI 32662751000](https://github.com/taizaki69/Kami/actions/runs/32662751000) passes |
+| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 — **171/171 tests pass**, including 6 APK-signature regressions, 17 real-APK paths, 3 pinned adapter/tamper/concurrency paths, 7 bounded HTML/selector regressions, 46 pre-execution-verifier tests, and async HTTP/DEX coverage; exact-head macOS [Swift CI 32665870013](https://github.com/taizaki69/Kami/actions/runs/32665870013) passes |
 | compat-audit CLI | built and run on Windows against 3 SHA-256-locked extension APKs; uploaded by Swift CI on macOS |
-| KamiCore (models, SQLite store, source registry) | 2 Windows tests pass, covering legacy/new chapter-number conversion and pinned interpreted-source registry integration/deduplication; the package builds as an app dependency for Simulator and device at the exact-head iOS checkpoint |
+| KamiCore (models, SQLite store, source registry) | 2 portable Windows tests pass; exact-head macOS Swift CI passes all 8 tests, including SQLite migration, repository/user trust, wrong signer, verified rotation, downgrade and same-version replacement rejection, and downloaded registry admission |
 | App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |
 | IPA packaging | the `IPA Package` workflow builds a real Release `Kami.app`, packages `Kami-unsigned.ipa`, and uploads `Kami-unsigned-ipa` |
 
@@ -42,9 +42,12 @@ swift run --package-path Packages/MihonCompatKit compat-audit inspect some-exten
 bash scripts/fetch_corpus.sh
 ```
 
-Corpus APKs are gitignored third-party binaries. The script downloads immutable
-Keiyoushi release assets and verifies the SHA-256 values recorded in
-`Tests/corpus/manifest.json`; Swift CI runs this before the tests.
+The three real Keiyoushi APKs are gitignored third-party binaries downloaded
+from immutable release assets. Six tiny AOSP apksig conformance APKs are
+vendored at a pinned source revision with the upstream Apache-2.0 license so CI
+does not depend on Gitiles availability. The script verifies every SHA-256 in
+`Tests/corpus/manifest.json` and restores missing fixtures; Swift CI runs it
+before the tests.
 
 ## GitHub Actions
 
@@ -54,11 +57,11 @@ Keiyoushi release assets and verifies the SHA-256 values recorded in
 
 The repository became public on 2026-08-23, so its standard GitHub-hosted
 runners now dispatch without consuming private-repository minutes. Exact-head
-commit `3708aa1` passes [Swift CI 32662751000](https://github.com/taizaki69/Kami/actions/runs/32662751000),
-[iOS Build 32662750970](https://github.com/taizaki69/Kami/actions/runs/32662750970),
-and [IPA Package 32662751023](https://github.com/taizaki69/Kami/actions/runs/32662751023).
-The Swift job fetches the locked corpus, runs all 165 MihonCompatKit tests,
-builds the optimized `compat-audit` CLI, tests KamiCore, and uploads the CLI.
+commit `a902d06` passes [Swift CI 32665870013](https://github.com/taizaki69/Kami/actions/runs/32665870013),
+[iOS Build 32665869921](https://github.com/taizaki69/Kami/actions/runs/32665869921),
+and [IPA Package 32665869959](https://github.com/taizaki69/Kami/actions/runs/32665869959).
+The Swift job verifies the locked corpus, runs all 171 MihonCompatKit and 8
+KamiCore tests, builds the optimized `compat-audit` CLI, and uploads the CLI.
 
 A signed install still requires credentials owned by the user; no certificate,
 profile, password, or Apple account secret belongs in this repository.

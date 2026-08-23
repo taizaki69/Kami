@@ -66,8 +66,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       SHA-256 plus manifest/class identity gate construction, one source actor
       serializes the mutable VM, and `SourceRegistry` accepts the adapter;
       [#2](https://github.com/taizaki69/Kami/issues/2)
-- [ ] Verify store/APK signing identity before enabling downloaded extension
-      execution — [#3](https://github.com/taizaki69/Kami/issues/3)
+- [x] Verify store/APK signing identity before enabling downloaded extension
+      execution — bounded v1/v2/v3 verification, exact Mihon fingerprints,
+      persisted initial trust, rotation-aware updates, and capability-gated
+      registry admission — [#3](https://github.com/taizaki69/Kami/issues/3)
+- [ ] Trusted extension installation/selection UI and dynamic
+      APK-to-`KamiSource` construction through the persisted admission gate
 - [ ] Privacy-safe unresolved API/opcode telemetry and exportable compatibility
       report — [#4](https://github.com/taizaki69/Kami/issues/4)
 - [ ] zstd decompression for current-Mihon backups (schema work done)

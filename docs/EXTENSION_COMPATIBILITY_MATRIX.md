@@ -16,12 +16,13 @@ is no compatibility claim.
 | Store index (`index.pb` + gzip) | Working | Live 2026-08-21 sample parsed 1,372 extensions, store metadata, external-list indirection, and signing-key metadata |
 | Legacy JSON index | Working | Schema fixture decoded by `RepositoryIndexTests` |
 | APK acquisition | Working | Three immutable release assets downloaded and SHA-256 checked in local and CI corpus setup |
+| APK signing identity | Working on locked v1/v2/v3 corpus | RSA PKCS#1/PSS and ECDSA signer signatures, AOSP chunked content digests, certificate/SPKI matching, v3 proof-of-rotation, stripping protection, exact Mihon SHA-256 fingerprints, and unsigned/tamper rejection are asserted before admission |
 | ZIP + DEFLATE | Working | STORE/DEFLATE real APK entries parse with size limits, exact decoded size, and CRC-32 verification |
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
 | DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| DEX execution | Partial M1/M2 working | The 165-test suite includes 17 exact pinned-APK paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, bounded HTML/CSS, generated-serializer JSON encode/decode, page construction, and serialized adapter ownership are checked |
-| End-to-end source operations | Working for one pinned profile | The exact BatCave 1.6.9 APK exposes metadata, popular, paginated text search, latest, core details, combined chapter updates, pages, and default image requests through `KamiSource`; filtered search, preferences, custom image requests, live-site availability, and arbitrary APK admission remain open |
+| DEX execution | Partial M1/M2 working | The 171-test suite includes 17 exact pinned-APK paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, bounded HTML/CSS, generated-serializer JSON encode/decode, page construction, and serialized adapter ownership are checked |
+| End-to-end source operations | Working for one pinned profile | The exact BatCave 1.6.9 APK exposes metadata, popular, paginated text search, latest, core details, combined chapter updates, pages, and default image requests through `KamiSource`; signer-authenticated admission is working, while dynamic source construction, installation/selection UI, filtered search, preferences, custom image requests, and live-site availability remain open |
 
 ## Per-extension execution
 
@@ -64,7 +65,8 @@ and Tachiyomi `Page` conversion. Malformed JSON, invalid UTF-8, and a wrong
 images type are rejected as typed serialization failures.
 
 `PinnedInterpretedSource` admits only the locked BatCave bytes after exact
-SHA-256, manifest package/lib/entry-class, and DEX class checks. It owns one
+SHA-256, APK v2 signer fingerprint, manifest package/lib/entry-class, and DEX
+class checks. It owns one
 source-scoped interpreter and transport behind a bounded cancellation-aware
 queue, maps every operation above into `KamiSource`, reuses the combined update
 for one-request library refreshes, validates default HTTP(S) page image
@@ -102,12 +104,18 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 ## Test evidence
 
-- 165/165 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+- 171/171 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present.
-- Exact-head commit `3708aa1` passes
-  [Swift CI 32662751000](https://github.com/taizaki69/Kami/actions/runs/32662751000),
-  [iOS Build 32662750970](https://github.com/taizaki69/Kami/actions/runs/32662750970),
-  and [IPA Package 32662751023](https://github.com/taizaki69/Kami/actions/runs/32662751023).
+- Exact-head commit `a902d06` passes
+  [Swift CI 32665870013](https://github.com/taizaki69/Kami/actions/runs/32665870013),
+  [iOS Build 32665869921](https://github.com/taizaki69/Kami/actions/runs/32665869921),
+  and [IPA Package 32665869959](https://github.com/taizaki69/Kami/actions/runs/32665869959).
+- Six verifier regressions cover three real Keiyoushi v2 APKs, AOSP v1 and v3,
+  verified certificate rotation, signed-content and signer-signature tampering,
+  unsigned input, fingerprint normalization, and v3-block stripping. Eight
+  macOS KamiCore tests cover persisted repository/user trust, unrelated-signer
+  rejection, source-ID capability admission, rotation-aware updates, and
+  downgrade/same-version replacement rejection.
 - Seventeen real-extension tests require exact successful values or exact typed
   boundaries. The BatCave popular, text-search, latest, details, and chapter
   and page tests require exact requests and parsed model fields; invalid
@@ -158,13 +166,14 @@ controlled real-extension path through bounded async response delivery and
 parse BatCave popular/search/latest/details/chapters/pages into exact
 compatibility models. The exact locked APK now reaches the app-facing source
 and registry seams and produces validated default page image requests. This is
-one compiled pinned profile, not a claim that downloaded extensions are safe or
-generally compatible; signer trust, installation/selection UI, filtered
+one compiled pinned profile, not a claim that downloaded extensions are
+generally compatible. Signer trust and persisted registry admission are now
+working; dynamic source construction, installation/selection UI, filtered
 search, preferences, and custom image-request overrides remain open. Remaining
 DEX work (notably
 broader external hierarchy and super/default resolution beyond parsed class
 graphs, opcode coverage, and differential semantics) is tracked in
 [#1](https://github.com/taizaki69/Kami/issues/1), the completed first pinned
-source in [#2](https://github.com/taizaki69/Kami/issues/2), APK signer trust in
-[#3](https://github.com/taizaki69/Kami/issues/3), and privacy-safe compatibility
-telemetry in [#4](https://github.com/taizaki69/Kami/issues/4).
+source in [#2](https://github.com/taizaki69/Kami/issues/2), completed APK signer
+trust in [#3](https://github.com/taizaki69/Kami/issues/3), and privacy-safe
+compatibility telemetry in [#4](https://github.com/taizaki69/Kami/issues/4).
