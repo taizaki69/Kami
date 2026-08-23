@@ -36,8 +36,10 @@ the result through the same bounded surface. The public latest-updates path
 proves its cached page-3 GET, and the real manga-details worker proves its
 cached detail GET before returning the expected core `SManga` fields. The
 combined update worker reuses the same bounded response path and returns exact
-generated-DTO chapter results. The next page-list slice still needs its JSON
-request body and exact POST.
+generated-DTO chapter results. The page-list worker runs its generated request
+serializer, sends the exact JSON POST, decodes its response DTOs from a bounded
+Okio source, and returns normalized page image URLs. All of these tests remain
+offline.
 
 ## Remaining extension-facing stack
 
@@ -47,8 +49,8 @@ compatibility:
 - Additional Jsoup document/element APIs only as the next pinned source paths
   measure them; the covered BatCave paths already enforce input, DOM, extracted
   string, result-count, and cumulative selector-work limits.
-- Additional request/response overloads (including JSON and byte-array bodies)
-  only as measured extensions reach them.
+- Additional request/response overloads, including byte-array and streaming
+  request bodies, only as measured extensions reach them.
 - Persistent per-source cookies and preferences; the current compat cookie jar
   is source-isolated but in memory only.
 - Rate limiting: `RateLimitInterceptor` semantics (permits per interval).

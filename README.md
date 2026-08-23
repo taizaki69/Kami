@@ -35,10 +35,14 @@ Its combined manga-update worker also extracts `window.__DATA__`, drives the
 APK's generated kotlinx serializers through a bounded generic JSON decoder,
 and returns exact `SChapter` values plus `SMangaUpdate`, including fractional
 chapter numbers, source-local dates, invalid-date fallback, and xhash URLs.
+Its real page-list worker now executes generated JSON request encoding, sends
+the exact reader POST, decodes the generated response DTOs from a bounded Okio
+source, normalizes image URLs, and returns exact `PageCompat` values. Malformed
+page JSON, invalid UTF-8, and wrong response types are typed failures.
 A separate real-APK regression proves non-2xx responses become Mihon's
 `HttpException`. This is a measured M1/M2 runtime slice, **not end-to-end source
-compatibility**: filtered search, pages, preferences, the
-`KamiSource` adapter, and much of the Kotlin/Java surface remain open
+compatibility**: filtered search, preferences, custom image-request behavior,
+the `KamiSource` adapter, and much of the Kotlin/Java surface remain open
 (`docs/EXTENSION_RUNTIME.md`). Kami currently reads through its native
 MangaDex source.
 
@@ -72,11 +76,12 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 159 tests run on Windows with Swift 6.3
+The compatibility kit and all 162 tests run on Windows with Swift 6.3
 (`scripts/windows_dev_test.bat`). GitHub Actions is configured to run the pinned
 real-APK suite on macOS, compiles both Simulator and unsigned device targets,
-and publishes an unsigned IPA artifact. The `compat-audit` CLI produced the
-measured compatibility matrix from the locked corpus.
+and publishes an unsigned IPA artifact. Exact-head commit `d6530fe` passed all
+three workflows after the repository became public. The `compat-audit` CLI
+produced the measured compatibility matrix from the locked corpus.
 
 ## Non-goals / legality
 

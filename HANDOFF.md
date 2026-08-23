@@ -10,12 +10,17 @@ work was recovered, completed, verified, and pushed.
 ## Start here
 
 - Repository: <https://github.com/taizaki69/Kami>
-- Visibility: private
+- Visibility: public (changed 2026-08-23 so standard GitHub-hosted Actions
+  runners are free; publication preflight found no tracked secret patterns,
+  sensitive credential filenames, or binary APK/IPA archives in Git history)
 - Default branch: `main`
-- Current code/test checkpoint: `df11be5ee3f3dc67d66e76e2d4ba51c4a1ac51c8`
+- Current code/test checkpoint: `d6530fe4178155a2fc550654806937ecb99462a6`
+- Page-list implementation baseline: `0555862278890ba78666a4b5c192421f0952a6be`
+- Previous chapter-update baseline: `df11be5ee3f3dc67d66e76e2d4ba51c4a1ac51c8`
 - Previous latest/details baseline: `4eca3b2866b8fe4088956d793dd31ec780bde2a3`
 - Previous text-search baseline: `8d496330d1c5fd9e413164d12902d7b7cdb97eb7`
 - Bounded HTML/popular parsing baseline: `f55a695f57aba7685fa51b563107f277e7503d37`
+- Current macOS test-compiler portability checkpoint: `d6530fe4178155a2fc550654806937ecb99462a6`
 - Previous macOS test-compiler portability baseline: `e5988c34692e795180f020dee67a4a90a993ee80`
 - Current async transport/runtime implementation baseline: `6cb46b5ccbe600ca93847fdd270f8bfa02ecc690`
 - Previous isolated HTTP transport baseline: `e58bf8e83bbc562e240f0f507f76cd8c42655e1c`
@@ -71,7 +76,19 @@ Stop state on 2026-08-23 (America/Lima):
   source-local dates, invalid-date fallback, malformed JSON rejection, and
   required-field rejection. Exact measured Kotlin string/Result/number,
   Java-time, Jsoup, and tachiyomix model shims support that path.
-- All 159 MihonCompatKit tests pass locally on Windows/Swift 6.3.3, including 15
+- Commit `0555862` is pushed to `main`. BatCave's real public page-list worker
+  splits the chapter URL, runs the APK's generated request serializer, emits
+  the exact JSON POST, decodes `ChapterApiResponse.data.images` from a bounded
+  Okio source through the generated response serializers, normalizes relative
+  and absolute image URLs, constructs Tachiyomi `Page` values, and converts
+  them to exact public `PageCompat` results. Malformed JSON, invalid UTF-8, and
+  a wrong images type all become typed `SerializationException`s. The reusable
+  surface adds bounded Kotlin split/regex/affix helpers, ordered generated JSON
+  encoding, String/list decoding, close-finally cleanup, and `Page` models.
+- Commit `d6530fe` is pushed to `main`. It rewrites one synthetic async DEX test
+  fixture as incremental array appends so Swift 6 on macOS can type-check it in
+  reasonable time; runtime behavior and fixture bytes are unchanged.
+- All 162 MihonCompatKit tests pass locally on Windows/Swift 6.3.3, including 17
   pinned real-extension paths, 7 focused HTML/parser-limit tests, bounded Java
   URL-encoding and Kotlin string/collection regressions, and 4 async
   interpreter/transport tests. KamiCore's dependency build/test, its chapter-
@@ -82,15 +99,13 @@ Stop state on 2026-08-23 (America/Lima):
   propagates cancellation, and exposes bounded OkHttp response/body values.
 - A real-APK regression still proves a 503 response reaches Mihon's exact
   `HttpException(code: 503)`.
-- The first macOS Swift CI attempt exposed only a compiler type-check timeout in
-  one large test-fixture expression, fixed by `e5988c3`. The newest `df11be5`
-  Swift CI [32659336682](https://github.com/taizaki69/Kami/actions/runs/32659336682),
-  iOS Build [32659336683](https://github.com/taizaki69/Kami/actions/runs/32659336683),
-  and IPA Package [32659336679](https://github.com/taizaki69/Kami/actions/runs/32659336679)
-  jobs all have zero steps and the explicit account payment/spending-limit
-  annotation. Resolve Actions billing and rerun all three workflows before
-  treating macOS/iOS verification as current. The preceding `6cb46b5` iOS
-  Build and IPA Package runs did pass.
+- Publishing the repository removed the private-repository Actions billing
+  dispatch block. A public rerun of `0555862` passed iOS Build and IPA Package;
+  Swift CI reached the compiler and exposed the test-only expression fixed in
+  `d6530fe`. Exact-head `d6530fe` then passed
+  [Swift CI 32660907795](https://github.com/taizaki69/Kami/actions/runs/32660907795),
+  [iOS Build 32660907782](https://github.com/taizaki69/Kami/actions/runs/32660907782),
+  and [IPA Package 32660907773](https://github.com/taizaki69/Kami/actions/runs/32660907773).
 - GitHub CLI is installed and authenticated as `taizaki69`; repository and
   workflow access were working. No authentication setup should be needed on
   this computer.
@@ -101,30 +116,35 @@ Stop state on 2026-08-23 (America/Lima):
   and remains open intentionally.
 - Issue #2 has the chapter checkpoint in
   [progress comment 5387853914](https://github.com/taizaki69/Kami/issues/2#issuecomment-5387853914)
-  and remains open for pages and `KamiSource` exposure.
+  and the page checkpoint in
+  [progress comment 5387957141](https://github.com/taizaki69/Kami/issues/2#issuecomment-5387957141).
+  It remains open for interpreted `KamiSource` and reader image-request exposure.
 
-### Next milestone: BatCave pages
+### Next milestone: interpreted `KamiSource`
 
 Popular, paginated text search, latest updates, core manga details, and combined
-chapter updates now return exact compatibility models. Drive the page-list path
-from the pinned source's real generated methods. Its measured source flow is:
+chapter updates plus page lists now return exact compatibility models. Wrap the
+pinned interpreted source behind the existing `KamiSource` protocol so the app
+can consume one unmodified extension through its normal source seam. Preserve
+the exact already-proven VM entrypoints and conversions:
 
 ```text
-getPageList(SChapter)
-  -> split /reader/{comicId}/{chapterId...}
-  -> ChapterRequestBody(news_id, chapter_id)
-  -> bounded JSON request encoding + request body
-  -> POST /engine/ajax/controller.php?mod=api&action=reader/getChapterData
-  -> ChapterApiResponse.data.images generated decoding
-  -> absolute image URLs + Page(index, imageUrl)
+locked APK + resolved entry class
+  -> one source-scoped interpreter/transport owner
+  -> metadata + browse/search/latest
+  -> details/chapters through the combined SMangaUpdate path
+  -> page list -> [PageCompat]
+  -> image request (default URL first; exact override only when measured)
+  -> existing KamiSource / SourceRegistry / reader consumers
 ```
 
-Use a deterministic offline JSON response and continue accepting only exact
-canonical signatures measured from the locked APK. Record each unresolved
-signature reached by the real page worker before expanding the encoding,
-request-body, response-decode, or `Page` surfaces. Do not turn the measured JSON
-decoder into a broad serialization claim. The optional related-manga memo JSON
-branch in details is also still unproven.
+Make interpreter ownership concurrency-safe and keep cookies, transport state,
+instruction budgets, and failures source-scoped. Add an end-to-end adapter test
+that exercises every `KamiSource` operation with deterministic offline fixtures
+and proves reader pages become image requests. Do not duplicate BatCave parsing
+in Swift. Keep the bounded runtime claims narrow: filtered search, the optional
+related-manga memo JSON branch, and custom image-request overrides remain
+unproven until a real APK path measures them.
 
 Do not enable arbitrary downloaded APK execution while the signer gate in
 issue #3 remains open. Keep `HostBridge` deny-by-default and never execute
@@ -146,7 +166,8 @@ signer gate in issue #3 is still open.
 
 ## Clone and restore the workspace
 
-Because the repository is private, authenticate the new computer first:
+The repository is public, so cloning does not require authentication. GitHub
+CLI authentication is still useful for pushes and workflow administration:
 
 ```bash
 gh auth login
@@ -229,9 +250,9 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 159 Swift tests passed locally on Windows/Swift 6.3.3; exact-head macOS CI is blocked before dispatch by Actions billing |
+| MihonCompatKit | 162 Swift tests passed locally on Windows/Swift 6.3.3 and in exact-head macOS Swift CI |
 | KamiCore | Dependency build and 1 chapter-number conversion test passed locally on Windows/Swift 6.3.3 |
-| Optimized package build | `scripts\windows_dev_test.bat Packages\MihonCompatKit release` compiled and linked SwiftSoup, MihonCompatKit, and `compat-audit.exe` in 67.45 seconds |
+| Optimized package build | `scripts\windows_dev_test.bat Packages\MihonCompatKit release` compiled and linked SwiftSoup, MihonCompatKit, and `compat-audit.exe` in 73.66 seconds |
 | Real APK constructors | Akuma, MangaDex, and BatCave passed |
 | Structural verifier | 9 focused regressions cover instruction geometry, branch/fallthrough boundaries, and aligned, bounded, correctly typed payloads and switch targets |
 | Exception/control verifier | 13 focused regressions cover strict try/catch decoding, resolved `Throwable` validation, typed handler state/execution, and AOSP branch/result/exception-entry rules |
@@ -239,20 +260,19 @@ At the implementation baseline:
 | Runtime reference semantics | 4 focused regressions cover resolved and unresolved typed-catch dispatch plus hierarchy-aware `check-cast` and `instance-of` |
 | Binary opcode semantics | 1 focused regression covers AOSP operation/type-major ordering across int, long, float, double, and `/2addr` forms |
 | Method resolution and receiver dispatch | 15 focused regressions cover virtual/class override selection, lexical normal/range class-super dispatch, inherited/maximally-specific interface defaults, abstract masking, default conflicts, DEX 037 interface-super gating, strict interface receivers, typed linkage failures, and conservative unresolved boundaries |
-| Request/model host regressions | 6 focused tests cover request construction, duration/cache conversion, URL scheme rejection, CRLF-header rejection, body bounds, Java URL encoding, and bounded Kotlin string/collection helpers |
+| Request/model host regressions | 7 focused tests cover request construction, duration/cache conversion, URL scheme rejection, CRLF-header rejection, body bounds, Java URL encoding, and bounded Kotlin split/regex/affix/string/collection helpers |
 | HTTP transport regressions | 8 focused tests cover source isolation, bounded deterministic encoding, redirect secret stripping/downgrade rejection, streamed response limits, cancellation, and cookie scope |
 | Async interpreter/response regressions | 4 focused tests cover nested frame resumption, sync-entry diagnostics, typed DEX handler re-entry, cancellation, injected transport, charset decoding, one-shot reads, and close state |
 | HTML/selector hardening | 7 focused tests cover BatCave CSS/URL semantics, modern direct-child and `:containsData` selectors, input, base-URL, node, depth, attribute, selector length/result/work, and extracted-string limits |
-| BatCave execution | Exact metadata getters pass; popular, paginated text search, and latest updates return exact `MangasPage`; core details return exact `SManga`; combined updates return exact chapters and typed malformed/missing-field failures; a 503 maps to `HttpException(code: 503)` |
-| Swift CI | Latest `df11be5` [run 32659336682](https://github.com/taizaki69/Kami/actions/runs/32659336682) was blocked before runner dispatch by Actions billing; the job has zero steps and the explicit billing annotation |
-| iOS Simulator and unsigned device builds | `6cb46b5` passed [run 32655420894](https://github.com/taizaki69/Kami/actions/runs/32655420894); latest `df11be5` [run 32659336683](https://github.com/taizaki69/Kami/actions/runs/32659336683) was blocked before dispatch by Actions billing |
-| Unsigned IPA packaging | `6cb46b5` passed [run 32655420893](https://github.com/taizaki69/Kami/actions/runs/32655420893); latest `df11be5` [run 32659336679](https://github.com/taizaki69/Kami/actions/runs/32659336679) was blocked before dispatch by Actions billing |
+| BatCave execution | Exact metadata getters pass; popular, paginated text search, and latest updates return exact `MangasPage`; core details return exact `SManga`; combined updates return exact chapters; page list returns exact image URLs; malformed chapter/page payloads are typed failures; a 503 maps to `HttpException(code: 503)` |
+| Swift CI | Exact-head `d6530fe` [run 32660907795](https://github.com/taizaki69/Kami/actions/runs/32660907795) passed the 162-test suite, optimized CLI build, KamiCore tests, and artifact upload |
+| iOS Simulator and unsigned device builds | Exact-head `d6530fe` [run 32660907782](https://github.com/taizaki69/Kami/actions/runs/32660907782) passed both targets |
+| Unsigned IPA packaging | Exact-head `d6530fe` [run 32660907773](https://github.com/taizaki69/Kami/actions/runs/32660907773) passed and uploaded `Kami-unsigned-ipa` |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
-The successful iOS/IPA runs validate the `6cb46b5` async runtime implementation
-and produced `Kami-unsigned-ipa`. Commits `e5988c3`, `f55a695`, `8d49633`,
-`4eca3b2`, and `df11be5` have local full-suite evidence only until GitHub Actions billing is restored.
-Rerun Swift CI, iOS Build, and IPA Package for the latest exact checkpoint.
+The successful exact-head public-repository runs validate every implementation
+checkpoint through `0555862`, including the async runtime and page-list path,
+and produced both `compat-audit` and `Kami-unsigned-ipa` artifacts.
 
 ## What the latest continuation completed
 
@@ -304,6 +324,28 @@ Commit `df11be5` adds the combined manga-update/chapter path:
   and one KamiCore model regression bring MihonCompatKit to 159 tests and
   KamiCore to 1 currently runnable Windows test.
 
+Commit `0555862` adds the page-list path:
+
+- The pinned APK parses `/reader/42/7?token=test`, executes its generated
+  `ChapterRequestBody` serializer, and sends the exact ordered JSON body to the
+  exact reader endpoint through the injected transport.
+- The bounded Okio JSON path executes the real `ChapterApiResponse`/`Images`
+  generated deserializers, including `List<String>`, then the APK trims and
+  normalizes relative/absolute URLs and constructs two Tachiyomi `Page` values.
+  Public conversion returns exact `PageCompat` indexes and image URLs.
+- Strict UTF-8, JSON input/output and structure limits, Kotlin split/regex/
+  affix bounds, one-shot buffered-source consumption, and close-finally cleanup
+  preserve the deny-by-default runtime boundary. Malformed JSON, invalid UTF-8,
+  and a wrong images type are typed `SerializationException`s.
+- Two real-APK page tests and one focused helper regression bring
+  MihonCompatKit to 162 tests. KamiCore's dependency test and the optimized
+  package/CLI build also pass.
+
+Commit `d6530fe` then replaces a second compound synthetic DEX fixture expression
+with incremental appends so Swift 6 can type-check it on macOS. The exact-head
+Swift CI, iOS Build, and IPA Package workflows all pass; this changes test
+construction only, not runtime semantics.
+
 Earlier commit `6cb46b5` crossed the asynchronous extension HTTP boundary:
 
 - `DexInterpreter.callAsync` snapshots exact nested frames at async host
@@ -324,9 +366,8 @@ Earlier commit `6cb46b5` crossed the asynchronous extension HTTP boundary:
   historical suite to 143 tests and moved the real-APK frontier from
   `awaitSuccess` to `JsoupExtensionsKt.asJsoup$default`.
 
-Commit `e5988c3` then splits one compound DEX test-fixture expression so the
-macOS compiler can type-check it without timing out; it makes no runtime
-semantic change.
+Earlier commit `e5988c3` similarly split a different compound DEX test-fixture
+expression for the macOS compiler; it made no runtime semantic change.
 
 Commit `e58bf8e` immediately before it supplies the isolated production
 URLSession transport: per-source actor ownership, redirect/timeout/request and
@@ -642,9 +683,9 @@ Proven today:
 - Compatibility analysis and the `compat-audit` CLI.
 - Exact execution of the pinned constructors/getters listed above and
   BatCave's interpreted popular, paginated text-search, latest-updates, and core
-  details plus combined chapter-update paths through exact request construction,
-  bounded async response delivery, production selectors, generated DTO
-  decoding, and exact compatibility-model conversion.
+  details plus combined chapter-update and page-list paths through exact request
+  construction, bounded async response delivery, production selectors,
+  generated DTO encoding/decoding, and exact compatibility-model conversion.
 - Source-scoped, bounded OkHttp request/response/body/Okio values, async nested
   frame resumption, cancellation, typed transport/HTTP errors, the exact pinned
   BatCave POST assertion, and a deterministic no-live-network test transport.
@@ -657,10 +698,10 @@ Proven today:
 
 Not proven or implemented:
 
-- An interpreted extension completing pages and exposing all operations through
-  `KamiSource`.
+- An interpreted extension exposing the proven operations through `KamiSource`
+  and the reader-facing image-request seam.
 - Broad Jsoup coverage beyond the measured subset, kotlinx serialization beyond
-  the bounded generated-decoder slice,
+  the bounded generated encoder/decoder slice,
   persistent source preferences and cookies, rate limiting, the
   tachiyomix-to-`KamiSource` bridge, or WebView challenge handling. The current
   cookie jar is source-isolated but in memory.
@@ -745,19 +786,17 @@ The rest of the product backlog is in `TODO.md`.
    `invoke-super`, and invoke word-count/kind checks are already in.
 4. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
-5. Continue issue #2 after the now-passing popular, paginated text-search,
-   latest-updates, core details, and combined chapter-update paths. Drive the
-   real page-list worker and record each exact unresolved signature before
-   adding host surface.
-6. Implement pages in bounded slices: generated JSON request encoding, request
-   body/POST construction, generated response decoding, image URL normalization,
-   and `Page`. Keep every test deterministic and offline and retain the existing
-   parser, selector, JSON, request, response, and interpreter limits.
-7. Expose the interpreted source through the existing `KamiSource` contract
-   only after exact popular/search, details, chapters, and pages tests pass.
-8. Implement issue #3 before enabling execution of arbitrary repository
+5. Continue issue #2 by exposing one pinned interpreted source through the
+   existing `KamiSource` contract. Reuse the exact passing popular/search/latest,
+   details/chapter-update, and page-list paths; do not recreate source parsing in
+   Swift. Make interpreter access concurrency-safe and source-scoped.
+6. Prove every `KamiSource` operation through one deterministic adapter test,
+   including default page image requests. Measure a real custom image-request
+   override before widening that runtime surface, and keep filtered search
+   explicitly unclaimed meanwhile.
+7. Implement issue #3 before enabling execution of arbitrary repository
    downloads or updates.
-9. Add issue #4 diagnostics as local, deterministic, redacted output so the
+8. Add issue #4 diagnostics as local, deterministic, redacted output so the
    compatibility corpus can grow from reproducible failures.
 
 Every new runtime capability should arrive with a synthetic malformed fixture,

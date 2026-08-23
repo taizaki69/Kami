@@ -40,9 +40,15 @@ Measured real-APK behavior today:
   xhash URLs, fractional numbers, source-local epoch dates, and Mihon's zero
   fallback for an invalid date. Malformed JSON and missing required fields
   surface as typed serialization failures.
+- Its real page-list worker splits the chapter URL, runs the APK's generated
+  request serializer, sends the exact JSON POST, decodes
+  `ChapterApiResponse.data.images` from `okio.BufferedSource` through the
+  generated response serializers, normalizes relative and absolute image URLs,
+  and returns exact public `PageCompat` values. Malformed JSON, invalid UTF-8,
+  and a wrong images type surface as typed serialization failures.
 - These source-result paths are proven only with deterministic offline response
-  HTML. No test yet claims filtered search, pages, the optional
-  related-manga JSON memo, preferences, Cloudflare behavior, or an
+  fixtures. No test yet claims filtered search, the optional related-manga JSON
+  memo, preferences, Cloudflare behavior, image-request overrides, or an
   interpreted `KamiSource` adapter. The pinned suite never performs live
   network I/O.
 
@@ -56,8 +62,8 @@ classes*.dex                        validated structural parse
    ↓ DexInterpreter                 partial M1; async frame resume works
    ↓ Java/Kotlin HostBridge         partial exact-signature M2 surface
    ↓ source-scoped HTTP transport   bounded async request/response slice works
-   ↓ bounded HTML/CSS bridge        BatCave browse/search/details/chapters works
-   ↓ tachiyomix API bridge          result models through SMangaUpdate; no pages
+   ↓ bounded HTML/JSON bridges      BatCave browse/details/chapters/pages works
+   ↓ tachiyomix API bridge          result models through SMangaUpdate + Page
 KamiSource (Swift protocol)         working for native sources
    ↓ SourceRegistry / app / DB      working
 ```
@@ -160,8 +166,9 @@ synthetic and pinned-corpus tests:
   primitive boxes, atomics, concurrent maps, bounded lists, and iterators.
 - Kotlin `Intrinsics`, `Result`, basic synchronous continuation setup, lazy
   values, pairs, `isBlank`, trimming, Java-compatible UTF-8 form URL encoding,
-  regex construction, bounded default `joinToString`, bounded delimiter
-  substring helpers, and mutable reference boxes.
+  bounded regex find, bounded default `joinToString`, delimiter substring/split
+  helpers, prefix/suffix checks, close-finally behavior, and mutable reference
+  boxes.
 - Mihon filter/filter-list construction and state access, plus construction
   shims for `HttpSource` and `ParsedHttpSource` superclasses.
 - The date-pattern object needed by the pinned BatCave constructor plus the
@@ -184,25 +191,25 @@ synthetic and pinned-corpus tests:
   direct-child relative selectors and `:containsData(...)` semantics reached by
   the details/chapter parsers even though the pinned SwiftSoup release predates
   those Jsoup behaviors.
-- A bounded JSON decode subset supplies generated serial descriptors, list
-  serializers, and primitive/nested-object composite decoding. It invokes each
-  extension DTO's real generated `deserialize` method, preserves generated
-  optional/default and required-field behavior, and caps input bytes, decoded
-  nodes/depth/members/keys/strings, descriptors, and collections. It is not a
-  claim of full kotlinx serialization or an encoding surface.
+- A bounded JSON encode/decode subset supplies generated serial descriptors,
+  list/string serializers, ordered composite encoding, and primitive/nested-
+  object composite decoding. It invokes each extension DTO's real generated
+  `serialize`/`deserialize` methods, supports string and Okio-buffered input,
+  preserves generated optional/default and required-field behavior, and caps
+  encoded/decoded bytes, nodes/depth/members/keys/strings, descriptors, and
+  collections. It is not a claim of full kotlinx serialization.
 - The reached tachiyomix model slice constructs and mutates `SManga`, applies
-  `setUrlWithoutDomain`, constructs `MangasPage`, `SChapter`, and `SMangaUpdate`,
-  and converts those results to public Swift compatibility models without
-  silently dropping entries. Core manga-detail fields and chapter URL/name/
-  number/date fields are proven through the real APK.
+  `setUrlWithoutDomain`, constructs `MangasPage`, `SChapter`, `SMangaUpdate`, and
+  `Page`, and converts those results to public Swift compatibility models
+  without silently dropping entries. Core manga-detail fields, chapter URL/
+  name/number/date fields, and page indexes/image URLs are proven through the
+  real APK.
 - Kotlin duration encoding/conversion reached by OkHttp cache-control setup.
 
-The measured next layer is BatCave page-list execution, followed by filtered
-search and the interpreted `KamiSource` adapter. Pages introduce bounded JSON
-request encoding/body construction, the exact POST, response DTO decoding, and
-`Page` construction. The longer tail remains additional Jsoup DOM behavior,
-string/collection overloads, broader serialization, preferences, and Android
-context/UI shims. A class appearing in
+The measured next layer is the interpreted `KamiSource` adapter, including the
+reader-facing image-request path, followed by filtered search. The longer tail
+remains additional Jsoup DOM behavior, string/collection overloads, broader
+serialization, preferences, and Android context/UI shims. A class appearing in
 the analyzer's
 `implementedClasses` set is only a coarse prioritization signal; it does not
 mean every method on that class is callable.
@@ -241,23 +248,22 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 159 passing tests locally on Windows/Swift 6.3.3.
-They include 15 pinned real-extension executions, 7 focused HTML/parser-limit
+`MihonCompatKit` currently has 162 passing tests locally on Windows/Swift 6.3.3.
+They include 17 pinned real-extension executions, 7 focused HTML/parser-limit
 regressions, Java URL-encoding and bounded Kotlin string/collection-helper
-regressions, generated chapter JSON success/failure paths, and 4 focused async
-interpreter/transport regressions, alongside the existing parser, verifier,
-request-model, repository, and compression coverage. GitHub Swift CI fetches
-the SHA-256-locked APK corpus before running it.
+regressions, generated chapter/page JSON success/failure paths, and 4 focused
+async interpreter/transport regressions, alongside the existing parser,
+verifier, request-model, repository, and compression coverage. GitHub Swift CI
+fetches the SHA-256-locked APK corpus before running it.
 
-The first `6cb46b5` macOS run found a compiler type-check timeout in one large
-test-fixture expression. The expression was split in `e5988c3`; all 159 current
-tests pass locally. Exact-head `df11be5` Swift CI
-[32659336682](https://github.com/taizaki69/Kami/actions/runs/32659336682), iOS
-Build [32659336683](https://github.com/taizaki69/Kami/actions/runs/32659336683),
-and IPA Package
-[32659336679](https://github.com/taizaki69/Kami/actions/runs/32659336679) jobs
-again had zero steps because the account's Actions payment/spending limit
-blocked runner dispatch.
+After the repository became public, the `0555862` workflows dispatched normally:
+iOS Build and IPA Package passed, while Swift CI exposed a macOS-only compiler
+type-check timeout in another synthetic test-fixture expression. Commit
+`d6530fe` rewrites that expression without changing its bytes or runtime meaning.
+Exact-head [Swift CI 32660907795](https://github.com/taizaki69/Kami/actions/runs/32660907795),
+[iOS Build 32660907782](https://github.com/taizaki69/Kami/actions/runs/32660907782),
+and [IPA Package 32660907773](https://github.com/taizaki69/Kami/actions/runs/32660907773)
+all pass.
 
 The compatibility matrix records the exact versions, hashes, and methods. New
 runtime behavior is complete only when it has a focused regression test and,
