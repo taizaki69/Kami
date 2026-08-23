@@ -53,6 +53,17 @@ final class RealExtensionExecutionTests: XCTestCase {
         )
     }
 
+    private func httpURL(_ rawValue: String, vm: DexInterpreter) throws -> RVal {
+        let companion = try XCTUnwrap(vm.bridge.staticFields["Lokhttp3/HttpUrl;->Companion"])
+        let get = try XCTUnwrap(vm.bridge.resolve(
+            class: "Lokhttp3/HttpUrl$Companion;",
+            "get",
+            prototype: "(Ljava/lang/String;)Lokhttp3/HttpUrl;",
+            isStatic: false
+        ))
+        return try get(vm, [companion, HostBridge.string(rawValue)])
+    }
+
     /// BatCave 1.6.9 (lib 1.6): getBaseUrl() = const-string/return-object —
     /// the first method from a real extension APK executed by Kami's VM.
     func testBatCaveGetBaseUrl() throws {
@@ -219,6 +230,50 @@ final class RealExtensionExecutionTests: XCTestCase {
         XCTAssertEqual(vm.bridge.lastPreparedRequest, expected)
     }
 
+    func testBatCaveLatestUpdatesBuildsGETAndParsesPage() async throws {
+        let html = """
+        <div id="content-load">
+          <article class="latest grid-item">
+            <div class="latest__title"><a href="/comic/latest-hit">Latest Hit</a></div>
+            <div class="latest__img"><img src="/uploads/latest-hit.jpg"></div>
+          </article>
+        </div>
+        <li class="pagination"><a href="/page/4">Next</a></li>
+        """
+        let transport = StaticTransport(response: CompatHTTPResponse(
+            finalURL: "https://batcave.biz/page/3",
+            statusCode: 200,
+            headers: [CompatHTTPHeader(name: "Content-Type", value: "text/html; charset=utf-8")],
+            body: Array(html.utf8)
+        ))
+        let (vm, _) = try loadVM("batcave", transport: transport)
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = try vm.instantiate(classDescriptor: cls)
+
+        let result = try await vm.callAsync(
+            classDescriptor: cls,
+            method: "getLatestUpdates",
+            prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;",
+            args: [receiver, .int(3), .null]
+        )
+        guard let page = HostBridge.mangasPageCompat(from: result) else {
+            return XCTFail("expected a converted latest MangasPage, got \(result)")
+        }
+        XCTAssertEqual(page.mangas.count, 1)
+        XCTAssertEqual(page.mangas[0].url, "/comic/latest-hit")
+        XCTAssertEqual(page.mangas[0].title, "Latest Hit")
+        XCTAssertEqual(page.mangas[0].thumbnailURL, "https://batcave.biz/uploads/latest-hit.jpg")
+        XCTAssertTrue(page.hasNextPage)
+
+        let expected = CompatHTTPRequest(
+            url: "https://batcave.biz/page/3",
+            cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
+        )
+        let requests = await transport.requests()
+        XCTAssertEqual(requests, [expected])
+        XCTAssertEqual(vm.bridge.lastPreparedRequest, expected)
+    }
+
     /// BatCave's generated search worker is R8-renamed to `k`; calling that
     /// exact pinned method drives the real nonblank-query branch without
     /// fabricating an implementation of its external KeiSource superclass.
@@ -259,6 +314,59 @@ final class RealExtensionExecutionTests: XCTestCase {
 
         let expected = CompatHTTPRequest(
             url: "https://batcave.biz/search/alpha+beta/page/2/",
+            cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
+        )
+        let requests = await transport.requests()
+        XCTAssertEqual(requests, [expected])
+        XCTAssertEqual(vm.bridge.lastPreparedRequest, expected)
+    }
+
+    func testBatCaveMangaByURLBuildsGETAndParsesCoreDetails() async throws {
+        let html = """
+        <header class="page__header"><h1>Detail Hero</h1></header>
+        <div class="page__poster"><img src="/uploads/detail-hero.jpg"></div>
+        <ul class="page__list">
+          <li><div>Publisher</div><a>Bat Publisher</a></li>
+          <li><div>Year</div><a>2024</a></li>
+          <li><div>Writer</div><a>Writer Name</a></li>
+          <li><div>Artist</div><a>Artist Name</a></li>
+          <li><div>Release type</div>Ongoing</li>
+        </ul>
+        <div class="page__text">A deterministic description.</div>
+        <div class="page__tags"><a>Action</a><a>Adventure</a></div>
+        """
+        let detailURL = "https://batcave.biz/comic/detail-hero"
+        let transport = StaticTransport(response: CompatHTTPResponse(
+            finalURL: detailURL,
+            statusCode: 200,
+            headers: [CompatHTTPHeader(name: "Content-Type", value: "text/html; charset=utf-8")],
+            body: Array(html.utf8)
+        ))
+        let (vm, _) = try loadVM("batcave", transport: transport)
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = try vm.instantiate(classDescriptor: cls)
+        let url = try httpURL(detailURL, vm: vm)
+
+        let result = try await vm.callAsync(
+            classDescriptor: cls,
+            method: "h",
+            prototype: "(Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;Lokhttp3/HttpUrl;Lkotlin/coroutines/jvm/internal/ContinuationImpl;)Ljava/lang/Object;",
+            args: [receiver, url, .null]
+        )
+        guard let manga = HostBridge.mangaCompat(from: result) else {
+            return XCTFail("expected converted manga details, got \(result)")
+        }
+        XCTAssertEqual(manga.url, "/comic/detail-hero")
+        XCTAssertEqual(manga.title, "Detail Hero")
+        XCTAssertEqual(manga.thumbnailURL, "https://batcave.biz/uploads/detail-hero.jpg")
+        XCTAssertEqual(manga.description, "Bat Publisher — 2024\n\nA deterministic description.")
+        XCTAssertEqual(manga.author, "Writer Name")
+        XCTAssertEqual(manga.artist, "Artist Name")
+        XCTAssertEqual(manga.genres, ["Action", "Adventure", "Comic"])
+        XCTAssertEqual(manga.status, .ongoing)
+
+        let expected = CompatHTTPRequest(
+            url: detailURL,
             cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
         )
         let requests = await transport.requests()

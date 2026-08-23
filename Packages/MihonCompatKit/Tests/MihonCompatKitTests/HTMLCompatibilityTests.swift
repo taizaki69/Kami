@@ -30,7 +30,7 @@ final class HTMLCompatibilityTests: XCTestCase {
             try context.select(context.document, query: "div.pagination__pages").first
         )
 
-        XCTAssertEqual(try anchor.ownText(), "Alpha & Omega")
+        XCTAssertEqual(anchor.ownText(), "Alpha & Omega")
         XCTAssertEqual(
             try anchor.absUrl("href"),
             "https://batcave.biz/comic/alpha?from=popular#top"
@@ -40,6 +40,32 @@ final class HTMLCompatibilityTests: XCTestCase {
             "https://batcave.biz/uploads/alpha.jpg"
         )
         XCTAssertEqual(pagination.children().array().last?.tagName(), "a")
+    }
+
+    func testRelativeDirectChildSelectorsMatchModernJsoupSemantics() throws {
+        let html = """
+        <ul class="page__list">
+          <li id="direct"><div>Publisher</div><a>Direct Value</a></li>
+          <li id="nested"><section><div>Publisher</div></section><a>Nested Value</a></li>
+          <li id="other"><div>Writer</div><a>Other Value</a></li>
+        </ul>
+        """
+        let context = try CompatHTMLParser.parse(
+            html,
+            baseURL: "https://example.test/details",
+            policy: .init()
+        )
+
+        let matches = try context.select(
+            context.document,
+            query: ".page__list > li:has(> div:contains(Publisher))"
+        )
+        XCTAssertEqual(matches.map { $0.id() }, ["direct"])
+
+        let anchor = try XCTUnwrap(
+            try context.select(try XCTUnwrap(matches.first), query: "> a").first
+        )
+        XCTAssertEqual(anchor.ownText(), "Direct Value")
     }
 
     func testParserRejectsInvalidBaseURLAndOversizedInput() {

@@ -82,6 +82,11 @@ public enum CompatHTMLError: Swift.Error, Sendable, Equatable, CustomStringConve
 /// Shared state for one parsed document. Element wrappers retain this context
 /// so selector work is cumulative across every call derived from the document.
 final class CompatHTMLContext {
+    private struct DirectChildHasPlan {
+        let baseQuery: String
+        let childQueries: [String]
+    }
+
     let document: SwiftSoup.Document
     let policy: CompatHTMLPolicy
     let nodeCount: Int
@@ -101,14 +106,35 @@ final class CompatHTMLContext {
             throw CompatHTMLError.selectorTooLarge(limit: policy.maximumSelectorBytes)
         }
 
-        let cost = queryBytes.multipliedReportingOverflow(by: max(1, nodeCount))
-        guard !cost.overflow, cost.partialValue <= remainingSelectorWork else {
+        let directChildPlan = Self.directChildHasPlan(query)
+        let passes = 1 + (directChildPlan?.childQueries.count ?? 0)
+        let baseCost = queryBytes.multipliedReportingOverflow(by: max(1, nodeCount))
+        let cost = baseCost.partialValue.multipliedReportingOverflow(by: passes)
+        guard !baseCost.overflow, !cost.overflow,
+              cost.partialValue <= remainingSelectorWork else {
             throw CompatHTMLError.selectorBudgetExceeded(limit: policy.maximumSelectorWork)
         }
         remainingSelectorWork -= cost.partialValue
 
         do {
-            let elements = try root.select(query).array()
+            let elements: [SwiftSoup.Element]
+            if let plan = directChildPlan {
+                let candidates = try Self.selectRaw(root, query: plan.baseQuery)
+                let evaluators = try plan.childQueries.map {
+                    try SwiftSoup.QueryParser.parse($0)
+                }
+                elements = try candidates.filter { candidate in
+                    for evaluator in evaluators {
+                        let hasDirectMatch = try candidate.children().array().contains { child in
+                            try evaluator.matches(candidate, child)
+                        }
+                        if !hasDirectMatch { return false }
+                    }
+                    return true
+                }
+            } else {
+                elements = try Self.selectRaw(root, query: query)
+            }
             guard elements.count <= policy.maximumSelectorResults else {
                 throw CompatHTMLError.tooManySelectorResults(
                     limit: policy.maximumSelectorResults
@@ -120,6 +146,128 @@ final class CompatHTMLContext {
         } catch {
             throw CompatHTMLError.invalidSelector
         }
+    }
+
+    private static func selectRaw(
+        _ root: SwiftSoup.Element,
+        query: String
+    ) throws -> [SwiftSoup.Element] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix(">") {
+            return try root.select(":root " + trimmed).array()
+        }
+        return try root.select(trimmed).array()
+    }
+
+    /// SwiftSoup 2.9.6 predates Jsoup's relative-selector handling inside
+    /// `:has(...)`. Extract top-level `:has(> child)` clauses and enforce them
+    /// against direct children while leaving the rest of the selector to the
+    /// full CSS engine. Nested/quoted parentheses are scanned, not split by a
+    /// regular expression, so `:contains(...)` remains intact.
+    private static func directChildHasPlan(_ query: String) -> DirectChildHasPlan? {
+        let bytes = Array(query.utf8)
+        var output: [UInt8] = []
+        output.reserveCapacity(bytes.count)
+        var children: [String] = []
+        var index = 0
+        var nesting = 0
+        var quote: UInt8?
+        var escaped = false
+
+        while index < bytes.count {
+            let byte = bytes[index]
+            if let activeQuote = quote {
+                output.append(byte)
+                if escaped {
+                    escaped = false
+                } else if byte == 0x5C {
+                    escaped = true
+                } else if byte == activeQuote {
+                    quote = nil
+                }
+                index += 1
+                continue
+            }
+            if byte == 0x22 || byte == 0x27 {
+                quote = byte
+                output.append(byte)
+                index += 1
+                continue
+            }
+
+            if nesting == 0, isHasToken(bytes, at: index),
+               let close = matchingParenthesis(bytes, open: index + 4) {
+                var start = index + 5
+                var end = close
+                while start < end, isASCIIWhitespace(bytes[start]) { start += 1 }
+                while end > start, isASCIIWhitespace(bytes[end - 1]) { end -= 1 }
+                if start < end, bytes[start] == 0x3E {
+                    start += 1
+                    while start < end, isASCIIWhitespace(bytes[start]) { start += 1 }
+                    guard start < end else { return nil }
+                    children.append(String(decoding: bytes[start..<end], as: UTF8.self))
+                    index = close + 1
+                    continue
+                }
+            }
+
+            output.append(byte)
+            if byte == 0x28 {
+                nesting += 1
+            } else if byte == 0x29, nesting > 0 {
+                nesting -= 1
+            }
+            index += 1
+        }
+
+        guard !children.isEmpty else { return nil }
+        let base = String(decoding: output, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return DirectChildHasPlan(
+            baseQuery: base.isEmpty ? "*" : base,
+            childQueries: children
+        )
+    }
+
+    private static func isHasToken(_ bytes: [UInt8], at index: Int) -> Bool {
+        guard index + 4 < bytes.count, bytes[index] == 0x3A else { return false }
+        let h = bytes[index + 1] | 0x20
+        let a = bytes[index + 2] | 0x20
+        let s = bytes[index + 3] | 0x20
+        return h == 0x68 && a == 0x61 && s == 0x73 && bytes[index + 4] == 0x28
+    }
+
+    private static func matchingParenthesis(_ bytes: [UInt8], open: Int) -> Int? {
+        guard open < bytes.count, bytes[open] == 0x28 else { return nil }
+        var depth = 1
+        var index = open + 1
+        var quote: UInt8?
+        var escaped = false
+        while index < bytes.count {
+            let byte = bytes[index]
+            if let activeQuote = quote {
+                if escaped {
+                    escaped = false
+                } else if byte == 0x5C {
+                    escaped = true
+                } else if byte == activeQuote {
+                    quote = nil
+                }
+            } else if byte == 0x22 || byte == 0x27 {
+                quote = byte
+            } else if byte == 0x28 {
+                depth += 1
+            } else if byte == 0x29 {
+                depth -= 1
+                if depth == 0 { return index }
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    private static func isASCIIWhitespace(_ byte: UInt8) -> Bool {
+        byte == 0x20 || byte == 0x09 || byte == 0x0A || byte == 0x0C || byte == 0x0D
     }
 
     func boundedString(_ value: String) throws -> String {

@@ -2,7 +2,9 @@ import XCTest
 @testable import MihonCompatKit
 
 final class CompatHTTPRequestTests: XCTestCase {
-    private func makeVM() throws -> (DexInterpreter, HostBridge) {
+    private func makeVM(
+        htmlPolicy: CompatHTMLPolicy = .init()
+    ) throws -> (DexInterpreter, HostBridge) {
         var builder = DexBuilder()
         builder.setClass("LTest;")
         builder.addMethod(.init(
@@ -13,7 +15,7 @@ final class CompatHTTPRequestTests: XCTestCase {
             insns: [0x000e],
             isStatic: true
         ))
-        let bridge = HostBridge.minimal()
+        let bridge = HostBridge.minimal(htmlPolicy: htmlPolicy)
         return (DexInterpreter(dex: try DexFile(builder.build()), bridge: bridge), bridge)
     }
 
@@ -228,6 +230,79 @@ final class CompatHTTPRequestTests: XCTestCase {
             prototype: "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
             isStatic: true,
             args: [HostBridge.string(String(repeating: "x", count: 8_193)), HostBridge.string("UTF-8")]
+        ))
+    }
+
+    func testKotlinJoinToStringDefaultsAndExplicitLimit() throws {
+        let (vm, bridge) = try makeVM()
+        let values = RVal.arr(ArrInstance(
+            elemDescriptor: "Ljava/lang/Object;",
+            elements: [
+                HostBridge.string("Action"),
+                HostBridge.string("Adventure"),
+                HostBridge.string("Comic"),
+            ]
+        ))
+        let list = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "listOf",
+            prototype: "([Ljava/lang/Object;)Ljava/util/List;",
+            isStatic: true,
+            args: [values]
+        )
+        let prototype = "(Ljava/lang/Iterable;Ljava/lang/CharSequence;Ljava/lang/CharSequence;Ljava/lang/CharSequence;ILjava/lang/CharSequence;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/lang/String;"
+
+        let defaults = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "joinToString$default",
+            prototype: prototype,
+            isStatic: true,
+            args: [list, .null, .null, .null, .int(0), .null, .null, .int(0x3F), .null]
+        )
+        XCTAssertEqual(vmStringValue(defaults), "Action, Adventure, Comic")
+
+        let limited = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "joinToString$default",
+            prototype: prototype,
+            isStatic: true,
+            args: [
+                list,
+                HostBridge.string("|"),
+                HostBridge.string("["),
+                HostBridge.string("]"),
+                .int(2),
+                HostBridge.string("more"),
+                .null,
+                .int(0),
+                .null,
+            ]
+        )
+        XCTAssertEqual(vmStringValue(limited), "[Action|Adventure|more]")
+    }
+
+    func testKotlinJoinToStringEnforcesOutputLimit() throws {
+        let (vm, bridge) = try makeVM(
+            htmlPolicy: .init(maximumExtractedStringBytes: 4)
+        )
+        let values = RVal.arr(ArrInstance(
+            elemDescriptor: "Ljava/lang/Object;",
+            elements: [HostBridge.string("12345")]
+        ))
+        let list = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "listOf",
+            prototype: "([Ljava/lang/Object;)Ljava/util/List;",
+            isStatic: true,
+            args: [values]
+        )
+
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "joinToString$default",
+            prototype: "(Ljava/lang/Iterable;Ljava/lang/CharSequence;Ljava/lang/CharSequence;Ljava/lang/CharSequence;ILjava/lang/CharSequence;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/lang/String;",
+            isStatic: true,
+            args: [list, .null, .null, .null, .int(0), .null, .null, .int(0x3F), .null]
         ))
     }
 }

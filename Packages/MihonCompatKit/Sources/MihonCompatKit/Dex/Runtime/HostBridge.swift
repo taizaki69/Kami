@@ -1451,6 +1451,75 @@ public final class HostBridge {
             destination.elements.append(contentsOf: source.elements)
             return .int(1)
         }
+        bridge.register(
+            class: collections,
+            "joinToString$default",
+            prototype: "(Ljava/lang/Iterable;Ljava/lang/CharSequence;Ljava/lang/CharSequence;Ljava/lang/CharSequence;ILjava/lang/CharSequence;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)Ljava/lang/String;",
+            isStatic: true
+        ) { _, args in
+            let values = try listBox(args, "CollectionsKt.joinToString").elements
+            guard case let .int(mask) = try argument(args, 7, "CollectionsKt.joinToString mask") else {
+                throw VMError.verify("CollectionsKt.joinToString default mask")
+            }
+            let separator = mask & 0x01 != 0
+                ? ", "
+                : try requiredString(args, 1, "CollectionsKt.joinToString separator")
+            let prefix = mask & 0x02 != 0
+                ? ""
+                : try requiredString(args, 2, "CollectionsKt.joinToString prefix")
+            let postfix = mask & 0x04 != 0
+                ? ""
+                : try requiredString(args, 3, "CollectionsKt.joinToString postfix")
+            let limit: Int
+            if mask & 0x08 != 0 {
+                limit = -1
+            } else {
+                guard case let .int(value) = try argument(
+                    args, 4, "CollectionsKt.joinToString limit"
+                ) else { throw VMError.verify("CollectionsKt.joinToString limit") }
+                limit = Int(value)
+            }
+            let truncated = mask & 0x10 != 0
+                ? "..."
+                : try requiredString(args, 5, "CollectionsKt.joinToString truncated")
+            let transform = mask & 0x20 != 0
+                ? RVal.null
+                : try argument(args, 6, "CollectionsKt.joinToString transform")
+            guard transform.isNull else {
+                throw VMError.verify("CollectionsKt.joinToString transform is not implemented")
+            }
+
+            let maximumBytes = bridge.htmlPolicy.maximumExtractedStringBytes
+            var output = ""
+            var outputBytes = 0
+            func append(_ value: String) throws {
+                let count = value.utf8.count
+                let total = outputBytes.addingReportingOverflow(count)
+                guard !total.overflow, total.partialValue <= maximumBytes else {
+                    throw hostThrowable(
+                        "Ljava/lang/IllegalArgumentException;",
+                        "joined string is too long"
+                    )
+                }
+                output.append(value)
+                outputBytes = total.partialValue
+            }
+
+            try append(prefix)
+            var count = 0
+            for value in values {
+                count += 1
+                if count > 1 { try append(separator) }
+                if limit < 0 || count <= limit {
+                    try append(vmStringValue(value))
+                } else {
+                    break
+                }
+            }
+            if limit >= 0, count > limit { try append(truncated) }
+            try append(postfix)
+            return string(output)
+        }
 
         let mutableListClasses = [
             "Ljava/util/ArrayList;",
