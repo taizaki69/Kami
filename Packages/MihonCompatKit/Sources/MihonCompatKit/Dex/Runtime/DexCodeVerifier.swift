@@ -51,6 +51,15 @@ enum DexCodeVerifier {
         let expectedKind: PayloadKind
     }
 
+    private struct DecodedStream {
+        let units: [UInt16]
+        let instructionStarts: Set<Int>
+        let instructions: [InstructionInfo]
+        let payloads: [Int: PayloadInfo]
+        let branches: [BranchReference]
+        let payloadReferences: [PayloadReference]
+    }
+
     private struct ExceptionTable {
         let tryBlocks: [DexTryBlock]
         let handlerEntries: Set<Int>
@@ -71,117 +80,13 @@ enum DexCodeVerifier {
                 "outs_size \(code.outsSize) exceeds registers_size \(code.registersSize) for \(context)"
             )
         }
-        guard code.insnsCount <= maximumCodeUnits else {
-            throw VMError.verify(
-                "code item for \(context) has \(code.insnsCount) units; limit is \(maximumCodeUnits)"
-            )
-        }
-
-        let (byteCount, byteCountOverflow) = code.insnsCount.multipliedReportingOverflow(by: 2)
-        guard !byteCountOverflow, code.insnsOffset >= 0,
-              byteCount <= dex.source.count,
-              code.insnsOffset <= dex.source.count - byteCount else {
-            throw VMError.verify("truncated instruction stream for \(context)")
-        }
-
-        var units: [UInt16] = []
-        units.reserveCapacity(code.insnsCount)
-        for index in 0..<code.insnsCount {
-            let offset = code.insnsOffset + index * 2
-            units.append(UInt16(dex.source[offset]) | UInt16(dex.source[offset + 1]) << 8)
-        }
-
-        var instructionStarts: Set<Int> = []
-        var instructions: [InstructionInfo] = []
-        var payloads: [Int: PayloadInfo] = [:]
-        var branches: [BranchReference] = []
-        var payloadReferences: [PayloadReference] = []
-        var pc = 0
-
-        while pc < units.count {
-            let word = units[pc]
-            let opcode = UInt8(word & 0xff)
-            if opcode == 0 {
-                if word == 0 {
-                    instructionStarts.insert(pc)
-                    instructions.append(InstructionInfo(address: pc, width: 1, opcode: opcode))
-                    pc += 1
-                    continue
-                }
-                let payload = try payloadInfo(at: pc, units: units, context: context)
-                payloads[pc] = payload
-                pc += payload.width
-                continue
-            }
-
-            let width = try instructionWidth(opcode, address: pc, context: context)
-            guard width <= units.count - pc else {
-                throw VMError.verify(
-                    "truncated opcode 0x\(String(opcode, radix: 16)) at pc \(pc) in \(context)"
-                )
-            }
-            instructionStarts.insert(pc)
-            instructions.append(InstructionInfo(address: pc, width: width, opcode: opcode))
-
-            switch opcode {
-            case 0x28:
-                branches.append(BranchReference(
-                    source: pc,
-                    offset: Int64(Int8(bitPattern: UInt8(word >> 8))),
-                    name: "goto",
-                    allowsZeroOffset: false
-                ))
-            case 0x29:
-                branches.append(BranchReference(
-                    source: pc,
-                    offset: Int64(Int16(bitPattern: units[pc + 1])),
-                    name: "goto/16",
-                    allowsZeroOffset: false
-                ))
-            case 0x2a:
-                branches.append(BranchReference(
-                    source: pc,
-                    offset: signed32(units[pc + 1], units[pc + 2]),
-                    name: "goto/32",
-                    allowsZeroOffset: true
-                ))
-            case 0x32...0x37:
-                branches.append(BranchReference(
-                    source: pc,
-                    offset: Int64(Int16(bitPattern: units[pc + 1])),
-                    name: "if-test",
-                    allowsZeroOffset: false
-                ))
-            case 0x38...0x3d:
-                branches.append(BranchReference(
-                    source: pc,
-                    offset: Int64(Int16(bitPattern: units[pc + 1])),
-                    name: "if-testz",
-                    allowsZeroOffset: false
-                ))
-            case 0x26:
-                payloadReferences.append(PayloadReference(
-                    source: pc,
-                    offset: signed32(units[pc + 1], units[pc + 2]),
-                    expectedKind: .arrayData
-                ))
-            case 0x2b:
-                payloadReferences.append(PayloadReference(
-                    source: pc,
-                    offset: signed32(units[pc + 1], units[pc + 2]),
-                    expectedKind: .packedSwitch
-                ))
-            case 0x2c:
-                payloadReferences.append(PayloadReference(
-                    source: pc,
-                    offset: signed32(units[pc + 1], units[pc + 2]),
-                    expectedKind: .sparseSwitch
-                ))
-            default:
-                break
-            }
-            pc += width
-        }
+        let decoded = try decodeStream(code: code, dex: dex, context: context)
+        let units = decoded.units
+        let instructionStarts = decoded.instructionStarts
+        let instructions = decoded.instructions
+        let payloads = decoded.payloads
+        let branches = decoded.branches
+        let payloadReferences = decoded.payloadReferences
 
         var codeBoundaries = instructionStarts
         codeBoundaries.insert(units.count)
@@ -295,6 +200,146 @@ enum DexCodeVerifier {
             context: context
         )
         return tryBlocks
+    }
+
+    /// Exact instruction boundaries used by both verification and offline
+    /// compatibility inventory. Operand words and payload bodies are omitted.
+    static func decodeInstructions(
+        code: DexFile.CodeItem,
+        dex: DexFile,
+        context: String
+    ) throws -> [InstructionInfo] {
+        try decodeStream(code: code, dex: dex, context: context).instructions
+    }
+
+    private static func decodeStream(
+        code: DexFile.CodeItem,
+        dex: DexFile,
+        context: String
+    ) throws -> DecodedStream {
+        guard code.insnsCount > 0 else {
+            throw VMError.verify("empty code item for \(context)")
+        }
+        guard code.insnsCount <= maximumCodeUnits else {
+            throw VMError.verify(
+                "code item for \(context) has \(code.insnsCount) units; limit is \(maximumCodeUnits)"
+            )
+        }
+
+        let (byteCount, byteCountOverflow) = code.insnsCount.multipliedReportingOverflow(by: 2)
+        guard !byteCountOverflow, code.insnsOffset >= 0,
+              byteCount <= dex.source.count,
+              code.insnsOffset <= dex.source.count - byteCount else {
+            throw VMError.verify("truncated instruction stream for \(context)")
+        }
+
+        var units: [UInt16] = []
+        units.reserveCapacity(code.insnsCount)
+        for index in 0..<code.insnsCount {
+            let offset = code.insnsOffset + index * 2
+            units.append(UInt16(dex.source[offset]) | UInt16(dex.source[offset + 1]) << 8)
+        }
+
+        var instructionStarts: Set<Int> = []
+        var instructions: [InstructionInfo] = []
+        var payloads: [Int: PayloadInfo] = [:]
+        var branches: [BranchReference] = []
+        var payloadReferences: [PayloadReference] = []
+        var pc = 0
+
+        while pc < units.count {
+            let word = units[pc]
+            let opcode = UInt8(word & 0xff)
+            if opcode == 0 {
+                if word == 0 {
+                    instructionStarts.insert(pc)
+                    instructions.append(InstructionInfo(address: pc, width: 1, opcode: opcode))
+                    pc += 1
+                    continue
+                }
+                let payload = try payloadInfo(at: pc, units: units, context: context)
+                payloads[pc] = payload
+                pc += payload.width
+                continue
+            }
+
+            let width = try instructionWidth(opcode, address: pc, context: context)
+            guard width <= units.count - pc else {
+                throw VMError.verify(
+                    "truncated opcode 0x\(String(opcode, radix: 16)) at pc \(pc) in \(context)"
+                )
+            }
+            instructionStarts.insert(pc)
+            instructions.append(InstructionInfo(address: pc, width: width, opcode: opcode))
+
+            switch opcode {
+            case 0x28:
+                branches.append(BranchReference(
+                    source: pc,
+                    offset: Int64(Int8(bitPattern: UInt8(word >> 8))),
+                    name: "goto",
+                    allowsZeroOffset: false
+                ))
+            case 0x29:
+                branches.append(BranchReference(
+                    source: pc,
+                    offset: Int64(Int16(bitPattern: units[pc + 1])),
+                    name: "goto/16",
+                    allowsZeroOffset: false
+                ))
+            case 0x2a:
+                branches.append(BranchReference(
+                    source: pc,
+                    offset: signed32(units[pc + 1], units[pc + 2]),
+                    name: "goto/32",
+                    allowsZeroOffset: true
+                ))
+            case 0x32...0x37:
+                branches.append(BranchReference(
+                    source: pc,
+                    offset: Int64(Int16(bitPattern: units[pc + 1])),
+                    name: "if-test",
+                    allowsZeroOffset: false
+                ))
+            case 0x38...0x3d:
+                branches.append(BranchReference(
+                    source: pc,
+                    offset: Int64(Int16(bitPattern: units[pc + 1])),
+                    name: "if-testz",
+                    allowsZeroOffset: false
+                ))
+            case 0x26:
+                payloadReferences.append(PayloadReference(
+                    source: pc,
+                    offset: signed32(units[pc + 1], units[pc + 2]),
+                    expectedKind: .arrayData
+                ))
+            case 0x2b:
+                payloadReferences.append(PayloadReference(
+                    source: pc,
+                    offset: signed32(units[pc + 1], units[pc + 2]),
+                    expectedKind: .packedSwitch
+                ))
+            case 0x2c:
+                payloadReferences.append(PayloadReference(
+                    source: pc,
+                    offset: signed32(units[pc + 1], units[pc + 2]),
+                    expectedKind: .sparseSwitch
+                ))
+            default:
+                break
+            }
+            pc += width
+        }
+
+        return DecodedStream(
+            units: units,
+            instructionStarts: instructionStarts,
+            instructions: instructions,
+            payloads: payloads,
+            branches: branches,
+            payloadReferences: payloadReferences
+        )
     }
 
     private static func instructionWidth(

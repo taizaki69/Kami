@@ -11,6 +11,7 @@ import MihonCompatKit
 ///   compat-audit missing <path.apk> [N]   Top-N missing external classes.
 ///   compat-audit index <url-or-file>      Dump an extension store index.
 ///   compat-audit methods <path.apk> [q]   Exact first-DEX method references.
+///   compat-audit opcodes <apk-or-dir>      Exact all-DEX opcode inventory.
 ///
 /// Works on any Swift host (Windows/Linux/macOS); pure Foundation.
 
@@ -26,6 +27,7 @@ struct CompatAudit {
               compat-audit index <url-or-path>
               compat-audit disasm <path.apk> [class-filter]
               compat-audit methods <path.apk> [text-or-decimal-index]
+              compat-audit opcodes <apk-or-directory>
             """)
             exit(64)
         }
@@ -69,6 +71,9 @@ struct CompatAudit {
             }
             let filter = args.count > 3 ? args[3] : ""
             methods([UInt8](data), filter: filter)
+
+        case "opcodes":
+            opcodeReport(at: args[2])
 
         default:
             print("unknown subcommand \(args[1])")
@@ -155,6 +160,130 @@ struct CompatAudit {
             exit(70)
         }
     }
+
+    /// Inventories exact decoded instructions across every classes*.dex entry.
+    /// A directory is processed offline in deterministic APK-name order.
+    static func opcodeReport(at path: String) {
+        do {
+            let urls = try opcodeInputURLs(at: path)
+            var reports: [(name: String, report: DexOpcodeInventory.Report)] = []
+            let inventory = DexOpcodeInventory()
+            for url in urls {
+                let bytes = [UInt8](try Data(contentsOf: url))
+                reports.append((url.lastPathComponent, try inventory.analyze(apk: bytes)))
+            }
+
+            for (index, item) in reports.enumerated() {
+                if index > 0 { print("") }
+                printOpcodeReport(name: item.name, report: item.report)
+            }
+            if reports.count > 1 {
+                print("")
+                printCorpusOpcodeTotals(reports)
+            }
+        } catch {
+            print("error: \(error)")
+            exit(70)
+        }
+    }
+
+    static func opcodeInputURLs(at path: String) throws -> [URL] {
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        let url = URL(fileURLWithPath: path)
+        if !isDirectory.boolValue { return [url] }
+
+        let urls = try fileManager.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ).filter { $0.pathExtension.lowercased() == "apk" }.sorted {
+            let lhs = $0.lastPathComponent.lowercased()
+            let rhs = $1.lastPathComponent.lowercased()
+            return lhs == rhs ? $0.lastPathComponent < $1.lastPathComponent : lhs < rhs
+        }
+        guard !urls.isEmpty else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        return urls
+    }
+
+    static func printOpcodeReport(name: String, report: DexOpcodeInventory.Report) {
+        print("== \(name) ==")
+        print("dex files:          \(report.dexCount)")
+        print("methods with code:  \(report.codeMethodCount)")
+        print("instructions:       \(report.instructionCount)")
+        for dex in report.dexFiles {
+            print("  \(dex.name): DEX \(String(format: "%03d", dex.version)), "
+                + "methods=\(dex.codeMethodCount), instructions=\(dex.instructionCount)")
+        }
+        print("opcodes:")
+        for opcode in report.opcodes {
+            let value = String(format: "0x%02x", opcode.opcode)
+            let example = opcode.examples.map {
+                "\($0.dexName):\($0.declaringClass)->\($0.methodSignature)@\($0.address)"
+            }.joined(separator: ", ")
+            print("  \(value) \(opcode.name): count=\(opcode.instructionCount), "
+                + "methods=\(opcode.methodCount), decode=\(yesNo(opcode.structurallyDecoded)), "
+                + "verify=\(yesNo(opcode.registerVerified)), execute=\(yesNo(opcode.executable))"
+                + (example.isEmpty ? "" : ", examples=\(example)"))
+        }
+    }
+
+    static func printCorpusOpcodeTotals(
+        _ reports: [(name: String, report: DexOpcodeInventory.Report)]
+    ) {
+        struct Total {
+            let name: String
+            let structurallyDecoded: Bool
+            let registerVerified: Bool
+            let executable: Bool
+            var instructionCount: Int
+            var methodCount: Int
+        }
+
+        var totals: [UInt8: Total] = [:]
+        for item in reports {
+            for opcode in item.report.opcodes {
+                if var total = totals[opcode.opcode] {
+                    total.instructionCount += opcode.instructionCount
+                    total.methodCount += opcode.methodCount
+                    totals[opcode.opcode] = total
+                } else {
+                    totals[opcode.opcode] = Total(
+                        name: opcode.name,
+                        structurallyDecoded: opcode.structurallyDecoded,
+                        registerVerified: opcode.registerVerified,
+                        executable: opcode.executable,
+                        instructionCount: opcode.instructionCount,
+                        methodCount: opcode.methodCount
+                    )
+                }
+            }
+        }
+
+        let dexCount = reports.reduce(0) { $0 + $1.report.dexCount }
+        let methodCount = reports.reduce(0) { $0 + $1.report.codeMethodCount }
+        let instructionCount = reports.reduce(0) { $0 + $1.report.instructionCount }
+        print("== Corpus total ==")
+        print("APKs:               \(reports.count)")
+        print("dex files:          \(dexCount)")
+        print("methods with code:  \(methodCount)")
+        print("instructions:       \(instructionCount)")
+        print("opcodes:")
+        for opcode in totals.keys.sorted() {
+            let total = totals[opcode]!
+            let value = String(format: "0x%02x", opcode)
+            print("  \(value) \(total.name): count=\(total.instructionCount), "
+                + "methods=\(total.methodCount), decode=\(yesNo(total.structurallyDecoded)), "
+                + "verify=\(yesNo(total.registerVerified)), execute=\(yesNo(total.executable))")
+        }
+    }
+
+    static func yesNo(_ value: Bool) -> String { value ? "yes" : "no" }
 
     static func inspect(_ r: ExtensionAnalyzer.Report) {
         print("== Extension ==")
