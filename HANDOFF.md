@@ -29,6 +29,78 @@ Always continue from the latest `origin/main`. The current runtime SHA above is
 the known-good executable state; the commit updating this handoff follows it
 and contains documentation only.
 
+## Tomorrow's resume point
+
+Stop state on 2026-08-22 (America/Lima):
+
+- No next-milestone runtime code was started after `f36a07a`. The only work
+  after its documentation checkpoint `72fc249` was a read-only survey followed
+  by this handoff update.
+- `main` was clean and exactly synchronized with `origin/main` before this
+  handoff-only commit. Resume from the latest `origin/main`, not from a local
+  build directory or an older SHA.
+- GitHub CLI is installed and authenticated as `taizaki69`; repository and
+  workflow access were working. No authentication setup should be needed on
+  this computer.
+- The three pinned APKs are present locally and still match the lock file:
+  Akuma 1.4.10, MangaDex 1.4.212, and BatCave 1.6.9.
+- The exact `f36a07a` implementation passed all 126 MihonCompatKit tests and
+  its Swift CI, iOS Build, and IPA Package workflows. The following
+  documentation head, `72fc249`, also passed all three workflows:
+  [Swift CI 32617796603](https://github.com/taizaki69/Kami/actions/runs/32617796603),
+  [iOS Build 32617796631](https://github.com/taizaki69/Kami/actions/runs/32617796631),
+  and [IPA Package 32617796599](https://github.com/taizaki69/Kami/actions/runs/32617796599).
+- Issue #1 has the completed dispatch-milestone evidence in
+  [progress comment 5384204450](https://github.com/taizaki69/Kami/issues/1#issuecomment-5384204450)
+  and remains open intentionally.
+
+### First milestone tomorrow: measure opcode reachability
+
+Begin by adding a deterministic instruction-inventory API and a
+`compat-audit opcodes <apk-or-directory>` command, then run it over all DEX
+files in the three pinned APKs. Do not select the next opcode implementation
+from raw byte frequency or from the first 12 code units printed by the current
+`disasm` command.
+
+The read-only survey established the exact reason this must come first:
+
+- `compat-audit disasm` currently opens only `classes.dex`, prints at most 12
+  raw code units per method, and does not walk instruction boundaries or
+  aggregate counts. It cannot distinguish operand bytes and payload contents
+  from real opcodes, so there is no honest corpus-wide reachability number yet.
+- `DexInterpreter.step` implements the classic executable opcode surface from
+  `0x00` through `0xe2` (with the DEX-reserved holes rejected). The structural
+  and register verifiers additionally recognize the DEX 038+ family
+  `0xfa`-`0xff`, but execution currently falls through to `unsupported opcode`:
+  `invoke-polymorphic`, `invoke-polymorphic/range`, `invoke-custom`,
+  `invoke-custom/range`, `const-method-handle`, and `const-method-type`.
+- The inventory must report DEX version, opcode count, declaring method and
+  address examples, and whether each opcode is structurally decoded,
+  register-verified, and executable. It must enumerate every `classes*.dex`
+  entry in deterministic order and must not count switch or array-data payload
+  words as instructions.
+- Add synthetic tests for instruction-boundary accuracy, payload exclusion,
+  deterministic ordering, and a multi-DEX APK before trusting the report.
+- Use the resulting report to choose one coherent implementation family. If
+  the pinned corpus does not contain `0xfa`-`0xff`, record that result and
+  prioritize the next real execution blocker (external hierarchy resolution
+  or the BatCave transport seam) instead of implementing dynamic invocation
+  speculatively.
+
+Start with:
+
+```bash
+git switch main
+git pull --ff-only
+git status --short --branch
+swift test --package-path Packages/MihonCompatKit
+swift build --package-path Packages/MihonCompatKit -c release --product compat-audit
+```
+
+On this Windows checkout, use the checked-in helper for the test command if
+needed. Keep the inventory offline and limited to `Tests/corpus/*.apk`; the APK
+signer gate in issue #3 is still open.
+
 ## Clone and restore the workspace
 
 Because the repository is private, authenticate the new computer first:
