@@ -70,8 +70,15 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       execution — bounded v1/v2/v3 verification, exact Mihon fingerprints,
       persisted initial trust, rotation-aware updates, and capability-gated
       registry admission — [#3](https://github.com/taizaki69/Kami/issues/3)
-- [ ] Trusted extension installation/selection UI and dynamic
-      APK-to-`KamiSource` construction through the persisted admission gate
+- [x] Trusted extension installation/selection UI and APK-to-`KamiSource`
+      construction through the persisted admission gate — repositories and
+      content-addressed APKs persist, repository keys or explicit legacy-store
+      signer confirmation establish trust, every startup re-authenticates the
+      exact bytes, and enabled downloaded sources appear in Browse. The factory
+      intentionally supports only exact measured profiles today.
+- [ ] General interpreted profile discovery: replace per-extension private
+      worker mappings with a measured inherited `KeiSource`/`HttpSource`
+      wrapper path and prove a second current extension end to end
 - [ ] Privacy-safe unresolved API/opcode telemetry and exportable compatibility
       report — [#4](https://github.com/taizaki69/Kami/issues/4)
 - [ ] zstd decompression for current-Mihon backups (schema work done)

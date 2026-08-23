@@ -19,7 +19,8 @@ work was recovered, completed, verified, and pushed.
   Do not add a project license without the creator's explicit decision; see
   `LICENSES.md` and issue #5.
 - Default branch: `main`
-- Current code/test checkpoint: `a902d064af4c55edcb59a0048cbc87feb4292202`
+- Current code/test checkpoint: `4d42def9dec5a9d884f2fb78982ba538b381114c`
+- Trusted installation/source-factory baseline: `4d42def9dec5a9d884f2fb78982ba538b381114c`
 - Signer-authenticated admission baseline: `a902d064af4c55edcb59a0048cbc87feb4292202`
 - Pinned interpreted `KamiSource` baseline: `3708aa1e9deff88b24db767c4b19e18bca738b16`
 - Page-list implementation baseline: `0555862278890ba78666a4b5c192421f0952a6be`
@@ -53,7 +54,41 @@ and contains documentation only.
 
 Stop state on 2026-08-23 (America/Lima):
 
-- Commit `a902d06` is pushed to `main`. `APKSignatureVerifier` performs bounded
+- Commit `4d42def` is pushed to `main`. Kami now has a durable, capability-gated
+  extension product flow. `ExtensionInstallationService` downloads repository
+  entries into content-addressed app storage, validates repository metadata,
+  and either uses the repository's pinned signing key or stages the already
+  verified bytes for explicit legacy-store certificate-fingerprint
+  confirmation. Updates inherit sticky trust, require signer continuity, and
+  preserve the existing enabled state. Canceled or failed installs do not leave
+  reusable trust state.
+- `ExtensionAdmissionService.restore` issues a fresh capability only for an
+  enabled persisted install whose bounded regular file still has the exact
+  stored SHA-256, cryptographic signature scheme/current signers/history,
+  explicit-user fingerprint when applicable, and package/version manifest.
+  `ExtensionSourceFactory` is the only consumer: it re-reads the exact bytes it
+  will execute into one bounded immutable buffer, repeats hash/signature/
+  manifest verification, uses the exact profile catalog, and rejects runtime
+  source IDs not declared by the repository. Unsupported profiles fail closed.
+- The app persists/removes extension repositories, pins a non-empty repository
+  signing key against later removal or substitution, provides install/update
+  and enable/disable UI, re-authenticates enabled installs on startup, disables
+  failed restorations, and shows active downloaded sources beside native ones
+  in Browse. Downloaded updates replace the old runtime; disabling removes it;
+  the protected native source ID cannot be shadowed. Browse text search now
+  actually calls the selected source's search operation.
+- The exact measured profile catalog still contains only BatCave 1.6.9. An
+  arbitrary authenticated extension can be stored securely, but it cannot be
+  enabled or heuristically executed until a measured profile exists.
+- Exact implementation-head `4d42def` passes
+  [Swift CI 32668016125](https://github.com/taizaki69/Kami/actions/runs/32668016125),
+  [iOS Build 32668016122](https://github.com/taizaki69/Kami/actions/runs/32668016122),
+  and [IPA Package 32668016110](https://github.com/taizaki69/Kami/actions/runs/32668016110).
+  This verifies 171 MihonCompatKit tests, the optimized CLI, all 18 macOS
+  KamiCore tests, Simulator/device targets, and the unsigned IPA artifact.
+  Locally, 171 MihonCompatKit and 7 portable KamiCore tests pass on
+  Windows/Swift 6.3.3.
+- Earlier commit `a902d06` established the signer gate. `APKSignatureVerifier` performs bounded
   APK v2, v3/v3.1, and conservative v1/JAR verification with RSA PKCS#1/PSS and
   ECDSA, X.509/SPKI matching, AOSP chunked content digests, v3 proof-of-rotation,
   and signature-stripping protection. Fingerprints exactly match Mihon's
@@ -72,19 +107,10 @@ Stop state on 2026-08-23 (America/Lima):
   signers and update identities. The tiny AOSP fixtures and full Apache-2.0
   license are tracked; real extension APKs remain ignored and fetched by hash
   lock.
-- Exact-head `a902d06` passes
-  [Swift CI 32665870013](https://github.com/taizaki69/Kami/actions/runs/32665870013),
-  [iOS Build 32665869921](https://github.com/taizaki69/Kami/actions/runs/32665869921),
-  and [IPA Package 32665869959](https://github.com/taizaki69/Kami/actions/runs/32665869959).
-  This verifies 171 MihonCompatKit tests, the optimized CLI, all 8 macOS
-  KamiCore tests, Simulator/device targets, and the unsigned IPA artifact.
 - Issue #3 is closed with the final evidence in
   [comment 5388393509](https://github.com/taizaki69/Kami/issues/3#issuecomment-5388393509).
   The exact-head typed-error hardening is recorded in
   [comment 5388440829](https://github.com/taizaki69/Kami/issues/3#issuecomment-5388440829).
-  A general APK-to-`KamiSource` factory and trusted installation/selection UI
-  remain deliberately unimplemented; the shipping app still cannot execute an
-  arbitrary download merely because the signer gate exists.
 - Commit `3708aa1` is pushed to `main`. `PinnedInterpretedSource` admits only
   the exact BatCave 1.6.9 bytes after SHA-256, manifest package/lib/entry-class,
   and DEX class validation, then exposes its real metadata, popular, latest,
@@ -149,9 +175,10 @@ Stop state on 2026-08-23 (America/Lima):
   signer regressions and 17
   pinned real-extension paths, 7 focused HTML/parser-limit tests, bounded Java
   URL-encoding and Kotlin string/collection regressions, and 4 async
-  interpreter/transport tests plus 3 pinned adapter regressions. KamiCore's 2
-  portable Windows tests pass; exact-head macOS CI passes all 8, including the
-  SQLite admission and update-policy suite. The optimized
+  interpreter/transport tests plus 3 pinned adapter regressions. KamiCore's 7
+  portable Windows tests pass; exact-head macOS CI passes all 18, including the
+  SQLite admission, repository persistence, install/restore/factory, enabled
+  state, and update-policy suite. The optimized
   MihonCompatKit/`compat-audit` build also passes.
 - The earlier `6cb46b5` async runtime still captures nested DEX frames, awaits
   without blocking, resumes inside-out with shared budgets and typed handlers,
@@ -187,30 +214,34 @@ Stop state on 2026-08-23 (America/Lima):
   records exact local and CI evidence. The issue is closed as completed at
   `3708aa1`; general compatibility remains separate work.
 
-### Completed security gate and next milestone
+### Completed trusted install/factory milestone and next frontier
 
-The first pinned interpreted `KamiSource` and signer-authenticated admission
-gate are complete under deterministic fixtures. Preserve this established trust
-order:
+The first interpreted `KamiSource`, signer-authenticated admission gate, durable
+installation/selection flow, and exact-byte source factory are complete under
+deterministic fixtures. Preserve this established trust order:
 
 ```text
 selected extension store + declared signing identity
   -> bounded APK v2/v3/v3.1 signer verification (v1 fallback where required)
   -> normalized certificate identity
   -> explicit persisted initial trust decision
-  -> installed package/version/signer binding
-  -> update signer match
-  -> executable-source eligibility
+  -> content-addressed installed package/version/signer binding
+  -> update signer continuity and enabled-state preservation
+  -> startup exact-file re-authentication
+  -> fresh executable-source capability
+  -> exact measured profile construction from the same bytes
+  -> declared source-ID validation and registry insertion
 ```
 
 Issue #3's valid, tampered, wrong-signer, rotated-signer, unsigned, and stripped
-fixtures now enforce this order. The next product milestone is a trusted
-installation/selection flow plus dynamic APK-to-`KamiSource` construction that
-can only consume the persisted admission capability. Do not let the UI, a new
-factory, or future profile discovery create a parallel bypass. General
-compatibility, filtered search, preferences, and custom image requests still
-need separately measured implementations. Keep `HostBridge` deny-by-default
-and never execute extension native libraries.
+fixtures plus the install/restore/factory regressions enforce this order. The
+next high-leverage milestone is general profile discovery: implement the
+inherited public `KeiSource`/`HttpSource` wrapper path so extensions do not need
+per-version mappings to R8-private workers, then prove a second current lib 1.6
+extension end to end. Do not let profile discovery create a parallel admission
+bypass. Filtered search, preferences, and custom image requests still need
+separately measured implementations. Keep `HostBridge` deny-by-default and
+never execute extension native libraries.
 
 Start with:
 
@@ -314,7 +345,7 @@ At the implementation baseline:
 | Check | Result |
 |---|---|
 | MihonCompatKit | 171 Swift tests passed locally on Windows/Swift 6.3.3 and exact-head macOS CI, including 6 APK-signature regressions |
-| KamiCore | 2 portable tests passed locally on Windows/Swift 6.3.3; all 8 tests passed on macOS with SQLite signer-trust persistence and update policy enabled |
+| KamiCore | 7 portable tests passed locally on Windows/Swift 6.3.3; all 18 tests passed on macOS with SQLite repository/trust persistence, install/restore/factory, enabled-state, update-policy, and registry lifecycle coverage |
 | Optimized package build | `scripts\windows_dev_test.bat Packages\MihonCompatKit release` compiled and linked SwiftSoup, Swift Crypto, MihonCompatKit, and `compat-audit.exe` in 253.21 seconds on the first release build |
 | Real APK constructors | Akuma, MangaDex, and BatCave passed |
 | Structural verifier | 9 focused regressions cover instruction geometry, branch/fallthrough boundaries, and aligned, bounded, correctly typed payloads and switch targets |
@@ -331,20 +362,47 @@ At the implementation baseline:
 | Pinned source adapter | 3 focused regressions cover every claimed `KamiSource` method/default image request, pre-parse SHA tamper rejection, and serialized concurrent VM/transport entry; 1 KamiCore regression covers registry insertion/deduplication |
 | APK signer verification | 6 focused regressions cover real Keiyoushi v2, AOSP v1/v3 and verified rotation, content/signature tampering, unsigned input, fingerprint normalization, and scheme stripping |
 | Persisted extension admission | 3 focused macOS test methods cover repository/user trust, unrelated-signer rejection, declared source-ID capability registration, verified signer rotation, and downgrade/same-version replacement rejection |
-| Swift CI | Exact-head `a902d06` [run 32665870013](https://github.com/taizaki69/Kami/actions/runs/32665870013) passed 171 MihonCompatKit tests, optimized CLI build, 8 KamiCore tests, and artifact upload |
-| iOS Simulator and unsigned device builds | Exact-head `a902d06` [run 32665869921](https://github.com/taizaki69/Kami/actions/runs/32665869921) passed both targets |
-| Unsigned IPA packaging | Exact-head `a902d06` [run 32665869959](https://github.com/taizaki69/Kami/actions/runs/32665869959) passed and uploaded `Kami-unsigned-ipa` |
+| Install/restore/source factory | 3 macOS install tests plus 4 portable factory tests cover repository-key install, explicit legacy confirmation, cancellation, startup restoration, exact-file replacement rejection, declared source-ID enforcement, real source registration, and refusal to guess an unmeasured profile |
+| Swift CI | Exact implementation head `4d42def` [run 32668016125](https://github.com/taizaki69/Kami/actions/runs/32668016125) passed 171 MihonCompatKit tests, optimized CLI build, 18 KamiCore tests, and artifact upload |
+| iOS Simulator and unsigned device builds | Exact implementation head `4d42def` [run 32668016122](https://github.com/taizaki69/Kami/actions/runs/32668016122) passed both targets |
+| Unsigned IPA packaging | Exact implementation head `4d42def` [run 32668016110](https://github.com/taizaki69/Kami/actions/runs/32668016110) passed and uploaded `Kami-unsigned-ipa` |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
 The successful exact-head public-repository runs validate every implementation
-checkpoint through `a902d06`, including the pinned app-facing source adapter
-and signer-authenticated admission gate, and produced both `compat-audit` and
-`Kami-unsigned-ipa` artifacts.
+checkpoint through `4d42def`, including the app-facing source adapter,
+signer-authenticated admission gate, durable install/restore flow, exact-byte
+factory, source selection UI, and Browse registration, and produced both
+`compat-audit` and `Kami-unsigned-ipa` artifacts.
 
 ## What the latest continuation completed
 
-Commits `86125f9` through `a902d06` complete signer-authenticated extension
-admission:
+Commit `4d42def` completes trusted extension installation, restoration, source
+construction, and selection:
+
+- `ExtensionInstallationService` owns content-addressed durable APK storage.
+  Repository-keyed first installs complete without a prompt; legacy stores
+  stage cryptographically verified bytes until the user confirms a displayed
+  certificate fingerprint. Pending confirmations are hash-bound, cancellation
+  removes the stage, updates retain sticky trust and enabled state, and old APK
+  files are removed only after successful replacement admission.
+- `ExtensionAdmissionService.restore` reads only enabled persisted installs and
+  checks the bounded regular file, exact hash, complete signature identity,
+  signer history, user trust, and manifest before issuing a new capability.
+- `ExtensionSourceFactory` is the only admission consumer. It authenticates the
+  same immutable buffer it passes to `InterpretedExtensionProfileCatalog`,
+  requires repository-declared source IDs, and rejects unsupported profiles.
+  The catalog currently contains only exact BatCave 1.6.9.
+- Repositories and their normalized signing keys persist. Key removal or
+  substitution is rejected; unavailable repositories remain listed and can be
+  removed. The Extensions UI installs/updates and enables/disables; AppModel
+  restores safely on startup; SourceRegistry replaces/removes downloaded
+  runtimes without allowing the native source to be shadowed; Browse displays
+  source origin and now performs nonblank source search correctly.
+- Exact-head workflows prove 171 MihonCompatKit tests, 18 macOS KamiCore tests,
+  optimized CLI output, both iOS build destinations, and the unsigned IPA.
+
+Earlier commits `86125f9` through `a902d06` completed signer-authenticated
+extension admission:
 
 - `APKSignatureVerifier` authenticates the APK Signing Block and signed content
   for v2/v3/v3.1, verifies v3 proof-of-rotation, and implements a conservative
@@ -364,10 +422,10 @@ admission:
 - Six tiny AOSP apksig fixtures are tracked with their full Apache-2.0 license;
   their pinned hashes eliminate a flaky Gitiles dependency. Real extension
   APKs remain ignored and downloaded from immutable releases.
-- Exact-head workflows prove 171 MihonCompatKit tests, 8 macOS KamiCore tests,
+- Their exact-head workflows proved 171 MihonCompatKit tests, 8 macOS KamiCore tests,
   optimized CLI output, both iOS build destinations, and the unsigned IPA.
-  Issue #3 is closed. Installation/selection UI and general source construction
-  remain the next boundary.
+  Issue #3 is closed. Those capabilities now feed the install/restore/factory
+  path completed at `4d42def`.
 
 Commit `f55a695` crosses the measured Jsoup boundary without pretending the
 source is end-to-end complete:
@@ -805,6 +863,10 @@ Proven today:
 - The locked BatCave profile exposes those operations, metadata, and default
   page image requests through `KamiSource`; source-scoped actor ownership
   serializes VM entry, and KamiCore's existing registry accepts the source.
+- Repository and APK persistence, repository-key or explicit-user first trust,
+  install/update and enable/disable UI, startup exact-file re-authentication,
+  capability-only source construction, failure-to-disabled behavior, and active
+  downloaded-source display in Browse.
 - Source-scoped, bounded OkHttp request/response/body/Okio values, async nested
   frame resumption, cancellation, typed transport/HTTP errors, the exact pinned
   BatCave POST assertion, and a deterministic no-live-network test transport.
@@ -813,15 +875,14 @@ Proven today:
   primitive/constructor/reference register dataflow over normal and exception
   edges.
 - Native MangaDex browsing through the existing `KamiSource` implementation;
-  the shipping app still defaults to it until trusted extension installation
-  and source selection are implemented.
+  the app starts with it and can add a supported authenticated downloaded source.
 - Simulator/device compilation and creation of a real unsigned IPA.
 
 Not proven or implemented:
 
-- A general downloaded-extension-to-`KamiSource` bridge beyond the compiled
-  BatCave profile, trusted installation/selection UI, filtered search, or a
-  measured custom reader image-request override.
+- A general downloaded-extension-to-`KamiSource` bridge beyond the exact
+  BatCave profile, filtered search, or a measured custom reader image-request
+  override.
 - Broad Jsoup coverage beyond the measured subset, kotlinx serialization beyond
   the bounded generated encoder/decoder slice,
   persistent source preferences and cookies, rate limiting, dynamic source
@@ -835,9 +896,9 @@ Not proven or implemented:
   dispatch, maximally specific interface defaults, and lexical class/interface
   `invoke-super` across parsed DEX graphs are working. Equivalent resolution
   across incomplete external hierarchy data remains open.
-- Trusted extension installation/selection UI and a general
-  APK-to-`KamiSource` constructor that consumes the persisted admission
-  capability without bypassing it.
+- General inherited `KeiSource`/`HttpSource` wrapper discovery and construction
+  without per-extension mappings to R8-private workers; a second current
+  extension has not yet crossed the full app-facing path.
 - A signed installation on a physical iPhone or iPad.
 - Production compatibility telemetry or a final distribution/licensing model.
 
@@ -861,6 +922,9 @@ Preserve these security facts:
 - Never restore a general `SourceRegistry.add`. Pinned compiled adapters use
   `addPinned`; downloaded adapters must use `addDownloaded` with an
   `ExtensionAdmission` issued and persisted by `ExtensionAdmissionService`.
+- Keep `ExtensionSourceFactory` as the only admission-capability consumer. It
+  must authenticate the exact bounded buffer supplied to a measured profile;
+  startup restoration must disable a record that cannot be re-authenticated.
 - Preserve update monotonicity, same-version byte equality, and verified
   single-signer lineage or exact multi-signer continuity.
 - Never load Android native `.so` files.
@@ -894,7 +958,7 @@ Address these before treating arbitrary downloaded extensions as safe.
 |---|---|---|
 | P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining external hierarchy and super/default resolution, opcode, and differential semantics work |
 | Completed | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | Exact pinned BatCave profile completed at `3708aa1`; general compatibility remains separate work |
-| Completed | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | v1/v2/v3 verification and persisted admission completed at `a902d06`; installation/profile construction remain separate work |
+| Completed | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | v1/v2/v3 verification and persisted admission completed at `a902d06`; the later install/restore/factory product path is complete at `4d42def` |
 | Diagnostics | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Deterministic, redacted unresolved-surface reports |
 | Distribution | [#5 Choose Kami's distribution and licensing model](https://github.com/taizaki69/Kami/issues/5) | Preserve all options; do not add a project license without an explicit owner decision |
 
@@ -902,14 +966,13 @@ The rest of the product backlog is in `TODO.md`.
 
 ## Recommended next implementation sequence
 
-1. Add trusted extension installation/selection and dynamic profile discovery
-   incrementally from measured corpus evidence. Every path must call
-   `ExtensionAdmissionService` and retain the resulting capability alongside
-   the exact APK bytes used to build the source.
-2. Build a general downloaded-APK-to-`KamiSource` constructor without turning
-   the compiled BatCave entrypoints into guesses for unrelated extensions.
-   Re-read and hash the persisted APK before construction so the capability
-   cannot be replayed against replacement bytes.
+1. Generalize profile discovery incrementally from measured corpus evidence.
+   Implement the public inherited `KeiSource`/`HttpSource` wrapper path so a
+   profile can use stable API entrypoints instead of mapping R8-private worker
+   names, while preserving the existing exact-byte factory and admission gate.
+2. Select a current lib 1.6 extension whose reached surface is close to the
+   implemented BatCave subset and prove it end to end through install, restore,
+   factory, registry, Browse, details, chapters, pages, and image requests.
 3. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
    plus canonical unresolved diagnostics for every new bridge decision.
 4. Continue issue #1 with broader external hierarchy and super/default

@@ -11,14 +11,24 @@ crosses the app-facing `KamiSource` boundary end to end under deterministic
 offline fixtures. This is not yet a complete verifier, Java or Kotlin runtime,
 general tachiyomix source bridge, or arbitrary-extension implementation.
 
-The signer-authenticated admission layer is now complete. Before any downloaded
-APK can become registry-eligible, Kami verifies its APK v2/v3/v3.1 signature or
-conservative v1 fallback, signed content digest, X.509 signer key, and any v3
-proof-of-rotation chain. Kami then matches the exact Mihon-format certificate
-fingerprint against selected-store metadata or an explicit user decision and
-atomically persists the package, version, APK hash/path, source IDs, signer
-history, and trust origin. Dynamic source construction and app installation/
-selection still need to be wired through that gate.
+The signer-authenticated admission and app installation layers are now wired
+end to end. Before any downloaded APK can become registry-eligible, Kami
+verifies its APK v2/v3/v3.1 signature or conservative v1 fallback, signed
+content digest, X.509 signer key, and any v3 proof-of-rotation chain. Kami then
+matches the exact Mihon-format certificate fingerprint against selected-store
+metadata or an explicit user decision and atomically persists the package,
+version, APK hash/path, source IDs, signer history, trust origin, and enabled
+state. Content-addressed APK storage, install/update controls, legacy-store
+signer confirmation, enable/disable controls, and startup restoration all use
+that same gate.
+
+`ExtensionSourceFactory` is the only admission-capability consumer. It re-reads
+the durable APK once into a bounded immutable buffer, rehashes it, re-verifies
+the full signing identity and manifest, selects an exact measured profile, and
+rejects any constructed source ID that the repository did not declare. The
+current catalog contains one exact BatCave 1.6.9 profile; an authenticated but
+unmeasured extension is stored securely and left disabled rather than executed
+heuristically.
 
 Measured real-APK behavior today:
 
@@ -67,6 +77,9 @@ Measured real-APK behavior today:
 
 ```text
 Extension APK                       (untrusted)
+   ↓ install + signature trust      durable, capability-gated
+content-addressed APK               persisted; re-authenticated on restore
+   ↓ exact profile catalog          BatCave 1.6.9 measured; others fail closed
    ↓ bounded ZIP/DEFLATE + CRC      working
 AndroidManifest.xml (AXML)          working
 classes*.dex                        validated structural parse
@@ -75,8 +88,8 @@ classes*.dex                        validated structural parse
    ↓ source-scoped HTTP transport   bounded async request/response slice works
    ↓ bounded HTML/JSON bridges      BatCave browse/details/chapters/pages works
    ↓ tachiyomix API bridge          pinned BatCave profile works
-KamiSource (Swift protocol)         native + pinned BatCave adapter work
-   ↓ SourceRegistry / app / DB      registration + combined refresh work
+KamiSource (Swift protocol)         native + admitted BatCave adapter work
+   ↓ SourceRegistry / app / DB      restore, enable/disable, Browse work
 ```
 
 The interpreter consumes `DexFile` code items directly. It follows the Android
@@ -217,12 +230,15 @@ synthetic and pinned-corpus tests:
   real APK.
 - Kotlin duration encoding/conversion reached by OkHttp cache-control setup.
 
-Signer-authenticated extension admission is now measured and persisted. The
-next layer is app installation/selection plus dynamic source-profile
-construction through that capability, followed by filtered search and a real
-custom image-request override. The longer tail remains additional Jsoup DOM
-behavior, string/collection overloads, broader serialization, preferences, and
-Android context/UI shims. A class appearing in the analyzer's
+Signer-authenticated admission, durable installation/selection, exact-byte
+restoration, and capability-consuming source construction are now measured.
+The next layer is general profile discovery: replace the exact profile's
+R8-private worker mapping with a measured inherited `KeiSource`/`HttpSource`
+wrapper path and prove a second current extension end to end. Filtered search
+and a real custom image-request override follow. The longer tail remains
+additional Jsoup DOM behavior, string/collection overloads, broader
+serialization, preferences, and Android context/UI shims. A class appearing in
+the analyzer's
 `implementedClasses` set is only a coarse prioritization signal; it does not
 mean every method on that class is callable.
 
@@ -230,11 +246,12 @@ mean every method on that class is callable.
 
 The target is a signature-aware bridge from `HttpSource`, `SManga`, `SChapter`,
 `MangasPage`, filters, network helpers, and Jsoup helpers onto `KamiSource`.
-The exact pinned BatCave profile implements the currently measured subset with
-one actor owning its mutable interpreter and source-scoped transport. General
-profile discovery and the remaining APIs are still M3 work. Per-source network
-clients must own rate limits, cookies, and redacted tracing. The first pinned
-end-to-end adapter is tracked in
+The exact BatCave profile implements the currently measured subset with one
+actor owning its mutable interpreter and source-scoped transport. The app can
+construct that profile from a restored admission, but general profile discovery
+and the remaining APIs are still M3 work. Per-source network clients must own
+rate limits, cookies, and redacted tracing. The first pinned end-to-end adapter
+is tracked in
 [GitHub issue #2](https://github.com/taizaki69/Kami/issues/2).
 
 ## M4 — WebView/Cloudflare bridge
@@ -263,9 +280,11 @@ rejects unsigned, tampered, wrong-signer, stripped-scheme, downgraded, or
 same-version-replaced APKs. Initial repository or explicit-user trust is sticky
 and persisted before the only downloaded-source registry path can be called.
 [GitHub issue #3](https://github.com/taizaki69/Kami/issues/3) records the
-implementation and exact-head evidence. The shipping app still has no general
-downloaded-APK source factory or installation/selection flow, so this security
-gate does not itself claim arbitrary extension compatibility.
+implementation and exact-head evidence. The shipping app now has a durable
+installation/selection flow and an exact-profile downloaded-APK source factory.
+The factory refuses authenticated extensions outside its measured catalog, so
+this completed trust path still does not claim arbitrary extension
+compatibility.
 
 ## Verification
 
@@ -276,16 +295,18 @@ string/collection-helper
 regressions, generated chapter/page JSON success/failure paths, and 4 focused
 async interpreter/transport regressions, plus 3 end-to-end adapter/tamper/
 concurrency regressions, alongside the existing parser, bytecode verifier,
-request-model, repository, and compression coverage. KamiCore has 2 portable
-Windows tests; macOS CI runs all 8, including SQLite signer persistence,
-wrong-signer and update-policy rejection, rotation, and downloaded registry
-admission. Swift CI verifies the SHA-256-locked APK corpus before running it.
+request-model, repository, and compression coverage. KamiCore has 7 portable
+Windows tests; macOS CI runs all 18, including SQLite signer persistence,
+repository-key pinning, install/update and legacy confirmation, exact-byte
+restore/factory rejection, enabled-state preservation, and downloaded registry
+replacement/removal. Swift CI verifies the SHA-256-locked APK corpus before
+running it.
 
-Exact-head commit `a902d06` passes
-[Swift CI 32665870013](https://github.com/taizaki69/Kami/actions/runs/32665870013),
-[iOS Build 32665869921](https://github.com/taizaki69/Kami/actions/runs/32665869921),
-and [IPA Package 32665869959](https://github.com/taizaki69/Kami/actions/runs/32665869959).
-Those runs cover the 171-test compatibility suite, optimized CLI build, 8
+Exact implementation commit `4d42def` passes
+[Swift CI 32668016125](https://github.com/taizaki69/Kami/actions/runs/32668016125),
+[iOS Build 32668016122](https://github.com/taizaki69/Kami/actions/runs/32668016122),
+and [IPA Package 32668016110](https://github.com/taizaki69/Kami/actions/runs/32668016110).
+Those runs cover the 171-test compatibility suite, optimized CLI build, 18
 KamiCore tests, Simulator/device compilation, and unsigned IPA artifact.
 
 The compatibility matrix records the exact versions, hashes, and methods. New

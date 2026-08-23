@@ -13,7 +13,9 @@ MihonCompatKit, never in the app.
 ┌──────────────┴───────────────────────────────┐
 │ KamiCore                                     │
 │  Models · LibraryStore (actor, SQLite)       │
-│  ExtensionAdmissionService · SourceRegistry  │
+│  ExtensionInstallationService                │
+│  ExtensionAdmissionService                   │
+│  ExtensionSourceFactory · SourceRegistry     │
 │  LibraryService                              │
 │  Native sources: MangaDex                    │
 └──────────────┬───────────────────────────────┘
@@ -25,7 +27,7 @@ MihonCompatKit, never in the app.
 │  APK: ZipArchive · Inflate · BinaryXML ·     │
 │       APKSignatureVerifier                   │
 │  Dex: DexFile + bounded M1 interpreter       │
-│  Sources: pinned interpreted profiles        │
+│  Sources: measured interpreted profiles      │
 │  Repository: index.pb/index.min.json client  │
 │  Backup: TachibkReader                       │
 │  Analyzer: ExtensionAnalyzer + compat-audit  │
@@ -51,6 +53,17 @@ MihonCompatKit, never in the app.
   downloaded-source registry path requires the resulting internal-init
   capability; updates must preserve signing identity and cannot downgrade or
   replace bytes under the same version code.
+- **Installation and restoration preserve the same trust chain.**
+  `ExtensionInstallationService` stores APKs by content hash. A repository's
+  normalized signing key authorizes a first install; a legacy store instead
+  requires explicit confirmation of the already-verified certificate
+  fingerprint. `ExtensionAdmissionService.restore` will issue a capability only
+  for an enabled record whose on-disk hash, signature scheme, complete signer
+  identity/history, user trust (when applicable), and manifest still match.
+  `ExtensionSourceFactory` is the only capability consumer: it reads one
+  bounded immutable buffer, repeats those checks on the bytes it will execute,
+  selects an exact measured profile, and verifies every runtime source ID was
+  declared by the repository. Startup failures are disabled rather than run.
 - **Untrusted code boundary.** Extension APKs are data until the interpreter
   runs them; even then they only reach iOS capabilities through explicit
   bridges (HTTP, preferences, cookies, WebView) with budgets and isolation

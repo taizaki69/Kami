@@ -55,11 +55,23 @@ rotation, and signature-stripping protection. KamiCore binds the verified
 package/version/APK hash and signer history to persisted repository or explicit
 user trust; downgrades, same-version byte replacement, unrelated signers, and
 unadmitted source IDs are rejected before downloaded-source registration.
-This closes the signer-admission security gate, but it is not a claim of broad
-extension execution: dynamic APK-to-`KamiSource` construction, installation and
-selection UI, filtered search, preferences, custom image-request behavior, and
-much of the Kotlin/Java surface remain open (`docs/EXTENSION_RUNTIME.md`). The
-shipping app still defaults to its native MangaDex source.
+
+The app now completes that trust path: it persists extension repositories and
+content-addressed APKs, automatically uses a repository's pinned signing key,
+asks the user to confirm a verified certificate fingerprint for legacy stores,
+supports install/update and enable/disable controls, and restores enabled
+extensions after rechecking the stored hash, signature, signer continuity, and
+manifest. The only APK-to-`KamiSource` factory consumes that restored admission,
+re-authenticates the exact immutable buffer it executes, and refuses undeclared
+source IDs or unsupported profiles. Enabled downloaded sources appear beside
+the native MangaDex source in Browse.
+
+This is still not a claim of broad extension execution: the runtime profile
+catalog currently recognizes only the exact measured BatCave 1.6.9 build.
+General inherited `KeiSource`/`HttpSource` profile discovery, filtered search,
+preferences, custom image-request behavior, and much of the Kotlin/Java surface
+remain open (`docs/EXTENSION_RUNTIME.md`). Kami starts with native MangaDex and
+can additionally restore a supported, authenticated downloaded source.
 
 ## Layout
 
@@ -91,13 +103,14 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 171 tests run on Windows with Swift 6.3
-(`scripts/windows_dev_test.bat`). GitHub Actions is configured to run the pinned
-real-APK suite on macOS, compiles both Simulator and unsigned device targets,
-and publishes an unsigned IPA artifact. Exact-head commit `a902d06` passed
-[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32665870013),
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32665869921), and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32665869959).
+The compatibility kit and all 171 tests run on Windows with Swift 6.3, together
+with 7 portable KamiCore tests (`scripts/windows_dev_test.bat`). GitHub Actions
+runs the pinned real-APK suite plus all 18 macOS KamiCore tests, compiles both
+Simulator and unsigned device targets, and publishes an unsigned IPA artifact.
+Exact implementation commit `4d42def` passed
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32668016125),
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32668016122), and
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32668016110).
 The `compat-audit` CLI produced the measured compatibility matrix from the
 locked corpus.
 

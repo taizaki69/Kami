@@ -4,9 +4,9 @@
 
 | Component | Verified how |
 |---|---|
-| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 — **171/171 tests pass**, including 6 APK-signature regressions, 17 real-APK paths, 3 pinned adapter/tamper/concurrency paths, 7 bounded HTML/selector regressions, 46 pre-execution-verifier tests, and async HTTP/DEX coverage; exact-head macOS [Swift CI 32665870013](https://github.com/taizaki69/Kami/actions/runs/32665870013) passes |
+| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 — **171/171 tests pass**, including 6 APK-signature regressions, 17 real-APK paths, 3 pinned adapter/tamper/concurrency paths, 7 bounded HTML/selector regressions, 46 pre-execution-verifier tests, and async HTTP/DEX coverage; exact-head macOS [Swift CI 32668016125](https://github.com/taizaki69/Kami/actions/runs/32668016125) passes |
 | compat-audit CLI | built and run on Windows against 3 SHA-256-locked extension APKs; uploaded by Swift CI on macOS |
-| KamiCore (models, SQLite store, source registry) | 2 portable Windows tests pass; exact-head macOS Swift CI passes all 8 tests, including SQLite migration, repository/user trust, wrong signer, verified rotation, downgrade and same-version replacement rejection, and downloaded registry admission |
+| KamiCore (models, SQLite store, install/admission/factory, source registry) | 7 portable Windows tests pass; exact-head macOS Swift CI passes all 18 tests, including SQLite migration, repository-key persistence, install/update/legacy confirmation, startup restoration, exact-byte factory re-authentication, unsupported-profile rejection, enabled-state handling, and downloaded registry replacement/removal |
 | App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |
 | IPA packaging | the `IPA Package` workflow builds a real Release `Kami.app`, packages `Kami-unsigned.ipa`, and uploads `Kami-unsigned-ipa` |
 
@@ -57,10 +57,10 @@ before the tests.
 
 The repository became public on 2026-08-23, so its standard GitHub-hosted
 runners now dispatch without consuming private-repository minutes. Exact-head
-commit `a902d06` passes [Swift CI 32665870013](https://github.com/taizaki69/Kami/actions/runs/32665870013),
-[iOS Build 32665869921](https://github.com/taizaki69/Kami/actions/runs/32665869921),
-and [IPA Package 32665869959](https://github.com/taizaki69/Kami/actions/runs/32665869959).
-The Swift job verifies the locked corpus, runs all 171 MihonCompatKit and 8
+implementation commit `4d42def` passes [Swift CI 32668016125](https://github.com/taizaki69/Kami/actions/runs/32668016125),
+[iOS Build 32668016122](https://github.com/taizaki69/Kami/actions/runs/32668016122),
+and [IPA Package 32668016110](https://github.com/taizaki69/Kami/actions/runs/32668016110).
+The Swift job verifies the locked corpus, runs all 171 MihonCompatKit and 18
 KamiCore tests, builds the optimized `compat-audit` CLI, and uploads the CLI.
 
 A signed install still requires credentials owned by the user; no certificate,
