@@ -1,6 +1,7 @@
 /// Transport-neutral HTTP values produced by the OkHttp compatibility layer.
-/// Building these values has no network side effects; a future per-source
-/// transport adapter will consume them after policy and signer gates pass.
+/// Building these values has no network side effects. They cross the explicit
+/// `CompatHTTPTransport` boundary only when a caller supplies a source-scoped
+/// transport; interpreted `awaitSuccess` is not wired to that boundary yet.
 public struct CompatHTTPHeader: Sendable, Equatable {
     public let name: String
     public let value: String
