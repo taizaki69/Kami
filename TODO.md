@@ -47,12 +47,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 - [~] Kotlin/Java class library M2 — Object/String/StringBuilder, core Kotlin
       ABI, bounded collections, atomics, reflection, and Mihon filters cover
       the pinned BatCave request path; bounded form/header/URL/cache/request/
-      call models and Kotlin duration shims now reach the transport seam;
-      measured long tail remains
+      call models, Kotlin duration shims, async frame resumption, source-scoped
+      transport, and bounded response/body/Okio values now reach the Jsoup HTML
+      parser seam; measured long tail remains
 - [ ] tachiyomix API bridge M3 (`HttpSource` → `KamiSource`)
 - [ ] First real extension executing popular→search→details→chapters→pages —
-      BatCave now constructs its exact popular POST request and stops exactly
-      at `OkHttpExtensionsKt.awaitSuccess` before transport;
+      BatCave now sends its exact popular POST through a deterministic injected
+      transport, resumes the real DEX path, and stops exactly at
+      `JsoupExtensionsKt.asJsoup$default` before HTML parsing;
       [#2](https://github.com/taizaki69/Kami/issues/2)
 - [ ] Verify store/APK signing identity before enabling downloaded extension
       execution — [#3](https://github.com/taizaki69/Kami/issues/3)

@@ -7,7 +7,7 @@ engineering problem. See `docs/EXTENSION_COMPATIBILITY_ANALYSIS.md` for the
 verified ecosystem research and `docs/EXTENSION_COMPATIBILITY_MATRIX.md` for
 measured status.
 
-**Honest status (2026-08-22):** the pure-Swift extension pipeline now covers
+**Honest status (2026-08-23):** the pure-Swift extension pipeline now covers
 store indexes, APK download, bounded ZIP/DEFLATE and binary-manifest parsing,
 validated DEX parsing, compatibility analysis, and an initial interpreter with
 a bounded pre-execution geometry/control-flow, exception-table, register-bounds,
@@ -20,11 +20,14 @@ Pinned real-APK tests execute the Akuma, MangaDex, and BatCave entry
 constructors plus BatCave's `getBaseUrl`, `getLang`, `getName`, and `getId`
 methods. BatCave's real popular-manga path now runs through Kotlin class
 initialization, filters, collections, iteration, coroutine setup, and a bounded
-pure OkHttp model. It constructs and asserts the exact BatCave popular POST
-request, creates an inert call, and stops at the unresolved `awaitSuccess`
-transport seam without network I/O. This is a measured M1/M2 runtime slice,
-**not end-to-end source compatibility**: no interpreted response has completed,
-and details, chapters, pages, transport, and much of the Kotlin/Java surface
+OkHttp model. It constructs the exact BatCave popular POST request, crosses an
+injected source-scoped async transport, resumes nested DEX frames, and exposes
+bounded `Response`, `ResponseBody`, and `BufferedSource` values. The measured
+path now stops at the unresolved Jsoup `asJsoup$default` HTML-parser boundary;
+a separate real-APK regression proves non-2xx responses become Mihon's
+`HttpException`. This is a measured M1/M2 runtime slice, **not end-to-end source
+compatibility**: no interpreted HTML has produced a manga result, and search,
+details, chapters, pages, preferences, and much of the Kotlin/Java surface
 remain open (`docs/EXTENSION_RUNTIME.md`). Kami currently reads through its
 native MangaDex source.
 
@@ -58,8 +61,8 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 126 tests run on Windows with Swift 6.3
-(`scripts/windows_dev_test.bat`). GitHub Actions independently runs the pinned
+The compatibility kit and all 143 tests run on Windows with Swift 6.3
+(`scripts/windows_dev_test.bat`). GitHub Actions is configured to run the pinned
 real-APK suite on macOS, compiles both Simulator and unsigned device targets,
 and publishes an unsigned IPA artifact. The `compat-audit` CLI produced the
 measured compatibility matrix from the locked corpus.

@@ -1,6 +1,6 @@
 # Extension Compatibility Matrix
 
-**Last updated:** 2026-08-22
+**Last updated:** 2026-08-23
 
 **Corpus:** immutable Keiyoushi release assets fetched by
 `scripts/fetch_corpus.sh` and verified against `Tests/corpus/manifest.json`.
@@ -20,24 +20,25 @@ is no compatibility claim.
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
 | DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| DEX execution | Partial M1/M2 working | 91 interpreter tests plus eight exact assertions against pinned APK paths; method/exception geometry, exact primitive/constructor/reference dataflow, resolved catch validation, runtime casts/catches, overload identity, invoke shape/kind, lexical super dispatch, interface defaults, and AOSP binary-op ordering are checked |
-| End-to-end source operations | Not implemented | BatCave popular constructs an exact inert POST request and reaches `awaitSuccess`; no interpreted response or network operation completes yet |
+| DEX execution | Partial M1/M2 working | The 143-test suite includes 10 exact pinned-APK paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, and typed handler re-entry are checked |
+| End-to-end source operations | Not yet complete | BatCave popular crosses a deterministic injected transport and receives a bounded response, then stops at `JsoupExtensionsKt.asJsoup$default`; no manga result is parsed yet |
 
 ## Per-extension execution
 
-| Extension | Version | SHA-256 | Loads | Constructor | Metadata methods | Search | Details | Chapters | Pages |
-|---|---:|---|:---:|:---:|---|:---:|:---:|:---:|:---:|
-| MangaDex (`all.mangadex`) | 1.4.212 | `543dcf6a…306fa3` | ✅ | ✅ | — | — | — | — | — |
-| Akuma (`all.akuma`) | 1.4.10 | `9f5e744e…ba39a` | ✅ | ✅ | — | — | — | — | — |
-| BatCave (`en.batcave`) | 1.6.9 | `f5338a90…34fab6` | ✅ | ✅ | ✅ base URL, lang, name, ID | — | — | — | — |
+| Extension | Version | SHA-256 | Loads | Constructor | Metadata methods | Popular | Search | Details | Chapters | Pages |
+|---|---:|---|:---:|:---:|---|---|:---:|:---:|:---:|:---:|
+| MangaDex (`all.mangadex`) | 1.4.212 | `543dcf6a…306fa3` | ✅ | ✅ | — | — | — | — | — | — |
+| Akuma (`all.akuma`) | 1.4.10 | `9f5e744e…ba39a` | ✅ | ✅ | — | — | — | — | — | — |
+| BatCave (`en.batcave`) | 1.6.9 | `f5338a90…34fab6` | ✅ | ✅ | ✅ base URL, lang, name, ID | ⚠️ response delivered; stops at Jsoup | — | — | — | — |
 
 All three constructors execute their real no-argument DEX paths and return
 objects of the declared entry type. BatCave's popular path additionally proves
 class initialization, filter construction and iteration, its Kotlin ABI, and
 bounded OkHttp request construction. It asserts the exact POST URL and ordered
-form fields, then asserts the unresolved
-`OkHttpExtensionsKt.awaitSuccess(Call, Continuation)` call. That is a precise
-transport frontier, not a successful popular operation.
+form fields, crosses a deterministic source-scoped transport, resumes nested
+DEX frames, and receives a bounded response. It then asserts the unresolved
+`JsoupExtensionsKt.asJsoup$default` call. That is a precise HTML-parser
+frontier, not a successful popular operation.
 
 ## Current measured API workload
 
@@ -69,12 +70,18 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 ## Test evidence
 
-- 126/126 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
-  corpus present and on the exact `f36a07a` baseline in
-  [macOS Swift CI](https://github.com/taizaki69/Kami/actions/runs/32617590375).
-- Seven real-extension constructor/getter tests require successful return
-  values. The eighth requires the exact request value and `awaitSuccess`
-  frontier; arbitrary VM failures are not accepted as progress.
+- 143/143 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+  corpus present.
+- The `6cb46b5` iOS Build and IPA Package workflows passed. Swift CI found a
+  macOS compiler type-check timeout in a large test expression; `e5988c3` splits
+  it and passes the full local suite, but exact-head workflow reruns were blocked
+  before runner dispatch by the account's Actions payment/spending limit.
+- Ten real-extension tests require exact successful values or exact typed
+  boundaries. The BatCave transport test requires the exact request and Jsoup
+  frontier; its 503 test requires the exact Mihon `HttpException` code.
+- Four focused async regressions prove nested DEX-frame resumption, the typed
+  sync-entry diagnostic, DEX handler re-entry, cancellation, and bounded
+  response/body/charset/closed-state behavior.
 - Fifteen focused dispatch regressions prove runtime-receiver virtual/class
   override selection, lexical normal/range class-super behavior, inherited and
   maximally specific interface defaults, abstract masking, default conflicts,
@@ -95,6 +102,8 @@ tests, not the heuristic percentage, are the acceptance signal.
   opcode ordering across int, long, float, double, and `/2addr` instructions.
 - Two focused host-bridge tests verify the pure request model, Kotlin duration
   conversion, size bounds, scheme rejection, and CRLF-header rejection.
+- Eight focused transport tests cover source isolation, redirect policy,
+  bounded encoding/streaming, cancellation, and cookie scope.
 - Parser hardening covers checksum/size/count limits and every truncated prefix
   of generated valid DEX and ZIP fixtures.
 - `compat-audit` builds in release mode and is uploaded by Swift CI.
@@ -102,8 +111,9 @@ tests, not the heuristic percentage, are the acceptance signal.
 ## Honest frontier
 
 Kami can download, validate structurally, inspect, classify, and execute a
-controlled real-extension path through pure request construction. It cannot yet
-use an unmodified extension as a reader source. Remaining DEX work (notably
+controlled real-extension path through bounded async response delivery. It
+cannot yet parse that response into a manga page or use an unmodified extension
+as a reader source. Remaining DEX work (notably
 broader external hierarchy and super/default resolution beyond parsed class
 graphs, opcode coverage, and differential semantics) is tracked in
 [#1](https://github.com/taizaki69/Kami/issues/1), the first

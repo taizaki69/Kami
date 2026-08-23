@@ -269,8 +269,8 @@ feasibility problem**. The blockers, honestly categorized:
 | DEX parsing/analysis | **Done** (this repo, pure Swift) |
 | APK/manifest parsing | **Done** (pure Swift, incl. binary AXML) |
 | Repo index compatibility | **Done** (JSON + proto) |
-| DEX execution | **Partial M1/M2 slice works**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual selection, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, pinned constructors/getters, and BatCave's popular path execute through pure request construction to `awaitSuccess`; no end-to-end source yet |
-| Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI, bounded collections, atomics/reflection, source filters, source-base constructors, and a bounded transport-neutral OkHttp request model; transport, responses, and the long tail remain open |
+| DEX execution | **Partial M1/M2 slice works**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual selection, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, pinned constructors/getters, and BatCave's popular path execute through bounded async response delivery to the Jsoup parser boundary; no end-to-end source yet |
+| Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI, bounded collections, atomics/reflection, source filters, source-base constructors, bounded OkHttp requests, source-scoped async transport, and response/body/Okio values; Jsoup, serialization, preferences, and the long tail remain open |
 | Cloudflare/WebView | Native WKWebView bridge design (see NETWORKING.md) |
 | Backup import | Proto decoding done; zstd decompression pending |
 

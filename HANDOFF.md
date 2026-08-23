@@ -1,6 +1,6 @@
 # Kami Continuation Handoff
 
-Last updated: 2026-08-22 (America/Lima)
+Last updated: 2026-08-23 (America/Lima)
 
 This is the durable continuation point for moving Kami development to another
 computer. The previous GLM 5.3 session stopped because its usage quota was
@@ -12,7 +12,11 @@ work was recovered, completed, verified, and pushed.
 - Repository: <https://github.com/taizaki69/Kami>
 - Visibility: private
 - Default branch: `main`
-- Current verified runtime implementation baseline: `f36a07a0a423c39287ae4efe37376c1eab459a35`
+- Current code/test checkpoint: `e5988c34692e795180f020dee67a4a90a993ee80`
+- Current async transport/runtime implementation baseline: `6cb46b5ccbe600ca93847fdd270f8bfa02ecc690`
+- Previous isolated HTTP transport baseline: `e58bf8e83bbc562e240f0f507f76cd8c42655e1c`
+- Previous opcode-inventory baseline: `1293540`
+- Previous parsed-DEX dispatch baseline: `f36a07a0a423c39287ae4efe37376c1eab459a35`
 - Previous resolved-reference/typed-catch baseline: `b079d6912fc08b89fab4d654b92ada6d07ff73f0`
 - Previous exact primitive/constructor-state baseline: `10bf770d61ebe1f6bb5dd9d13ade63853cdbffd8`
 - Previous register-category baseline: `7ce3c812d5eca159a28d680591a45a72ff325956`
@@ -29,63 +33,64 @@ Always continue from the latest `origin/main`. The current runtime SHA above is
 the known-good executable state; the commit updating this handoff follows it
 and contains documentation only.
 
-## Tomorrow's resume point
+## Current resume point
 
-Stop state on 2026-08-22 (America/Lima):
+Stop state on 2026-08-23 (America/Lima):
 
-- No next-milestone runtime code was started after `f36a07a`. The only work
-  after its documentation checkpoint `72fc249` was a read-only survey followed
-  by this handoff update.
-- `main` was clean and exactly synchronized with `origin/main` before this
-  handoff-only commit. Resume from the latest `origin/main`, not from a local
-  build directory or an older SHA.
+- Commit `6cb46b5` is pushed to `main`. It adds exact async host registration and
+  a public `DexInterpreter.callAsync` path that captures nested DEX frames,
+  awaits without blocking, resumes inside-out, preserves the shared instruction
+  budget, re-enters typed DEX handlers at the original invoke, and propagates
+  Task/OkHttp-call cancellation.
+- `HostBridge.minimal(transport:)` now wires Mihon's `await` and `awaitSuccess`
+  only when a source-scoped transport is explicitly injected. The response
+  allow-list is bounded and includes `Response`, `ResponseBody`, `Headers`, and
+  `okio.BufferedSource`; non-2xx `awaitSuccess` results throw Mihon's typed
+  `HttpException` with its status code.
+- The pinned BatCave popular path sends the exact expected POST through an actor
+  fake transport, resumes its real nested DEX path, and now stops at the exact
+  unresolved `JsoupExtensionsKt.asJsoup$default` signature. A second real-APK
+  test proves a 503 response reaches `HttpException(code: 503)`.
+- All 143 MihonCompatKit tests pass locally on Windows/Swift 6.3.3, including 10
+  pinned real-extension paths and 4 focused async interpreter/transport tests.
+  A clean KamiCore dependency build/test also passes.
+- The first macOS Swift CI attempt exposed only a compiler type-check timeout in
+  one large test-fixture expression. Commit `e5988c3` splits that expression and
+  the full local suite still passes. Exact-head reruns could not start because
+  GitHub reported an account payment/spending-limit block; resolve Actions
+  billing and rerun all three workflows before treating macOS verification as
+  current. The preceding `6cb46b5` iOS Build and IPA Package runs did pass.
 - GitHub CLI is installed and authenticated as `taizaki69`; repository and
   workflow access were working. No authentication setup should be needed on
   this computer.
 - The three pinned APKs are present locally and still match the lock file:
   Akuma 1.4.10, MangaDex 1.4.212, and BatCave 1.6.9.
-- The exact `f36a07a` implementation passed all 126 MihonCompatKit tests and
-  its Swift CI, iOS Build, and IPA Package workflows. The following
-  documentation head, `72fc249`, also passed all three workflows:
-  [Swift CI 32617796603](https://github.com/taizaki69/Kami/actions/runs/32617796603),
-  [iOS Build 32617796631](https://github.com/taizaki69/Kami/actions/runs/32617796631),
-  and [IPA Package 32617796599](https://github.com/taizaki69/Kami/actions/runs/32617796599).
 - Issue #1 has the completed dispatch-milestone evidence in
   [progress comment 5384204450](https://github.com/taizaki69/Kami/issues/1#issuecomment-5384204450)
   and remains open intentionally.
 
-### First milestone tomorrow: measure opcode reachability
+### Next milestone: cross the measured Jsoup boundary
 
-Begin by adding a deterministic instruction-inventory API and a
-`compat-audit opcodes <apk-or-directory>` command, then run it over all DEX
-files in the three pinned APKs. Do not select the next opcode implementation
-from raw byte frequency or from the first 12 code units printed by the current
-`disasm` command.
+Continue issue #2 from this exact canonical signature:
 
-The read-only survey established the exact reason this must come first:
+```text
+Leu/kanade/tachiyomi/util/JsoupExtensionsKt;->asJsoup$default(
+    Lokhttp3/Response;Ljava/lang/String;ILjava/lang/Object;
+)Lorg/jsoup/nodes/Document;
+```
 
-- `compat-audit disasm` currently opens only `classes.dex`, prints at most 12
-  raw code units per method, and does not walk instruction boundaries or
-  aggregate counts. It cannot distinguish operand bytes and payload contents
-  from real opcodes, so there is no honest corpus-wide reachability number yet.
-- `DexInterpreter.step` implements the classic executable opcode surface from
-  `0x00` through `0xe2` (with the DEX-reserved holes rejected). The structural
-  and register verifiers additionally recognize the DEX 038+ family
-  `0xfa`-`0xff`, but execution currently falls through to `unsupported opcode`:
-  `invoke-polymorphic`, `invoke-polymorphic/range`, `invoke-custom`,
-  `invoke-custom/range`, `const-method-handle`, and `const-method-type`.
-- The inventory must report DEX version, opcode count, declaring method and
-  address examples, and whether each opcode is structurally decoded,
-  register-verified, and executable. It must enumerate every `classes*.dex`
-  entry in deterministic order and must not count switch or array-data payload
-  words as instructions.
-- Add synthetic tests for instruction-boundary accuracy, payload exclusion,
-  deterministic ordering, and a multi-DEX APK before trusting the report.
-- Use the resulting report to choose one coherent implementation family. If
-  the pinned corpus does not contain `0xfa`-`0xff`, record that result and
-  prioritize the next real execution blocker (external hierarchy resolution
-  or the BatCave transport seam) instead of implementing dynamic invocation
-  speculatively.
+First map the exact BatCave DOM/selector calls reached after this method, then
+implement only that bounded Jsoup-compatible slice. Keep the HTML fixture and
+transport deterministic and offline. Cap input bytes, node/depth/attribute/text
+growth, and selector work before parsing hostile response HTML. Continue to
+record every next missing canonical signature instead of adding broad guessed
+APIs. The acceptance point is a real BatCave `MangasPage` value with exact
+fields; only after that should popular pagination/search, details, chapters,
+and pages be advanced in order.
+
+Do not enable arbitrary downloaded APK execution while the signer gate in
+issue #3 remains open. Keep `HostBridge` deny-by-default and never execute
+extension native libraries.
 
 Start with:
 
@@ -98,7 +103,7 @@ swift build --package-path Packages/MihonCompatKit -c release --product compat-a
 ```
 
 On this Windows checkout, use the checked-in helper for the test command if
-needed. Keep the inventory offline and limited to `Tests/corpus/*.apk`; the APK
+needed. Keep execution offline and limited to `Tests/corpus/*.apk`; the APK
 signer gate in issue #3 is still open.
 
 ## Clone and restore the workspace
@@ -185,7 +190,7 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 126 Swift tests passed locally on Windows/Swift 6.3.3 and on the exact implementation baseline in macOS CI |
+| MihonCompatKit | 143 Swift tests passed locally on Windows/Swift 6.3.3; exact-head macOS CI is linked below |
 | Real APK constructors | Akuma, MangaDex, and BatCave passed |
 | Structural verifier | 9 focused regressions cover instruction geometry, branch/fallthrough boundaries, and aligned, bounded, correctly typed payloads and switch targets |
 | Exception/control verifier | 13 focused regressions cover strict try/catch decoding, resolved `Throwable` validation, typed handler state/execution, and AOSP branch/result/exception-entry rules |
@@ -194,17 +199,52 @@ At the implementation baseline:
 | Binary opcode semantics | 1 focused regression covers AOSP operation/type-major ordering across int, long, float, double, and `/2addr` forms |
 | Method resolution and receiver dispatch | 15 focused regressions cover virtual/class override selection, lexical normal/range class-super dispatch, inherited/maximally-specific interface defaults, abstract masking, default conflicts, DEX 037 interface-super gating, strict interface receivers, typed linkage failures, and conservative unresolved boundaries |
 | Request-model regressions | 2 focused tests cover request construction, duration/cache conversion, URL scheme rejection, CRLF-header rejection, and body bounds |
-| BatCave execution | Exact metadata getters passed; popular path constructs the expected POST request and stops at the `awaitSuccess` transport seam |
-| Swift CI | [successful run 32617590375](https://github.com/taizaki69/Kami/actions/runs/32617590375) |
-| iOS Simulator and unsigned device builds | [successful run 32617590377](https://github.com/taizaki69/Kami/actions/runs/32617590377) |
-| Unsigned IPA packaging | [successful run 32617590376](https://github.com/taizaki69/Kami/actions/runs/32617590376) |
+| HTTP transport regressions | 8 focused tests cover source isolation, bounded deterministic encoding, redirect secret stripping/downgrade rejection, streamed response limits, cancellation, and cookie scope |
+| Async interpreter/response regressions | 4 focused tests cover nested frame resumption, sync-entry diagnostics, typed DEX handler re-entry, cancellation, injected transport, charset decoding, one-shot reads, and close state |
+| BatCave execution | Exact metadata getters pass; popular sends the expected POST, receives a bounded response, resumes, and stops at `JsoupExtensionsKt.asJsoup$default`; a 503 maps to `HttpException(code: 503)` |
+| Swift CI | `6cb46b5` reached compilation and found the fixture type-check timeout in [run 32655420934](https://github.com/taizaki69/Kami/actions/runs/32655420934); fixed locally in `e5988c3`, whose [rerun 32655643551](https://github.com/taizaki69/Kami/actions/runs/32655643551) was blocked before runner dispatch by Actions billing |
+| iOS Simulator and unsigned device builds | `6cb46b5` passed [run 32655420894](https://github.com/taizaki69/Kami/actions/runs/32655420894); the `e5988c3` [run 32655643547](https://github.com/taizaki69/Kami/actions/runs/32655643547) was blocked before dispatch by Actions billing |
+| Unsigned IPA packaging | `6cb46b5` passed [run 32655420893](https://github.com/taizaki69/Kami/actions/runs/32655420893); the `e5988c3` [run 32655643569](https://github.com/taizaki69/Kami/actions/runs/32655643569) was blocked before dispatch by Actions billing |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
-The referenced runs validate the exact `f36a07a` implementation baseline and
-produced `compat-audit-macos` and `Kami-unsigned-ipa`. GitHub artifacts expire;
-rerun the corresponding workflow if they are no longer available.
+The successful iOS/IPA runs validate the `6cb46b5` runtime implementation and
+produced `Kami-unsigned-ipa`. Commit `e5988c3` is a test-source portability
+follow-up with local full-suite evidence only until GitHub Actions billing is
+restored. Rerun Swift CI, iOS Build, and IPA Package for that exact checkpoint.
 
 ## What the latest continuation completed
+
+Commit `6cb46b5` crosses the asynchronous extension HTTP boundary without
+pretending the source is end-to-end complete:
+
+- `DexInterpreter.callAsync` snapshots exact nested frames at async host
+  invocations, awaits without blocking, resumes inside-out, preserves the
+  shared instruction budget, and supports repeated suspension. A thrown DEX
+  value re-enters the typed handler covering the original invoke instruction;
+  Task cancellation becomes `VMError.cancelled`.
+- `HostBridge` has exact sync and async method registries. Synchronous `call`
+  reports `asyncExecutionRequired` instead of leaking an internal suspension.
+  No async network method exists unless a source-scoped transport is injected.
+- Mihon's `await` and `awaitSuccess` execute the prepared request. Transport
+  failures become redacted `IOException` values; `awaitSuccess` accepts only
+  2xx and otherwise throws a modeled Mihon `HttpException` with its code.
+- Bounded `Response`, `ResponseBody`, `Headers`, and `BufferedSource` host values
+  expose the reached status/header/body/charset/one-shot read behavior using
+  only the already bounded transport response.
+- Four focused async regressions and two new pinned BatCave paths bring the
+  suite to 143 tests and move the exact real-APK frontier from `awaitSuccess` to
+  `JsoupExtensionsKt.asJsoup$default`.
+
+Commit `e5988c3` then splits one compound DEX test-fixture expression so the
+macOS compiler can type-check it without timing out; it makes no runtime
+semantic change.
+
+Commit `e58bf8e` immediately before it supplies the isolated production
+URLSession transport: per-source actor ownership, redirect/timeout/request and
+response limits, streaming response-body enforcement, cancellation, and an
+in-memory source-isolated cookie jar.
+
+## What the preceding dispatch continuation completed
 
 Commit `f36a07a` completes parsed-DEX class-super and interface-default method
 resolution for the current DEX runtime milestone:
@@ -513,9 +553,10 @@ Proven today:
 - Compatibility analysis and the `compat-audit` CLI.
 - Exact execution of the pinned constructors/getters listed above and
   BatCave's interpreted popular path through exact pure request construction
-  to the `awaitSuccess` transport boundary.
-- Bounded, transport-neutral OkHttp request values with no live-network side
-  effects, including the exact pinned BatCave POST assertion.
+  and bounded async response delivery to the Jsoup parser boundary.
+- Source-scoped, bounded OkHttp request/response/body/Okio values, async nested
+  frame resumption, cancellation, typed transport/HTTP errors, the exact pinned
+  BatCave POST assertion, and a deterministic no-live-network test transport.
 - Bounded pre-execution verification of complete instruction geometry,
   try/catch tables, register operands, resolved catch classes, and exact
   primitive/constructor/reference register dataflow over normal and exception
@@ -527,9 +568,9 @@ Not proven or implemented:
 
 - An interpreted extension completing popular/search, details, chapters, and
   pages through `KamiSource`.
-- Extension HTTP transport, response/response-body/Okio models, coroutine
-  suspension/resumption across async transport, Jsoup, preferences, cookies,
-  or WebView bridges. The current OkHttp subset is request-only.
+- Jsoup HTML parsing/selectors, serialization, persistent source preferences
+  and cookies, rate limiting, the tachiyomix-to-`KamiSource` bridge, or WebView
+  challenge handling. The current cookie jar is source-isolated but in memory.
 - Full DEX opcode coverage or complete hierarchy behavior when class data leaves
   the parsed DEX and bounded host graph. Structural
   code-item/control-flow/exception-table verification, exact
@@ -542,7 +583,7 @@ Not proven or implemented:
 - A signed installation on a physical iPhone or iPad.
 - Production compatibility telemetry or a declared repository license.
 
-Do not describe constructor/getter execution as end-to-end extension support.
+Do not describe bounded response delivery as end-to-end extension support.
 
 ## Security and trust boundary
 
@@ -569,7 +610,9 @@ Preserve these security facts:
 
 Known pre-existing hardening gaps that were not diff-introduced findings:
 
-- URLSession response limits are checked after full-body buffering.
+- Native repository index/APK downloads still need broader streaming and
+  aggregate resource accounting. The extension compat transport now enforces
+  its own response-body cap while delegate bytes arrive.
 - External-list/APK URL scheme, redirect, and destination policy is broad.
 - ZIP/DEX/string processing lacks a complete aggregate resource budget.
 - External class relationships absent from both the APK and bounded host graph
@@ -609,24 +652,20 @@ The rest of the product backlog is in `TODO.md`.
    `invoke-super`, and invoke word-count/kind checks are already in.
 4. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
-5. Continue issue #2 from the exact `OkHttpExtensionsKt.awaitSuccess` seam.
-   First define an injectable per-source transport contract consuming
-   `CompatHTTPRequest`; production transport must use URLSession with redirect
-   policy, cancellation, timeouts, response-header/body limits, redaction, and
-   isolated cookies. Keep the pinned test on a deterministic fake transport;
-   do not make live requests in the test suite.
-6. Model OkHttp `Response`/`ResponseBody`, the reached Okio surface, and proper
-   coroutine suspension/resumption. Do not register `awaitSuccess` as an
-   unconditional fake success or block the interpreter thread on URLSession.
-   Continue recording the next exact signature at every boundary.
-7. Add response parsing (Jsoup/serialization) and prove BatCave popular output,
-   then search, details, chapters, and pages, before exposing the interpreted
-   source through the existing `KamiSource` contract.
-8. Expose the interpreted source through the existing `KamiSource` contract
+5. Continue issue #2 from the exact
+   `JsoupExtensionsKt.asJsoup$default(Response, String, int, Object)` seam. Map
+   the BatCave-reached DOM/selector calls and implement a bounded parser slice
+   with byte, node, depth, attribute, text, and selector-work limits. Keep the
+   pinned test on a deterministic fake transport and HTML fixture; do not make
+   live requests in the test suite.
+6. Prove an exact BatCave `MangasPage` result, then popular pagination/search,
+   details, chapters, and pages. Continue recording the next exact canonical
+   signature at every boundary.
+7. Expose the interpreted source through the existing `KamiSource` contract
    only after exact popular/search, details, chapters, and pages tests pass.
-9. Implement issue #3 before enabling execution of arbitrary repository
+8. Implement issue #3 before enabling execution of arbitrary repository
    downloads or updates.
-10. Add issue #4 diagnostics as local, deterministic, redacted output so the
+9. Add issue #4 diagnostics as local, deterministic, redacted output so the
    compatibility corpus can grow from reproducible failures.
 
 Every new runtime capability should arrive with a synthetic malformed fixture,
@@ -647,7 +686,9 @@ an exact real-APK assertion when reachable, and CI coverage.
 | Register/invoke verifier | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexRegisterVerifier.swift` |
 | Native capability boundary | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/HostBridge.swift` |
 | Pure HTTP request values | `Packages/MihonCompatKit/Sources/MihonCompatKit/Networking/CompatHTTPRequest.swift` |
+| Source-scoped HTTP transport | `Packages/MihonCompatKit/Sources/MihonCompatKit/Networking/CompatHTTPTransport.swift` |
 | Request-model regressions | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/CompatHTTPRequestTests.swift` |
+| Async VM/response regressions | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/AsyncInterpreterTests.swift` |
 | Real APK execution frontier | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/RealExtensionExecutionTests.swift` |
 | Repository client | `Packages/MihonCompatKit/Sources/MihonCompatKit/Repository/ExtensionRepository.swift` |
 | App source seam | `Packages/MihonCompatKit/Sources/MihonCompatKit/Models/CompatModels.swift` (`KamiSource`) |
