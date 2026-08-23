@@ -57,6 +57,12 @@ Implemented slice:
 - Move/constant/return, branches and switches, arrays, fields, invoke and
   invoke-range, conversions, comparisons, arithmetic, literal, and two-address
   opcode families reached by the current fixtures.
+- Before a method first executes, a 2,000,000-code-unit-capped structural
+  verifier decodes its complete instruction stream. It rejects invalid or
+  truncated opcodes, branches/fallthrough/switch cases that do not land on
+  instruction boundaries, misaligned/truncated/mismatched payloads, invalid
+  array element widths, and unsorted sparse-switch keys. Successful results
+  are cached per interpreter and method.
 - Java-compatible integer divide/remainder edge cases, reference identity,
   exception handlers, recursion limit, cancellation, and trace callback.
 - Exact name/prototype dispatch for interpreted and host calls; virtual and
@@ -75,8 +81,8 @@ Still required before M1 is complete:
 - Full instruction and payload coverage for the expanding corpus.
 - Complete interface-default and invoke-super resolution when hierarchy data
   leaves the parsed DEX.
-- A pre-execution verifier for register types, targets, code-item layout, and
-  exception tables.
+- Register-type dataflow verification plus strict exception-table, try-range,
+  and handler-target validation.
 - Differential fixtures against AOSP-compatible reference execution.
 
 This work is tracked in [GitHub issue #1](https://github.com/taizaki69/Kami/issues/1).
@@ -136,7 +142,7 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 65 passing tests: 30 interpreter tests, 10 parser
+`MihonCompatKit` currently has 74 passing tests: 39 interpreter tests, 10 parser
 hardening tests (including every truncated prefix of generated DEX and ZIP
 fixtures), 8 pinned real-extension executions, 2 bounded request-model tests,
 and 15 reader/inflate/repository tests. GitHub Swift CI fetches the

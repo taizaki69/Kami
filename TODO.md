@@ -35,8 +35,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       objects/arrays/fields/invokes/exceptions, exact prototype dispatch,
       receiver-directed virtual/interface selection across parsed DEX
       superclasses, one-time class initialization, invoke validation, shared
-      budgets, cancellation, and real-APK execution to an HTTP boundary; full
-      verifier/opcode conformance is tracked in
+      budgets, cancellation, a bounded structural verifier for instruction and
+      payload geometry/control flow, and real-APK execution to an HTTP
+      boundary; register-type/exception-table verification and full opcode
+      conformance are tracked in
       [#1](https://github.com/taizaki69/Kami/issues/1)
 - [~] Kotlin/Java class library M2 — Object/String/StringBuilder, core Kotlin
       ABI, bounded collections, atomics, reflection, and Mihon filters cover

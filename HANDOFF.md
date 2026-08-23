@@ -12,7 +12,9 @@ work was recovered, completed, verified, and pushed.
 - Repository: <https://github.com/taizaki69/Kami>
 - Visibility: private
 - Default branch: `main`
-- Current verified runtime implementation baseline: `4d042c99a62536fbd894966286a1de7a93c5d0be`
+- Current verified runtime implementation baseline: `284b24dc2b7bec838afed5b6a2c9ea07df8b8f0b`
+- Previous receiver-directed dispatch baseline: `057169640b43c516455f753ae3efd81e3db02e61`
+- Previous request-model runtime baseline: `4d042c99a62536fbd894966286a1de7a93c5d0be`
 - Previous exact-dispatch/class-initialization baseline: `05720d24d46d13b21e25dee2b95737b59fa65a9d`
 - Code and documentation baseline before the original handoff: `4e50e6380c864e09205eb753c3ed7037780f9897`
 - Original Phase 2 baseline: `6f9de0719f057646e228f14620806326840e5c75`
@@ -106,8 +108,10 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 63 Swift tests passed; KamiCore also passed in macOS CI |
+| MihonCompatKit | 74 Swift tests passed locally on Windows/Swift 6.3.3; the last published macOS CI baseline passed 63 |
 | Real APK constructors | Akuma, MangaDex, and BatCave passed |
+| Structural verifier | 9 focused regressions cover instruction geometry, branch/fallthrough boundaries, and aligned, bounded, correctly typed payloads and switch targets |
+| Receiver dispatch | 2 focused regressions cover virtual override and interface implementation selection from the runtime receiver |
 | Request-model regressions | 2 focused tests cover request construction, duration/cache conversion, URL scheme rejection, CRLF-header rejection, and body bounds |
 | BatCave execution | Exact metadata getters passed; popular path constructs the expected POST request and stops at the `awaitSuccess` transport seam |
 | Swift CI | [successful run 32587746756](https://github.com/taizaki69/Kami/actions/runs/32587746756) |
@@ -115,11 +119,38 @@ At the implementation baseline:
 | Unsigned IPA packaging | [successful run 32587746752](https://github.com/taizaki69/Kami/actions/runs/32587746752) |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
-The referenced runs produced `compat-audit-macos` and `Kami-unsigned-ipa`.
-GitHub artifacts expire; rerun the corresponding workflow if they are no
-longer available.
+The referenced runs validate the earlier `4d042c9` request-model baseline and
+produced `compat-audit-macos` and `Kami-unsigned-ipa`. The `284b24d` verifier
+continuation was verified locally; require the same SHA to pass Swift CI, iOS
+build, and IPA workflows before calling it the published cross-platform
+checkpoint. GitHub artifacts expire; rerun the corresponding workflow if they
+are no longer available.
 
 ## What the latest continuation completed
+
+Commit `284b24d` adds a bounded, one-time structural verifier before a DEX
+method can execute:
+
+- It decodes the entire code item using the standard DEX instruction-width
+  table and rejects invalid/reserved or truncated instructions, even on paths
+  the interpreter would not take.
+- Direct branches, ordinary fallthrough, and packed/sparse switch cases must
+  land on exact executable instruction boundaries inside the code item.
+- Packed-switch, sparse-switch, and array-data payloads must be aligned,
+  complete, and referenced by the matching opcode family. Sparse keys must be
+  strictly increasing and array-data widths must be 1, 2, 4, or 8 bytes.
+- Code items are capped at 2,000,000 code units, and successful verification
+  is cached once per method for the lifetime of an interpreter.
+- Nine focused regressions cover valid packed-switch execution and malformed
+  truncation, operand branches, payload case targets, fallthrough, alignment,
+  family mismatches, sparse ordering, and array element widths. All 74 tests,
+  including all eight pinned real-extension paths, pass locally.
+
+This is structural geometry/control-flow verification, not a claim of a full
+Dalvik verifier. Register-type dataflow and strict exception-table/handler
+validation remain issue #1 work.
+
+## What the preceding request-model continuation completed
 
 Commit `4d042c9` advances the pinned BatCave APK through transport-neutral
 request construction without performing network I/O:
@@ -156,11 +187,11 @@ request construction without performing network I/O:
   This is the transport/coroutine boundary, not a successful popular-manga
   response.
 
-The two new focused request tests and eight pinned real-extension tests are
-part of the 63-test MihonCompatKit suite. All three workflows linked above
-passed for the exact implementation SHA.
+The two focused request tests and eight pinned real-extension tests are part
+of the 63-test MihonCompatKit suite at that historical baseline. All three
+workflows linked above passed for that exact implementation SHA.
 
-## What the preceding runtime continuation completed
+## What the earlier runtime continuation completed
 
 Commit `05720d2` advances the same pinned BatCave APK from shallow getters to a
 reproducible pre-request execution path:
@@ -244,8 +275,10 @@ Not proven or implemented:
 - Extension HTTP transport, response/response-body/Okio models, coroutine
   suspension/resumption across async transport, Jsoup, preferences, cookies,
   or WebView bridges. The current OkHttp subset is request-only.
-- Full DEX opcode coverage, a pre-execution verifier, or dynamic
-  virtual/interface target selection across receiver hierarchies.
+- Full DEX opcode/register-type coverage or strict exception-table validation.
+  Structural code-item/control-flow verification and receiver-directed
+  virtual/interface selection across parsed DEX superclass chains are working;
+  complete behavior when hierarchy data leaves the parsed DEX remains open.
 - APK signer authentication and update identity binding.
 - A signed installation on a physical iPhone or iPad.
 - Production compatibility telemetry or a declared repository license.
@@ -306,10 +339,11 @@ The rest of the product backlog is in `TODO.md`.
 1. Work only with the pinned local corpus while the signer gate is absent.
 2. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
    plus canonical unresolved diagnostics for every new bridge decision.
-3. Continue issue #1 with verifier checks for code-item geometry,
-   branch/payload targets, register types, and exception-handler conversions.
-   Receiver-directed virtual/interface lookup and invoke word-count checks are
-   already in; complete partially external hierarchy semantics remains open.
+3. Continue issue #1 with register-type dataflow plus strict try-range,
+   catch-handler decoding, and handler-target validation. Code-item geometry,
+   branch/fallthrough/payload targets, receiver-directed virtual/interface
+   lookup, and invoke word-count checks are already in; complete partially
+   external hierarchy semantics remains open.
 4. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
 5. Continue issue #2 from the exact `OkHttpExtensionsKt.awaitSuccess` seam.
