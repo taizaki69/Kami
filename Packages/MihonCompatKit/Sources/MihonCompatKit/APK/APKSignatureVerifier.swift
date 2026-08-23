@@ -223,6 +223,16 @@ public struct APKSignatureVerifier {
         )
         let selected = try selectAlgorithm(from: signatures)
         let publicKey = Array(bytes[publicKeyRange])
+        // This is a rejection-only preflight over bounded signed data. Some
+        // Apple Security backends reject unusually large, otherwise valid RSA
+        // keys before verification; a stripped higher scheme must still be
+        // rejected consistently. The authenticated path checks the attribute
+        // again below before any identity can be returned.
+        try preflightV2StrippingProtection(
+            bytes: bytes,
+            signedData: signedData,
+            availableSchemes: availableSchemes
+        )
         guard try verifySignature(
             algorithm: selected.algorithm,
             signature: selected.value,
@@ -369,6 +379,22 @@ public struct APKSignatureVerifier {
             signer: .init(currentFingerprint: current, certificateHistory: history),
             digestKind: selected.algorithm.contentDigest,
             expectedDigest: expected
+        )
+    }
+
+    private func preflightV2StrippingProtection(
+        bytes: [UInt8],
+        signedData: Range<Int>,
+        availableSchemes: Set<UInt32>
+    ) throws {
+        var data = LittleEndianReader(bytes, range: signedData)
+        _ = try data.lengthPrefixed32("v2 digests")
+        _ = try data.lengthPrefixed32("v2 certificates")
+        let attributesRange = try data.lengthPrefixed32("v2 attributes")
+        try checkV2Attributes(
+            bytes: bytes,
+            range: attributesRange,
+            availableSchemes: availableSchemes
         )
     }
 
