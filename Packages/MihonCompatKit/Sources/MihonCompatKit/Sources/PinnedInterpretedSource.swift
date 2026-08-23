@@ -10,6 +10,7 @@ public enum PinnedInterpretedSourceError: Error, Sendable, Equatable, LocalizedE
     case apkSignerMismatch(profile: String)
     case manifestMismatch(profile: String)
     case missingEntryClass(profile: String)
+    case missingSourceAPIWrapper(profile: String)
     case invalidMetadata(profile: String)
     case invalidInput(operation: String)
     case unsupportedOperation(String)
@@ -30,6 +31,8 @@ public enum PinnedInterpretedSourceError: Error, Sendable, Equatable, LocalizedE
             return "Pinned extension \(profile) does not match its manifest identity."
         case let .missingEntryClass(profile):
             return "Pinned extension \(profile) is missing its expected source class."
+        case let .missingSourceAPIWrapper(profile):
+            return "Pinned extension \(profile) is missing its measured source API wrapper."
         case let .invalidMetadata(profile):
             return "Pinned extension \(profile) returned invalid source metadata."
         case let .invalidInput(operation):
@@ -293,12 +296,12 @@ private struct PinnedInterpretedProfile: Sendable {
             prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;"
         ),
         search: ExactInterpretedMethod(
-            name: "k",
-            prototype: "(Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;ILjava/lang/String;Leu/kanade/tachiyomi/source/model/FilterList;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+            name: "getSearchManga",
+            prototype: "(ILjava/lang/String;Leu/kanade/tachiyomi/source/model/FilterList;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
         ),
         mangaUpdate: ExactInterpretedMethod(
-            name: "f",
-            prototype: "(Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;Leu/kanade/tachiyomi/source/model/SManga;Ljava/util/List;ZZLkotlin/coroutines/jvm/internal/ContinuationImpl;)Ljava/lang/Object;"
+            name: "getMangaUpdate",
+            prototype: "(Leu/kanade/tachiyomi/source/model/SManga;Ljava/util/List;ZZLkotlin/coroutines/Continuation;)Ljava/lang/Object;"
         ),
         pages: ExactInterpretedMethod(
             name: "getPageList",
@@ -318,6 +321,7 @@ private actor PinnedInterpretedRuntime {
     private let profile: PinnedInterpretedProfile
     private let vm: DexInterpreter
     private let receiver: RVal
+    private let sourceAPIWrapperDescriptor: String
     private var executing = false
     private var waiters: [Waiter] = []
     private var nextWaiterID: UInt64 = 0
@@ -356,6 +360,15 @@ private actor PinnedInterpretedRuntime {
         guard dex.classIndexByDescriptor[profile.entryClassDescriptor] != nil else {
             throw PinnedInterpretedSourceError.missingEntryClass(profile: profile.identifier)
         }
+        guard let sourceAPIWrapperDescriptor = Self.inheritedSourceAPIWrapper(
+            dex: dex,
+            entryClassDescriptor: profile.entryClassDescriptor,
+            requiredMethods: [profile.search, profile.mangaUpdate]
+        ) else {
+            throw PinnedInterpretedSourceError.missingSourceAPIWrapper(
+                profile: profile.identifier
+            )
+        }
 
         let vm = DexInterpreter(
             dex: dex,
@@ -383,6 +396,7 @@ private actor PinnedInterpretedRuntime {
         self.profile = profile
         self.vm = vm
         self.receiver = receiver
+        self.sourceAPIWrapperDescriptor = sourceAPIWrapperDescriptor
         self.metadata = PinnedInterpretedMetadata(
             id: id,
             name: name,
@@ -432,7 +446,9 @@ private actor PinnedInterpretedRuntime {
         defer { release() }
         try Task.checkCancellation()
         let result = try await vm.callAsync(
-            classDescriptor: profile.entryClassDescriptor,
+            // Keiyoushi's stable public wrapper routes URL queries and then
+            // virtually dispatches to the extension's R8-renamed worker.
+            classDescriptor: sourceAPIWrapperDescriptor,
             method: profile.search.name,
             prototype: profile.search.prototype,
             args: [receiver, .int(page), HostBridge.string(query), .null, .null]
@@ -453,7 +469,9 @@ private actor PinnedInterpretedRuntime {
         defer { release() }
         try Task.checkCancellation()
         let result = try await vm.callAsync(
-            classDescriptor: profile.entryClassDescriptor,
+            // The inherited wrapper owns concurrency protection and initialized
+            // state, then virtually dispatches to the extension implementation.
+            classDescriptor: sourceAPIWrapperDescriptor,
             method: profile.mangaUpdate.name,
             prototype: profile.mangaUpdate.prototype,
             args: [
@@ -562,6 +580,48 @@ private actor PinnedInterpretedRuntime {
             throw PinnedInterpretedSourceError.invalidMetadata(profile: profile.identifier)
         }
         return value
+    }
+
+    /// R8 may rename a source's abstract implementation workers, but the
+    /// inherited app-facing `KeiSource` methods remain public and stable. Walk
+    /// only the entry class's local superclass chain and require one concrete,
+    /// public, non-static declaration of every measured wrapper method.
+    private static func inheritedSourceAPIWrapper(
+        dex: DexFile,
+        entryClassDescriptor: String,
+        requiredMethods: [ExactInterpretedMethod]
+    ) -> String? {
+        guard let entryIndex = dex.classIndexByDescriptor[entryClassDescriptor] else {
+            return nil
+        }
+        var superclassIndex = dex.classDefs[entryIndex].superclassIndex
+        var visited: Set<String> = []
+
+        while superclassIndex >= 0, superclassIndex < dex.typeDescriptors.count {
+            let descriptor = dex.typeDescriptors[superclassIndex]
+            guard visited.insert(descriptor).inserted,
+                  let classIndex = dex.classIndexByDescriptor[descriptor] else {
+                return nil
+            }
+            let definition = dex.classDefs[classIndex]
+            let hasRequiredMethods = requiredMethods.allSatisfy { required in
+                let matches = definition.virtualMethods.filter { encoded in
+                    let reference = dex.methodIds[encoded.methodIndex]
+                    return reference.name == required.name &&
+                        reference.prototype.descriptor == required.prototype
+                }
+                guard matches.count == 1, let method = matches.first else {
+                    return false
+                }
+                let isPublic = method.accessFlags & 0x1 != 0
+                let isStatic = method.accessFlags & 0x8 != 0
+                let isAbstract = method.accessFlags & 0x400 != 0
+                return isPublic && !isStatic && !isAbstract && method.codeOffset != 0
+            }
+            if hasRequiredMethods { return descriptor }
+            superclassIndex = definition.superclassIndex
+        }
+        return nil
     }
 
     private static func sha256Hex(_ bytes: [UInt8]) -> String {
