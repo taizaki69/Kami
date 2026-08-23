@@ -7,6 +7,8 @@ engineering problem. See `docs/EXTENSION_COMPATIBILITY_ANALYSIS.md` for the
 verified ecosystem research and `docs/EXTENSION_COMPATIBILITY_MATRIX.md` for
 measured status.
 
+Created and maintained by [taizaki69](https://github.com/taizaki69).
+
 **Honest status (2026-08-23):** the pure-Swift extension pipeline now covers
 store indexes, APK download, bounded ZIP/DEFLATE and binary-manifest parsing,
 validated DEX parsing, compatibility analysis, and an initial interpreter with
@@ -86,5 +88,10 @@ produced the measured compatibility matrix from the locked corpus.
 ## Non-goals / legality
 
 Kami bundles no content and no sources' code. Extensions are user-installed
-from third-party repositories at the user's direction. Licensing notes:
-`LICENSES.md`.
+from third-party repositories at the user's direction.
+
+Kami's original code is currently public but unlicensed: copyright is retained
+by its creator and all rights are reserved while the long-term distribution
+model is being decided. Public visibility does not make the project open
+source. See [LICENSES.md](LICENSES.md) for the controlling notice and
+third-party attributions.

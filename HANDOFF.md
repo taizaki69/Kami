@@ -13,6 +13,11 @@ work was recovered, completed, verified, and pushed.
 - Visibility: public (changed 2026-08-23 so standard GitHub-hosted Actions
   runners are free; publication preflight found no tracked secret patterns,
   sensitive credential filenames, or binary APK/IPA archives in Git history)
+- Rights: Kami's original code is intentionally unlicensed and all rights are
+  reserved by creator [taizaki69](https://github.com/taizaki69) while the
+  proprietary/source-available/commercial/open-source decision remains open.
+  Do not add a project license without the creator's explicit decision; see
+  `LICENSES.md` and issue #5.
 - Default branch: `main`
 - Current code/test checkpoint: `d6530fe4178155a2fc550654806937ecb99462a6`
 - Page-list implementation baseline: `0555862278890ba78666a4b5c192421f0952a6be`
@@ -715,7 +720,7 @@ Not proven or implemented:
   across incomplete external hierarchy data remains open.
 - APK signer authentication and update identity binding.
 - A signed installation on a physical iPhone or iPad.
-- Production compatibility telemetry or a declared repository license.
+- Production compatibility telemetry or a final distribution/licensing model.
 
 Do not describe bounded response delivery as end-to-end extension support.
 
@@ -768,7 +773,7 @@ Address these before treating arbitrary downloaded extensions as safe.
 | P0 | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | One real APK through search/popular, details, chapters, pages, and `KamiSource` |
 | Security gate | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | Required before downloaded APK execution |
 | Diagnostics | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Deterministic, redacted unresolved-surface reports |
-| Distribution | [#5 Add the declared Apache-2.0 license](https://github.com/taizaki69/Kami/issues/5) | Requires owner confirmation before adding the license |
+| Distribution | [#5 Choose Kami's distribution and licensing model](https://github.com/taizaki69/Kami/issues/5) | Preserve all options; do not add a project license without an explicit owner decision |
 
 The rest of the product backlog is in `TODO.md`.
 

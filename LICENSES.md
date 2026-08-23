@@ -1,8 +1,19 @@
 # Licenses and Attribution
 
 ## Kami original code
-Apache License 2.0 (see repository license file when added). Original work:
-all Swift sources in this repository.
+
+Copyright (c) 2026 [taizaki69](https://github.com/taizaki69). All rights
+reserved.
+
+Kami is currently published **without a project license** while its creator
+decides between proprietary, source-available, commercial, and open-source
+distribution. No permission is granted to use, copy, modify, redistribute,
+sublicense, or sell Kami's original code beyond rights supplied directly by
+GitHub's Terms of Service for material in a public repository.
+
+Public visibility is not an open-source license. Do not add or infer an
+Apache-2.0, MIT, GPL, or other project license without the creator's explicit
+decision.
 
 ## Interoperability references (read, not copied)
 - **Mihon** (Apache-2.0) and **tachiyomix** (MPL-2.0 for spec, Apache-2.0 for
@@ -18,7 +29,8 @@ all Swift sources in this repository.
 - SQLite via the system library.
 
 If a zstd decoder or another runtime dependency is added later, its license
-must be recorded here before merge (Apache-2.0 or MIT options only).
+must be recorded here before merge. A dependency's license applies to that
+dependency; it does not license Kami's original code.
 
 ## Notes
 - This project is not affiliated with Mihon, Tachiyomi, or Keiyoushi.
