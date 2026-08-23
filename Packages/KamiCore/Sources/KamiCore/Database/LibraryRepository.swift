@@ -178,14 +178,15 @@ public actor LibraryStore {
         let apkSHA256 = row.string("apk_sha256"), !apkSHA256.isEmpty,
         let schemeText = row.string("signature_scheme"),
         let scheme = APKSigningIdentity.Scheme(rawValue: schemeText),
-        let currentSigners = Self.stringArray(row.string("current_signers")),
-        !currentSigners.isEmpty,
-        let signerHistory = Self.stringArray(row.string("signer_history")),
-        !signerHistory.isEmpty,
         let trustText = row.string("trust_source"),
         let trustSource = ExtensionTrustSource(persistedValue: trustText) else {
             // Rows created before signer admission are intentionally not
             // executable until they are re-admitted and populated.
+            return nil
+        }
+        let currentSigners = Self.stringArray(row.string("current_signers"))
+        let signerHistory = Self.stringArray(row.string("signer_history"))
+        guard !currentSigners.isEmpty, !signerHistory.isEmpty else {
             return nil
         }
         return InstalledExtensionTrust(
