@@ -23,6 +23,7 @@ MihonCompatKit, never in the app.
 │ Windows)                                     │
 │  APK: ZipArchive · Inflate · BinaryXML       │
 │  Dex: DexFile + bounded M1 interpreter       │
+│  Sources: pinned interpreted profiles        │
 │  Repository: index.pb/index.min.json client  │
 │  Backup: TachibkReader                       │
 │  Analyzer: ExtensionAnalyzer + compat-audit  │
@@ -31,9 +32,9 @@ MihonCompatKit, never in the app.
 
 ## Key decisions
 
-- **`KamiSource` is the seam.** Native sources and future app-integrated
-  DEX-bridged sources implement the same protocol; the registry hides which
-  is which.
+- **`KamiSource` is the seam.** Native sources and the pinned BatCave
+  DEX-backed source implement the same protocol; the registry hides which is
+  which. Future profiles must preserve this boundary.
   The protocol mirrors tachiyomix semantics (popular/latest/search/details/
   chapters/pages + image requests with headers) so the bridge is 1:1.
 - **Compat kit stays host-portable.** No UIKit/Combine/URLSession-only APIs
@@ -53,5 +54,6 @@ MihonCompatKit, never in the app.
 - Sources: async/await throughout; every source call is cancellable.
 - Persistence: actor-serialized SQLite.
 - Interpreter: the M1 runtime has a shared instruction budget and call-depth
-  guard today. A dedicated executor and suspend-method bridging via Swift
-  continuations remain follow-up work.
+  guard. Each app-facing interpreted source actor owns one mutable VM and uses
+  a bounded cancellation-aware queue to prevent overlapping entry across
+  suspend-method continuations.

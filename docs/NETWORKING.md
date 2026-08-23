@@ -41,6 +41,12 @@ serializer, sends the exact JSON POST, decodes its response DTOs from a bounded
 Okio source, and returns normalized page image URLs. All of these tests remain
 offline.
 
+The pinned BatCave `KamiSource` owns that transport together with one mutable
+interpreter behind a bounded actor queue, so a suspended request cannot permit
+another caller to enter the same VM concurrently. Its production transport
+disallows plain HTTP by default; the deterministic injected transport remains
+the only path used by the corpus tests.
+
 ## Remaining extension-facing stack
 
 Still required for the remaining source results and broader extension

@@ -19,7 +19,8 @@ work was recovered, completed, verified, and pushed.
   Do not add a project license without the creator's explicit decision; see
   `LICENSES.md` and issue #5.
 - Default branch: `main`
-- Current code/test checkpoint: `d6530fe4178155a2fc550654806937ecb99462a6`
+- Current code/test checkpoint: `3708aa1e9deff88b24db767c4b19e18bca738b16`
+- Pinned interpreted `KamiSource` baseline: `3708aa1e9deff88b24db767c4b19e18bca738b16`
 - Page-list implementation baseline: `0555862278890ba78666a4b5c192421f0952a6be`
 - Previous chapter-update baseline: `df11be5ee3f3dc67d66e76e2d4ba51c4a1ac51c8`
 - Previous latest/details baseline: `4eca3b2866b8fe4088956d793dd31ec780bde2a3`
@@ -51,6 +52,24 @@ and contains documentation only.
 
 Stop state on 2026-08-23 (America/Lima):
 
+- Commit `3708aa1` is pushed to `main`. `PinnedInterpretedSource` admits only
+  the exact BatCave 1.6.9 bytes after SHA-256, manifest package/lib/entry-class,
+  and DEX class validation, then exposes its real metadata, popular, latest,
+  paginated text search, combined details/chapters, pages, and default image
+  requests through `KamiSource`. One actor owns the mutable interpreter,
+  receiver, and source-scoped transport; a bounded cancellation-aware queue
+  prevents overlapping VM entry across async suspension. Production transport
+  disables plain HTTP by default.
+- `LibraryService.refresh` now uses an optional combined `SMangaUpdate` protocol
+  seam, so BatCave refreshes details and chapters with one real source request
+  while existing native sources retain the sequential default. `SourceRegistry`
+  accepts and deduplicates the interpreted source without source-kind branches.
+- Three deterministic adapter tests exercise every currently claimed
+  `KamiSource` operation, exact requests/results, default page image conversion,
+  a one-byte APK tamper rejection before parsing, and serialized concurrent
+  calls. A KamiCore regression proves registry integration. Swift Crypto 3.12.5
+  supplies cross-platform SHA-256 and is exactly locked and attributed; its
+  Apache-2.0 license applies to that dependency, not to Kami's original code.
 - Commit `f55a695` is pushed to `main`. It pins SwiftSoup 2.9.6 and places a
   resource-bounded HTML5/CSS layer behind the exact Jsoup methods reached by the
   pinned BatCave APK. Limits cover input bytes, DOM nodes/depth/attributes,
@@ -93,12 +112,12 @@ Stop state on 2026-08-23 (America/Lima):
 - Commit `d6530fe` is pushed to `main`. It rewrites one synthetic async DEX test
   fixture as incremental array appends so Swift 6 on macOS can type-check it in
   reasonable time; runtime behavior and fixture bytes are unchanged.
-- All 162 MihonCompatKit tests pass locally on Windows/Swift 6.3.3, including 17
+- All 165 MihonCompatKit tests pass locally on Windows/Swift 6.3.3, including 17
   pinned real-extension paths, 7 focused HTML/parser-limit tests, bounded Java
   URL-encoding and Kotlin string/collection regressions, and 4 async
-  interpreter/transport tests. KamiCore's dependency build/test, its chapter-
-  number conversion regression, and the optimized MihonCompatKit/`compat-audit`
-  build also pass.
+  interpreter/transport tests plus 3 pinned adapter regressions. KamiCore's 2
+  tests, including registry integration, and the optimized
+  MihonCompatKit/`compat-audit` build also pass.
 - The earlier `6cb46b5` async runtime still captures nested DEX frames, awaits
   without blocking, resumes inside-out with shared budgets and typed handlers,
   propagates cancellation, and exposes bounded OkHttp response/body values.
@@ -111,6 +130,12 @@ Stop state on 2026-08-23 (America/Lima):
   [Swift CI 32660907795](https://github.com/taizaki69/Kami/actions/runs/32660907795),
   [iOS Build 32660907782](https://github.com/taizaki69/Kami/actions/runs/32660907782),
   and [IPA Package 32660907773](https://github.com/taizaki69/Kami/actions/runs/32660907773).
+- Exact-head `3708aa1` passes
+  [Swift CI 32662751000](https://github.com/taizaki69/Kami/actions/runs/32662751000),
+  [iOS Build 32662750970](https://github.com/taizaki69/Kami/actions/runs/32662750970),
+  and [IPA Package 32662751023](https://github.com/taizaki69/Kami/actions/runs/32662751023).
+  This verifies the 165-test adapter suite, optimized CLI, 2 KamiCore tests,
+  Simulator/device targets, and unsigned IPA.
 - GitHub CLI is installed and authenticated as `taizaki69`; repository and
   workflow access were working. No authentication setup should be needed on
   this computer.
@@ -123,37 +148,34 @@ Stop state on 2026-08-23 (America/Lima):
   [progress comment 5387853914](https://github.com/taizaki69/Kami/issues/2#issuecomment-5387853914)
   and the page checkpoint in
   [progress comment 5387957141](https://github.com/taizaki69/Kami/issues/2#issuecomment-5387957141).
-  It remains open for interpreted `KamiSource` and reader image-request exposure.
+  Its final [completion comment 5388156079](https://github.com/taizaki69/Kami/issues/2#issuecomment-5388156079)
+  records exact local and CI evidence. The issue is closed as completed at
+  `3708aa1`; general compatibility remains separate work.
 
-### Next milestone: interpreted `KamiSource`
+### Next milestone: signer-authenticated extension admission
 
-Popular, paginated text search, latest updates, core manga details, and combined
-chapter updates plus page lists now return exact compatibility models. Wrap the
-pinned interpreted source behind the existing `KamiSource` protocol so the app
-can consume one unmodified extension through its normal source seam. Preserve
-the exact already-proven VM entrypoints and conversions:
+The first pinned interpreted `KamiSource` is complete under deterministic
+offline fixtures. The next blocker to making extensions user-installable is
+issue #3: prove an APK's signing identity before it can enter an executable
+registry. Preserve this trust order:
 
 ```text
-locked APK + resolved entry class
-  -> one source-scoped interpreter/transport owner
-  -> metadata + browse/search/latest
-  -> details/chapters through the combined SMangaUpdate path
-  -> page list -> [PageCompat]
-  -> image request (default URL first; exact override only when measured)
-  -> existing KamiSource / SourceRegistry / reader consumers
+selected extension store + declared signing identity
+  -> bounded APK v2/v3 signer parsing (v1 fallback where required)
+  -> normalized certificate identity
+  -> explicit persisted initial trust decision
+  -> installed package/version/signer binding
+  -> update signer match
+  -> executable-source eligibility
 ```
 
-Make interpreter ownership concurrency-safe and keep cookies, transport state,
-instruction budgets, and failures source-scoped. Add an end-to-end adapter test
-that exercises every `KamiSource` operation with deterministic offline fixtures
-and proves reader pages become image requests. Do not duplicate BatCave parsing
-in Swift. Keep the bounded runtime claims narrow: filtered search, the optional
-related-manga memo JSON branch, and custom image-request overrides remain
-unproven until a real APK path measures them.
-
-Do not enable arbitrary downloaded APK execution while the signer gate in
-issue #3 remains open. Keep `HostBridge` deny-by-default and never execute
-extension native libraries.
+Add valid, tampered, wrong-signer, rotated-signer, and unsigned fixtures. Reject
+before analysis or VM construction and keep diagnostics free of certificates,
+URLs, or other sensitive payloads. Passing issue #3 is necessary but not by
+itself sufficient for broad compatibility: dynamic source profiles,
+installation/selection UI, filtered search, preferences, and custom image
+requests still need separately measured implementations. Keep `HostBridge`
+deny-by-default and never execute extension native libraries.
 
 Start with:
 
@@ -255,9 +277,9 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 162 Swift tests passed locally on Windows/Swift 6.3.3 and in exact-head macOS Swift CI |
-| KamiCore | Dependency build and 1 chapter-number conversion test passed locally on Windows/Swift 6.3.3 |
-| Optimized package build | `scripts\windows_dev_test.bat Packages\MihonCompatKit release` compiled and linked SwiftSoup, MihonCompatKit, and `compat-audit.exe` in 73.66 seconds |
+| MihonCompatKit | 165 Swift tests passed locally on Windows/Swift 6.3.3; exact-head macOS verification is recorded below |
+| KamiCore | Dependency build and 2 tests (chapter-number conversion plus interpreted-source registry integration) passed locally on Windows/Swift 6.3.3 |
+| Optimized package build | `scripts\windows_dev_test.bat Packages\MihonCompatKit release` compiled and linked SwiftSoup, Swift Crypto, MihonCompatKit, and `compat-audit.exe` in 253.21 seconds on the first release build |
 | Real APK constructors | Akuma, MangaDex, and BatCave passed |
 | Structural verifier | 9 focused regressions cover instruction geometry, branch/fallthrough boundaries, and aligned, bounded, correctly typed payloads and switch targets |
 | Exception/control verifier | 13 focused regressions cover strict try/catch decoding, resolved `Throwable` validation, typed handler state/execution, and AOSP branch/result/exception-entry rules |
@@ -270,13 +292,14 @@ At the implementation baseline:
 | Async interpreter/response regressions | 4 focused tests cover nested frame resumption, sync-entry diagnostics, typed DEX handler re-entry, cancellation, injected transport, charset decoding, one-shot reads, and close state |
 | HTML/selector hardening | 7 focused tests cover BatCave CSS/URL semantics, modern direct-child and `:containsData` selectors, input, base-URL, node, depth, attribute, selector length/result/work, and extracted-string limits |
 | BatCave execution | Exact metadata getters pass; popular, paginated text search, and latest updates return exact `MangasPage`; core details return exact `SManga`; combined updates return exact chapters; page list returns exact image URLs; malformed chapter/page payloads are typed failures; a 503 maps to `HttpException(code: 503)` |
-| Swift CI | Exact-head `d6530fe` [run 32660907795](https://github.com/taizaki69/Kami/actions/runs/32660907795) passed the 162-test suite, optimized CLI build, KamiCore tests, and artifact upload |
-| iOS Simulator and unsigned device builds | Exact-head `d6530fe` [run 32660907782](https://github.com/taizaki69/Kami/actions/runs/32660907782) passed both targets |
-| Unsigned IPA packaging | Exact-head `d6530fe` [run 32660907773](https://github.com/taizaki69/Kami/actions/runs/32660907773) passed and uploaded `Kami-unsigned-ipa` |
+| Pinned source adapter | 3 focused regressions cover every claimed `KamiSource` method/default image request, pre-parse SHA tamper rejection, and serialized concurrent VM/transport entry; 1 KamiCore regression covers registry insertion/deduplication |
+| Swift CI | Exact-head `3708aa1` [run 32662751000](https://github.com/taizaki69/Kami/actions/runs/32662751000) passed the 165-test suite, optimized CLI build, 2 KamiCore tests, and artifact upload |
+| iOS Simulator and unsigned device builds | Exact-head `3708aa1` [run 32662750970](https://github.com/taizaki69/Kami/actions/runs/32662750970) passed both targets |
+| Unsigned IPA packaging | Exact-head `3708aa1` [run 32662751023](https://github.com/taizaki69/Kami/actions/runs/32662751023) passed and uploaded `Kami-unsigned-ipa` |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
 The successful exact-head public-repository runs validate every implementation
-checkpoint through `0555862`, including the async runtime and page-list path,
+checkpoint through `3708aa1`, including the pinned app-facing source adapter,
 and produced both `compat-audit` and `Kami-unsigned-ipa` artifacts.
 
 ## What the latest continuation completed
@@ -350,6 +373,29 @@ Commit `d6530fe` then replaces a second compound synthetic DEX fixture expressio
 with incremental appends so Swift 6 can type-check it on macOS. The exact-head
 Swift CI, iOS Build, and IPA Package workflows all pass; this changes test
 construction only, not runtime semantics.
+
+Commit `3708aa1` completes the first pinned app-facing source adapter:
+
+- A compiled BatCave 1.6.9 profile contains the exact APK digest, manifest
+  identity, entry descriptor, metadata expectations, and already measured DEX
+  method names/prototypes. Digest and identity checks happen before VM creation;
+  a one-byte mutation is rejected before parsing.
+- One source actor owns `DexInterpreter`, the instantiated receiver, and its
+  transport. Its bounded FIFO and cancellation handoff prevent concurrent
+  mutation while the actor is reentrant across async HTTP suspension.
+- Popular, latest, paginated text search, combined details/chapters, pages, and
+  validated default HTTP(S) image requests flow through `KamiSource`; filtered
+  and blank search remain explicit unsupported boundaries rather than silently
+  returning misleading results.
+- `KamiSource.getMangaUpdate` has a backwards-compatible sequential default.
+  The adapter overrides it with BatCave's one-request combined worker, and
+  `LibraryService.refresh` consumes that seam. `SourceRegistry` needs no
+  interpreted-source special case.
+- Swift Crypto 3.12.5 is exactly pinned for cross-platform SHA-256, with its
+  transitive Swift ASN.1 lock and third-party attribution recorded. Kami remains
+  intentionally unlicensed/all rights reserved pending issue #5.
+- MihonCompatKit reaches 165 passing Windows tests and KamiCore reaches 2; the
+  optimized package/CLI build also passes.
 
 Earlier commit `6cb46b5` crossed the asynchronous extension HTTP boundary:
 
@@ -691,6 +737,9 @@ Proven today:
   details plus combined chapter-update and page-list paths through exact request
   construction, bounded async response delivery, production selectors,
   generated DTO encoding/decoding, and exact compatibility-model conversion.
+- The locked BatCave profile exposes those operations, metadata, and default
+  page image requests through `KamiSource`; source-scoped actor ownership
+  serializes VM entry, and KamiCore's existing registry accepts the source.
 - Source-scoped, bounded OkHttp request/response/body/Okio values, async nested
   frame resumption, cancellation, typed transport/HTTP errors, the exact pinned
   BatCave POST assertion, and a deterministic no-live-network test transport.
@@ -698,18 +747,21 @@ Proven today:
   try/catch tables, register operands, resolved catch classes, and exact
   primitive/constructor/reference register dataflow over normal and exception
   edges.
-- Native MangaDex browsing through the existing `KamiSource` implementation.
+- Native MangaDex browsing through the existing `KamiSource` implementation;
+  the shipping app still defaults to it until trusted extension installation
+  and source selection are implemented.
 - Simulator/device compilation and creation of a real unsigned IPA.
 
 Not proven or implemented:
 
-- An interpreted extension exposing the proven operations through `KamiSource`
-  and the reader-facing image-request seam.
+- A general downloaded-extension-to-`KamiSource` bridge beyond the compiled
+  BatCave profile, trusted installation/selection UI, filtered search, or a
+  measured custom reader image-request override.
 - Broad Jsoup coverage beyond the measured subset, kotlinx serialization beyond
   the bounded generated encoder/decoder slice,
-  persistent source preferences and cookies, rate limiting, the
-  tachiyomix-to-`KamiSource` bridge, or WebView challenge handling. The current
-  cookie jar is source-isolated but in memory.
+  persistent source preferences and cookies, rate limiting, dynamic source
+  profile discovery, or WebView challenge handling. The current cookie jar is
+  source-isolated but in memory.
 - Full DEX opcode coverage or complete hierarchy behavior when class data leaves
   the parsed DEX and bounded host graph. Structural
   code-item/control-flow/exception-table verification, exact
@@ -722,7 +774,7 @@ Not proven or implemented:
 - A signed installation on a physical iPhone or iPad.
 - Production compatibility telemetry or a final distribution/licensing model.
 
-Do not describe bounded response delivery as end-to-end extension support.
+Do not generalize the one pinned BatCave adapter into broad extension support.
 
 ## Security and trust boundary
 
@@ -770,7 +822,7 @@ Address these before treating arbitrary downloaded extensions as safe.
 | Priority | Issue | Purpose |
 |---|---|---|
 | P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining external hierarchy and super/default resolution, opcode, and differential semantics work |
-| P0 | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | One real APK through search/popular, details, chapters, pages, and `KamiSource` |
+| Completed | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | Exact pinned BatCave profile completed at `3708aa1`; general compatibility remains separate work |
 | Security gate | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | Required before downloaded APK execution |
 | Diagnostics | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Deterministic, redacted unresolved-surface reports |
 | Distribution | [#5 Choose Kami's distribution and licensing model](https://github.com/taizaki69/Kami/issues/5) | Preserve all options; do not add a project license without an explicit owner decision |
@@ -780,28 +832,30 @@ The rest of the product backlog is in `TODO.md`.
 ## Recommended next implementation sequence
 
 1. Work only with the pinned local corpus while the signer gate is absent.
-2. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
+2. Implement issue #3 with bounded APK v2/v3 signer parsing and the v1 fallback
+   required by supported corpus artifacts. Normalize identities exactly against
+   extension-store metadata and cover valid, tampered, wrong-signer,
+   rotated-signer, and unsigned fixtures.
+3. Persist the initial signer trust result and bind package, installed version,
+   updates, and executable-source eligibility to it. Reject mismatches before
+   analysis or VM construction.
+4. After the signer gate, add trusted extension installation/selection and
+   dynamic profiles incrementally from measured corpus evidence. Do not turn
+   the compiled BatCave entrypoints into guesses for unrelated extensions.
+5. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
    plus canonical unresolved diagnostics for every new bridge decision.
-3. Continue issue #1 with broader external hierarchy and super/default
+6. Continue issue #1 with broader external hierarchy and super/default
    resolution, remaining opcodes, and differential AOSP coverage. Code-item
    geometry, strict try/catch decoding and resolved `Throwable` validation,
    branch/move-result/move-exception rules, bounded exact
    primitive/constructor/reference dataflow, runtime casts/catches,
    receiver-directed virtual/interface-default lookup, lexical parsed-DEX
    `invoke-super`, and invoke word-count/kind checks are already in.
-4. Add aggregate parser/runtime resource accounting and streaming or
+7. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
-5. Continue issue #2 by exposing one pinned interpreted source through the
-   existing `KamiSource` contract. Reuse the exact passing popular/search/latest,
-   details/chapter-update, and page-list paths; do not recreate source parsing in
-   Swift. Make interpreter access concurrency-safe and source-scoped.
-6. Prove every `KamiSource` operation through one deterministic adapter test,
-   including default page image requests. Measure a real custom image-request
-   override before widening that runtime surface, and keep filtered search
-   explicitly unclaimed meanwhile.
-7. Implement issue #3 before enabling execution of arbitrary repository
-   downloads or updates.
-8. Add issue #4 diagnostics as local, deterministic, redacted output so the
+8. Measure filtered search and a real custom image-request override before
+   widening those adapter surfaces; keep both explicitly unclaimed meanwhile.
+9. Add issue #4 diagnostics as local, deterministic, redacted output so the
    compatibility corpus can grow from reproducible failures.
 
 Every new runtime capability should arrive with a synthetic malformed fixture,
@@ -818,6 +872,7 @@ an exact real-APK assertion when reachable, and CI coverage.
 | APK and archive parsing | `Packages/MihonCompatKit/Sources/MihonCompatKit/APK/` |
 | DEX parser | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/DexFile.swift` |
 | Interpreter | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexInterpreter.swift` |
+| Pinned app-facing source | `Packages/MihonCompatKit/Sources/MihonCompatKit/Sources/PinnedInterpretedSource.swift` |
 | Method resolution | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexMethodResolver.swift` |
 | Register/invoke verifier | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexRegisterVerifier.swift` |
 | Native capability boundary | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/HostBridge.swift` |
@@ -827,6 +882,7 @@ an exact real-APK assertion when reachable, and CI coverage.
 | Async VM/response regressions | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/AsyncInterpreterTests.swift` |
 | HTML compatibility and limits | `Packages/MihonCompatKit/Sources/MihonCompatKit/HTML/CompatHTML.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/HTMLCompatibilityTests.swift` |
 | Real APK execution frontier | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/RealExtensionExecutionTests.swift` |
+| End-to-end adapter proof | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/PinnedInterpretedSourceTests.swift`, `Packages/KamiCore/Tests/KamiCoreTests/SourceRegistryTests.swift` |
 | Repository client | `Packages/MihonCompatKit/Sources/MihonCompatKit/Repository/ExtensionRepository.swift` |
 | App source seam | `Packages/MihonCompatKit/Sources/MihonCompatKit/Models/CompatModels.swift` (`KamiSource`) |
 | Persistence | `Packages/KamiCore/Sources/KamiCore/Database/` |

@@ -20,8 +20,8 @@ is no compatibility claim.
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
 | DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| DEX execution | Partial M1/M2 working | The 162-test suite includes 17 exact pinned-APK paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, bounded HTML/CSS, generated-serializer JSON encode/decode, and page construction are checked |
-| End-to-end source operations | Partial | BatCave popular, paginated text search, latest updates, core manga details, combined chapter updates, and pages cross deterministic injected transport and return exact compatibility models; filtered search and `KamiSource` exposure remain open |
+| DEX execution | Partial M1/M2 working | The 165-test suite includes 17 exact pinned-APK paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, bounded HTML/CSS, generated-serializer JSON encode/decode, page construction, and serialized adapter ownership are checked |
+| End-to-end source operations | Working for one pinned profile | The exact BatCave 1.6.9 APK exposes metadata, popular, paginated text search, latest, core details, combined chapter updates, pages, and default image requests through `KamiSource`; filtered search, preferences, custom image requests, live-site availability, and arbitrary APK admission remain open |
 
 ## Per-extension execution
 
@@ -40,7 +40,7 @@ DEX frames, and receives a bounded response. It then crosses the exact
 `JsoupExtensionsKt.asJsoup$default` call and parses the source's real selectors,
 relative links, thumbnails, and pagination into two exact
 `SManga` values and a `MangasPage`. The response fixture is offline; this does
-not claim live-site availability or a complete app-facing source. The pinned
+not claim live-site availability or arbitrary-extension compatibility. The pinned
 text-search worker additionally proves whitespace trimming, Java-compatible
 UTF-8 form encoding, GET construction, page routing, source cache policy, and
 the no-next-page result. Filtered search is not yet covered.
@@ -62,6 +62,15 @@ extraction, the APK's generated request serializer, the exact JSON POST,
 Okio-backed generated response decoding, relative/absolute URL normalization,
 and Tachiyomi `Page` conversion. Malformed JSON, invalid UTF-8, and a wrong
 images type are rejected as typed serialization failures.
+
+`PinnedInterpretedSource` admits only the locked BatCave bytes after exact
+SHA-256, manifest package/lib/entry-class, and DEX class checks. It owns one
+source-scoped interpreter and transport behind a bounded cancellation-aware
+queue, maps every operation above into `KamiSource`, reuses the combined update
+for one-request library refreshes, validates default HTTP(S) page image
+requests, and registers in KamiCore without source-kind branches. Three adapter
+tests prove the complete deterministic contract, pre-parse tamper rejection,
+and no overlapping VM/transport entry under concurrent calls.
 
 ## Current measured API workload
 
@@ -93,20 +102,21 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 ## Test evidence
 
-- 162/162 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+- 165/165 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present.
-- Once the repository became public, its standard hosted runners dispatched
-  normally. Commit `d6530fe` makes a synthetic async DEX fixture easier for the
-  macOS Swift compiler to type-check without changing its bytes. Exact-head
-  [Swift CI 32660907795](https://github.com/taizaki69/Kami/actions/runs/32660907795),
-  [iOS Build 32660907782](https://github.com/taizaki69/Kami/actions/runs/32660907782),
-  and [IPA Package 32660907773](https://github.com/taizaki69/Kami/actions/runs/32660907773)
-  all pass.
+- Exact-head commit `3708aa1` passes
+  [Swift CI 32662751000](https://github.com/taizaki69/Kami/actions/runs/32662751000),
+  [iOS Build 32662750970](https://github.com/taizaki69/Kami/actions/runs/32662750970),
+  and [IPA Package 32662751023](https://github.com/taizaki69/Kami/actions/runs/32662751023).
 - Seventeen real-extension tests require exact successful values or exact typed
   boundaries. The BatCave popular, text-search, latest, details, and chapter
   and page tests require exact requests and parsed model fields; invalid
   chapter/page JSON requires typed serialization failures, and its 503 test
   requires the exact Mihon `HttpException` code.
+- Three pinned adapter tests cover every currently claimed `KamiSource`
+  operation and default image request, reject a one-byte APK mutation before
+  parsing, and prove concurrent callers are serialized. A KamiCore test proves
+  registry insertion and source-ID deduplication.
 - Seven focused HTML regressions cover the BatCave selectors, modern direct-child
   relative-selector and `:containsData` semantics, URL resolution, invalid bases,
   input/node/depth/attribute limits, selector syntax/length/result and
@@ -146,12 +156,15 @@ tests, not the heuristic percentage, are the acceptance signal.
 Kami can download, validate structurally, inspect, classify, and execute a
 controlled real-extension path through bounded async response delivery and
 parse BatCave popular/search/latest/details/chapters/pages into exact
-compatibility models. It cannot yet expose that unmodified extension as an app
-reader source or execute its reader-facing image-request override. Remaining
+compatibility models. The exact locked APK now reaches the app-facing source
+and registry seams and produces validated default page image requests. This is
+one compiled pinned profile, not a claim that downloaded extensions are safe or
+generally compatible; signer trust, installation/selection UI, filtered
+search, preferences, and custom image-request overrides remain open. Remaining
 DEX work (notably
 broader external hierarchy and super/default resolution beyond parsed class
 graphs, opcode coverage, and differential semantics) is tracked in
-[#1](https://github.com/taizaki69/Kami/issues/1), the first
-complete source in [#2](https://github.com/taizaki69/Kami/issues/2), APK signer trust in
+[#1](https://github.com/taizaki69/Kami/issues/1), the completed first pinned
+source in [#2](https://github.com/taizaki69/Kami/issues/2), APK signer trust in
 [#3](https://github.com/taizaki69/Kami/issues/3), and privacy-safe compatibility
 telemetry in [#4](https://github.com/taizaki69/Kami/issues/4).

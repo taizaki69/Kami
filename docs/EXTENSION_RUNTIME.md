@@ -6,9 +6,10 @@
 
 Kami has crossed from DEX analysis into controlled execution. The partial M1
 interpreter runs synthetic conformance fixtures and progressively deeper paths
-from three pinned, current Mihon extension APKs. It is not yet a complete
-verifier, Java or Kotlin runtime, tachiyomix source bridge, or end-to-end source
-implementation.
+from three pinned, current Mihon extension APKs. One exact BatCave profile now
+crosses the app-facing `KamiSource` boundary end to end under deterministic
+offline fixtures. This is not yet a complete verifier, Java or Kotlin runtime,
+general tachiyomix source bridge, or arbitrary-extension implementation.
 
 Measured real-APK behavior today:
 
@@ -47,10 +48,11 @@ Measured real-APK behavior today:
   and returns exact public `PageCompat` values. Malformed JSON, invalid UTF-8,
   and a wrong images type surface as typed serialization failures.
 - These source-result paths are proven only with deterministic offline response
-  fixtures. No test yet claims filtered search, the optional related-manga JSON
-  memo, preferences, Cloudflare behavior, image-request overrides, or an
-  interpreted `KamiSource` adapter. The pinned suite never performs live
-  network I/O.
+  fixtures. `PinnedInterpretedSource` maps them through the complete app-facing
+  contract and proves a default reader image request, but no test claims
+  filtered search, the optional related-manga JSON memo, preferences,
+  Cloudflare behavior, custom image-request overrides, or live-site
+  availability. The pinned suite never performs live network I/O.
 
 ## Architecture
 
@@ -63,9 +65,9 @@ classes*.dex                        validated structural parse
    ↓ Java/Kotlin HostBridge         partial exact-signature M2 surface
    ↓ source-scoped HTTP transport   bounded async request/response slice works
    ↓ bounded HTML/JSON bridges      BatCave browse/details/chapters/pages works
-   ↓ tachiyomix API bridge          result models through SMangaUpdate + Page
-KamiSource (Swift protocol)         working for native sources
-   ↓ SourceRegistry / app / DB      working
+   ↓ tachiyomix API bridge          pinned BatCave profile works
+KamiSource (Swift protocol)         native + pinned BatCave adapter work
+   ↓ SourceRegistry / app / DB      registration + combined refresh work
 ```
 
 The interpreter consumes `DexFile` code items directly. It follows the Android
@@ -206,10 +208,11 @@ synthetic and pinned-corpus tests:
   real APK.
 - Kotlin duration encoding/conversion reached by OkHttp cache-control setup.
 
-The measured next layer is the interpreted `KamiSource` adapter, including the
-reader-facing image-request path, followed by filtered search. The longer tail
-remains additional Jsoup DOM behavior, string/collection overloads, broader
-serialization, preferences, and Android context/UI shims. A class appearing in
+The measured next layer is signer-authenticated extension admission and app
+installation/selection, followed by filtered search and a real custom
+image-request override. The longer tail remains additional Jsoup DOM behavior,
+string/collection overloads, broader serialization, preferences, and Android
+context/UI shims. A class appearing in
 the analyzer's
 `implementedClasses` set is only a coarse prioritization signal; it does not
 mean every method on that class is callable.
@@ -218,8 +221,11 @@ mean every method on that class is callable.
 
 The target is a signature-aware bridge from `HttpSource`, `SManga`, `SChapter`,
 `MangasPage`, filters, network helpers, and Jsoup helpers onto `KamiSource`.
-Per-source network clients must own rate limits, cookies, and redacted tracing.
-The first end-to-end extension is tracked in
+The exact pinned BatCave profile implements the currently measured subset with
+one actor owning its mutable interpreter and source-scoped transport. General
+profile discovery and the remaining APIs are still M3 work. Per-source network
+clients must own rate limits, cookies, and redacted tracing. The first pinned
+end-to-end adapter is tracked in
 [GitHub issue #2](https://github.com/taizaki69/Kami/issues/2).
 
 ## M4 — WebView/Cloudflare bridge
@@ -248,22 +254,22 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 162 passing tests locally on Windows/Swift 6.3.3.
+`MihonCompatKit` currently has 165 passing tests locally on Windows/Swift 6.3.3.
 They include 17 pinned real-extension executions, 7 focused HTML/parser-limit
 regressions, Java URL-encoding and bounded Kotlin string/collection-helper
 regressions, generated chapter/page JSON success/failure paths, and 4 focused
-async interpreter/transport regressions, alongside the existing parser,
-verifier, request-model, repository, and compression coverage. GitHub Swift CI
-fetches the SHA-256-locked APK corpus before running it.
+async interpreter/transport regressions, plus 3 end-to-end adapter/tamper/
+concurrency regressions, alongside the existing parser, verifier,
+request-model, repository, and compression coverage. KamiCore has 2 passing
+Windows tests, including interpreted-source registry/deduplication. GitHub
+Swift CI fetches the SHA-256-locked APK corpus before running it.
 
-After the repository became public, the `0555862` workflows dispatched normally:
-iOS Build and IPA Package passed, while Swift CI exposed a macOS-only compiler
-type-check timeout in another synthetic test-fixture expression. Commit
-`d6530fe` rewrites that expression without changing its bytes or runtime meaning.
-Exact-head [Swift CI 32660907795](https://github.com/taizaki69/Kami/actions/runs/32660907795),
-[iOS Build 32660907782](https://github.com/taizaki69/Kami/actions/runs/32660907782),
-and [IPA Package 32660907773](https://github.com/taizaki69/Kami/actions/runs/32660907773)
-all pass.
+Exact-head commit `3708aa1` passes
+[Swift CI 32662751000](https://github.com/taizaki69/Kami/actions/runs/32662751000),
+[iOS Build 32662750970](https://github.com/taizaki69/Kami/actions/runs/32662750970),
+and [IPA Package 32662751023](https://github.com/taizaki69/Kami/actions/runs/32662751023).
+Those runs cover the 165-test pinned adapter suite, optimized CLI build,
+KamiCore registry test, Simulator/device compilation, and unsigned IPA artifact.
 
 The compatibility matrix records the exact versions, hashes, and methods. New
 runtime behavior is complete only when it has a focused regression test and,
