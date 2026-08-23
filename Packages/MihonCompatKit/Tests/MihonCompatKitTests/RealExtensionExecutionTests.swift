@@ -64,6 +64,45 @@ final class RealExtensionExecutionTests: XCTestCase {
         return try get(vm, [companion, HostBridge.string(rawValue)])
     }
 
+    private func manga(
+        url: String,
+        title: String,
+        vm: DexInterpreter
+    ) throws -> RVal {
+        let companion = try XCTUnwrap(
+            vm.bridge.staticFields[
+                "Leu/kanade/tachiyomi/source/model/SManga;->Companion"
+            ]
+        )
+        let create = try XCTUnwrap(vm.bridge.resolve(
+            class: "Leu/kanade/tachiyomi/source/model/SManga$Companion;",
+            "create",
+            prototype: "()Leu/kanade/tachiyomi/source/model/SManga;",
+            isStatic: false
+        ))
+        let value = try create(vm, [companion])
+        for (name, propertyValue) in [("setUrl", url), ("setTitle", title)] {
+            let setter = try XCTUnwrap(vm.bridge.resolve(
+                class: "Leu/kanade/tachiyomi/source/model/SManga;",
+                name,
+                prototype: "(Ljava/lang/String;)V",
+                isStatic: false
+            ))
+            _ = try setter(vm, [value, HostBridge.string(propertyValue)])
+        }
+        return value
+    }
+
+    private func emptyList(vm: DexInterpreter) throws -> RVal {
+        let method = try XCTUnwrap(vm.bridge.resolve(
+            class: "Lkotlin/collections/CollectionsKt;",
+            "emptyList",
+            prototype: "()Ljava/util/List;",
+            isStatic: true
+        ))
+        return try method(vm, [])
+    }
+
     /// BatCave 1.6.9 (lib 1.6): getBaseUrl() = const-string/return-object —
     /// the first method from a real extension APK executed by Kami's VM.
     func testBatCaveGetBaseUrl() throws {
@@ -372,6 +411,145 @@ final class RealExtensionExecutionTests: XCTestCase {
         let requests = await transport.requests()
         XCTAssertEqual(requests, [expected])
         XCTAssertEqual(vm.bridge.lastPreparedRequest, expected)
+    }
+
+    func testBatCaveMangaUpdateParsesChaptersFromScriptJSON() async throws {
+        let html = """
+        <header class="page__header"><h1>Chapter Hero</h1></header>
+        <div class="page__text">Chapter frontier.</div>
+        <script>
+        window.__DATA__ = {"news_id":42,"chapters":[{"id":7,"posi":1.5,"title":"Chapter 1.5","date":"23.8.2026"},{"id":8,"posi":2.0,"title":"Chapter 2","date":"not-a-date"}],"xhash":"?token=test"};
+        </script>
+        """
+        let detailURL = "https://batcave.biz/comic/chapter-hero"
+        let transport = StaticTransport(response: CompatHTTPResponse(
+            finalURL: detailURL,
+            statusCode: 200,
+            headers: [CompatHTTPHeader(name: "Content-Type", value: "text/html; charset=utf-8")],
+            body: Array(html.utf8)
+        ))
+        let (vm, _) = try loadVM("batcave", transport: transport)
+        let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+        let receiver = try vm.instantiate(classDescriptor: cls)
+        let sourceManga = try manga(url: "/comic/chapter-hero", title: "Chapter Hero", vm: vm)
+
+        let result = try await vm.callAsync(
+            classDescriptor: cls,
+            method: "f",
+            prototype: "(Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;Leu/kanade/tachiyomi/source/model/SManga;Ljava/util/List;ZZLkotlin/coroutines/jvm/internal/ContinuationImpl;)Ljava/lang/Object;",
+            args: [receiver, sourceManga, try emptyList(vm: vm), .int(1), .int(1), .null]
+        )
+        guard let update = HostBridge.mangaUpdateCompat(from: result) else {
+            return XCTFail("expected converted manga update, got \(result)")
+        }
+        XCTAssertEqual(update.manga.url, "/comic/chapter-hero")
+        XCTAssertEqual(update.manga.title, "Chapter Hero")
+        XCTAssertEqual(update.manga.description, "\nChapter frontier.")
+        XCTAssertEqual(update.chapters.count, 2)
+        let firstChapter = update.chapters[0]
+        XCTAssertEqual(firstChapter.url, "/reader/42/7?token=test")
+        XCTAssertEqual(firstChapter.name, "Chapter 1.5")
+        XCTAssertEqual(firstChapter.chapterNumber, 1.5)
+        XCTAssertNil(firstChapter.number)
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let expectedDate = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 23
+        )))
+        XCTAssertEqual(
+            firstChapter.dateUpload,
+            Int64((expectedDate.timeIntervalSince1970 * 1_000).rounded())
+        )
+
+        let secondChapter = update.chapters[1]
+        XCTAssertEqual(secondChapter.url, "/reader/42/8?token=test")
+        XCTAssertEqual(secondChapter.name, "Chapter 2")
+        XCTAssertEqual(secondChapter.chapterNumber, 2)
+        XCTAssertNil(secondChapter.number)
+        XCTAssertEqual(secondChapter.dateUpload, 0)
+
+        let expected = CompatHTTPRequest(
+            url: detailURL,
+            cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
+        )
+        let requests = await transport.requests()
+        XCTAssertEqual(requests, [expected])
+        XCTAssertEqual(vm.bridge.lastPreparedRequest, expected)
+    }
+
+    func testBatCaveMangaUpdateRejectsInvalidChapterJSON() async throws {
+        let detailURL = "https://batcave.biz/comic/invalid-chapters"
+        let cases = [
+            (name: "malformed", payload: #"{"news_id":42,"chapters":[}"#),
+            (name: "missing required news_id", payload: #"{"chapters":[]}"#),
+        ]
+
+        for testCase in cases {
+            let html = """
+            <header class="page__header"><h1>Invalid Chapters</h1></header>
+            <div class="page__text">Invalid fixture.</div>
+            <script>window.__DATA__ = \(testCase.payload);</script>
+            """
+            let transport = StaticTransport(response: CompatHTTPResponse(
+                finalURL: detailURL,
+                statusCode: 200,
+                headers: [CompatHTTPHeader(
+                    name: "Content-Type",
+                    value: "text/html; charset=utf-8"
+                )],
+                body: Array(html.utf8)
+            ))
+            let (vm, _) = try loadVM("batcave", transport: transport)
+            let cls = "Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;"
+            let receiver = try vm.instantiate(classDescriptor: cls)
+            let sourceManga = try manga(
+                url: "/comic/invalid-chapters",
+                title: "Invalid Chapters",
+                vm: vm
+            )
+
+            do {
+                _ = try await vm.callAsync(
+                    classDescriptor: cls,
+                    method: "f",
+                    prototype: "(Leu/kanade/tachiyomi/extension/en/batcave/ExtensionGenerated;Leu/kanade/tachiyomi/source/model/SManga;Ljava/util/List;ZZLkotlin/coroutines/jvm/internal/ContinuationImpl;)Ljava/lang/Object;",
+                    args: [
+                        receiver,
+                        sourceManga,
+                        try emptyList(vm: vm),
+                        .int(1),
+                        .int(1),
+                        .null,
+                    ]
+                )
+                XCTFail("expected SerializationException for \(testCase.name)")
+            } catch let thrown as DEXThrowable {
+                guard case let .obj(object) = thrown.value else {
+                    XCTFail("expected host SerializationException for \(testCase.name)")
+                    continue
+                }
+                XCTAssertEqual(
+                    object.dexType,
+                    "Lkotlinx/serialization/SerializationException;",
+                    testCase.name
+                )
+            } catch {
+                XCTFail("unexpected error for \(testCase.name): \(error)")
+            }
+
+            let requests = await transport.requests()
+            XCTAssertEqual(
+                requests,
+                [CompatHTTPRequest(
+                    url: detailURL,
+                    cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
+                )],
+                testCase.name
+            )
+        }
     }
 
     func testBatCaveAwaitSuccessRejectsNonSuccessfulHTTPStatus() async throws {

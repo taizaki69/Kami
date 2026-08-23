@@ -68,6 +68,25 @@ final class HTMLCompatibilityTests: XCTestCase {
         XCTAssertEqual(anchor.ownText(), "Direct Value")
     }
 
+    func testContainsDataMatchesScriptDataWithJsoupSemantics() throws {
+        let html = """
+        <script>window.__DATA__ = {"id": 42};</script>
+        <script>window.other = true;</script>
+        """
+        let context = try CompatHTMLParser.parse(
+            html,
+            baseURL: "https://example.test/details",
+            policy: .init()
+        )
+
+        let scripts = try context.select(
+            context.document,
+            query: "script:containsData(WINDOW.__data__)"
+        )
+        XCTAssertEqual(scripts.count, 1)
+        XCTAssertTrue(scripts[0].data().contains("{\"id\": 42}"))
+    }
+
     func testParserRejectsInvalidBaseURLAndOversizedInput() {
         assertHTMLFailure(.invalidBaseURL) {
             try CompatHTMLParser.parse(

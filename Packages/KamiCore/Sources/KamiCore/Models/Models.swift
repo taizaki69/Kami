@@ -118,7 +118,7 @@ public struct Chapter: Identifiable, Hashable, Codable, Sendable {
             url: compat.url,
             name: compat.name,
             scanlator: compat.scanlators.first,
-            number: Double(compat.number ?? "") ?? -1,
+            number: Double(compat.number ?? "") ?? Double(compat.chapterNumber),
             dateUpload: compat.dateUpload
         )
     }

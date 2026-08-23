@@ -1,5 +1,33 @@
 import XCTest
 @testable import KamiCore
+import MihonCompatKit
+
+final class ChapterModelTests: XCTestCase {
+    func testCompatConversionPreservesLegacyAndModernChapterNumbers() {
+        let legacy = Chapter(
+            mangaId: 7,
+            sourceOrder: 1,
+            from: SChapterCompat(
+                url: "/chapter/legacy",
+                name: "Legacy",
+                chapterNumber: 1.5
+            )
+        )
+        XCTAssertEqual(legacy.number, 1.5)
+
+        let modern = Chapter(
+            mangaId: 7,
+            sourceOrder: 2,
+            from: SChapterCompat(
+                url: "/chapter/modern",
+                name: "Modern",
+                chapterNumber: 99,
+                number: "2.25"
+            )
+        )
+        XCTAssertEqual(modern.number, 2.25)
+    }
+}
 
 #if canImport(SQLite3)
 

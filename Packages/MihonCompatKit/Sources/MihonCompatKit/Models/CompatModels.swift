@@ -87,6 +87,7 @@ public struct SChapterCompat: Sendable {
     public var url: String
     public var name: String
     public var volume: String?
+    public var chapterNumber: Float
     public var number: String?
     public var scanlators: [String]
     public var dateUpload: Int64
@@ -99,6 +100,7 @@ public struct SChapterCompat: Sendable {
         url: String = "",
         name: String = "",
         volume: String? = nil,
+        chapterNumber: Float = -1,
         number: String? = nil,
         scanlators: [String] = [],
         dateUpload: Int64 = 0,
@@ -110,6 +112,7 @@ public struct SChapterCompat: Sendable {
         self.url = url
         self.name = name
         self.volume = volume
+        self.chapterNumber = chapterNumber
         self.number = number
         self.scanlators = scanlators
         self.dateUpload = dateUpload
@@ -117,6 +120,16 @@ public struct SChapterCompat: Sendable {
         self.locked = locked
         self.note = note
         self.memo = memo
+    }
+}
+
+public struct SMangaUpdateCompat: Sendable {
+    public var manga: SMangaCompat
+    public var chapters: [SChapterCompat]
+
+    public init(manga: SMangaCompat, chapters: [SChapterCompat]) {
+        self.manga = manga
+        self.chapters = chapters
     }
 }
 

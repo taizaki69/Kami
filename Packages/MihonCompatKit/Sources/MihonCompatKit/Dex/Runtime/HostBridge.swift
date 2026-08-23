@@ -201,9 +201,79 @@ public final class HostBridge {
         }
     }
 
+    private final class SChapterBox {
+        var value: SChapterCompat
+
+        init(_ value: SChapterCompat = .init()) {
+            self.value = value
+        }
+    }
+
     private struct MangasPageBox {
         let mangas: [RVal]
         let hasNextPage: Bool
+    }
+
+    private struct SMangaUpdateBox {
+        let manga: RVal
+        let chapters: [RVal]
+    }
+
+    private final class SerialDescriptorBox {
+        let serialName: String
+        let expectedElementCount: Int
+        var elements: [(name: String, isOptional: Bool)] = []
+
+        init(serialName: String, expectedElementCount: Int) {
+            self.serialName = serialName
+            self.expectedElementCount = expectedElementCount
+        }
+    }
+
+    private final class JSONValueDecoderBox {
+        let value: Any
+
+        init(_ value: Any) {
+            self.value = value
+        }
+    }
+
+    private final class JSONCompositeDecoderBox {
+        let object: [String: Any]
+        let descriptor: SerialDescriptorBox
+        let presentIndices: [Int]
+        var nextPresentIndex = 0
+
+        init(object: [String: Any], descriptor: SerialDescriptorBox) {
+            self.object = object
+            self.descriptor = descriptor
+            self.presentIndices = descriptor.elements.indices.filter {
+                object[descriptor.elements[$0].name] != nil
+            }
+        }
+
+        func value(at index: Int) -> Any? {
+            guard descriptor.elements.indices.contains(index) else { return nil }
+            return object[descriptor.elements[index].name]
+        }
+    }
+
+    private struct ArrayListSerializerBox {
+        let elementSerializer: RVal
+    }
+
+    private struct LocalDateBox {
+        let year: Int
+        let month: Int
+        let day: Int
+    }
+
+    private struct ZoneIDBox {
+        let timeZone: TimeZone
+    }
+
+    private struct EpochMillisecondsBox {
+        let value: Int64
     }
 
     private final class OkHttpClientBox {
@@ -540,6 +610,27 @@ public final class HostBridge {
             isStatic: true
         ) { _, _ in suspendedMarker }
         bridge.register(
+            class: "Lkotlin/Result;",
+            "constructor-impl",
+            prototype: "(Ljava/lang/Object;)Ljava/lang/Object;",
+            isStatic: true
+        ) { _, args in
+            try argument(args, 0, "Result.constructor-impl")
+        }
+        bridge.register(
+            class: "Lkotlin/Result;",
+            "isFailure-impl",
+            prototype: "(Ljava/lang/Object;)Z",
+            isStatic: true
+        ) { _, args in
+            let value = try argument(args, 0, "Result.isFailure-impl")
+            if case let .obj(object) = value,
+               object.payload is KotlinFailure || object.dexType == "Lkotlin/Result$Failure;" {
+                return .int(1)
+            }
+            return .int(0)
+        }
+        bridge.register(
             class: "Lkotlin/ResultKt;",
             "createFailure",
             prototype: "(Ljava/lang/Throwable;)Ljava/lang/Object;",
@@ -619,6 +710,44 @@ public final class HostBridge {
         ) { _, args in
             let value = vmStringValue(try argument(args, 0, "StringsKt.trim"))
             return string(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        for (name, beforeLast) in [
+            ("substringAfter$default", false),
+            ("substringBeforeLast$default", true),
+        ] {
+            bridge.register(
+                class: "Lkotlin/text/StringsKt;",
+                name,
+                prototype: "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ljava/lang/String;",
+                isStatic: true
+            ) { _, args in
+                let operation = "StringsKt.\(name)"
+                let value = try requiredString(args, 0, operation)
+                let delimiter = try requiredString(args, 1, operation)
+                guard case let .int(mask) = try argument(args, 3, operation) else {
+                    throw VMError.verify("\(operation) default mask")
+                }
+                let missingValue = mask & 0x02 != 0
+                    ? value
+                    : try requiredString(args, 2, operation)
+                let maximumBytes = bridge.htmlPolicy.maximumExtractedStringBytes
+                guard value.utf8.count <= maximumBytes,
+                      delimiter.utf8.count <= maximumBytes,
+                      missingValue.utf8.count <= maximumBytes else {
+                    throw hostThrowable(
+                        "Ljava/lang/IllegalArgumentException;",
+                        "substring input is too long"
+                    )
+                }
+                let options: String.CompareOptions = beforeLast ? [.backwards] : []
+                guard let range = value.range(of: delimiter, options: options) else {
+                    return string(missingValue)
+                }
+                let result = beforeLast
+                    ? String(value[..<range.lowerBound])
+                    : String(value[range.upperBound...])
+                return string(result)
+            }
         }
         bridge.register(
             class: "Ljava/net/URLEncoder;",
@@ -841,27 +970,13 @@ public final class HostBridge {
         Self.registerPrimitiveBoxes(bridge)
         Self.registerCollectionSurface(bridge)
         Self.registerFilterSurface(bridge)
+        Self.registerSerializationSurface(bridge)
         Self.registerKotlinDurationSurface(bridge)
         Self.registerOkHttpRequestSurface(bridge)
         Self.registerOkHttpResponseSurface(bridge)
         Self.registerHTMLSurface(bridge)
         Self.registerSourceModelSurface(bridge)
-        bridge.register(
-            class: "Ljava/time/format/DateTimeFormatter;",
-            "ofPattern",
-            prototype: "(Ljava/lang/String;)Ljava/time/format/DateTimeFormatter;",
-            isStatic: true
-        ) { _, args in
-            let pattern = vmStringValue(try argument(args, 0, "DateTimeFormatter.ofPattern"))
-            guard !pattern.isEmpty else {
-                throw DEXThrowable(string("IllegalArgumentException: empty date pattern"))
-            }
-            return .obj(ObjInstance(
-                dexType: "Ljava/time/format/DateTimeFormatter;",
-                payload: pattern,
-                isHost: true
-            ))
-        }
+        Self.registerJavaTimeSurface(bridge)
         let regex = "Lkotlin/text/Regex;"
         bridge.objectFactories[regex] = { _ in
             .obj(ObjInstance(dexType: regex, isHost: true))
@@ -909,6 +1024,370 @@ public final class HostBridge {
             return .int(selection.ascending ? 1 : 0)
         }
         return bridge
+    }
+
+    /// Minimal dependency-injection entry used by keiyoushi's serialization
+    /// helpers. The injected value is deliberately only a host `Json` object;
+    /// no general service locator or app-global dependency surface is exposed.
+    private static func registerSerializationSurface(_ bridge: HostBridge) {
+        let decoder = "Lkotlinx/serialization/encoding/Decoder;"
+        let compositeDecoder = "Lkotlinx/serialization/encoding/CompositeDecoder;"
+
+        func serializationThrowable(_ message: String) -> DEXThrowable {
+            hostThrowable("Lkotlinx/serialization/SerializationException;", message)
+        }
+
+        func validateJSON(_ root: Any) throws {
+            var stack: [(value: Any, depth: Int)] = [(root, 1)]
+            var nodes = 0
+            var objectMembers = 0
+            while let item = stack.popLast() {
+                nodes += 1
+                guard nodes <= bridge.htmlPolicy.maximumNodes else {
+                    throw serializationThrowable("JSON value exceeds node limit")
+                }
+                guard item.depth <= bridge.htmlPolicy.maximumDepth else {
+                    throw serializationThrowable("JSON value exceeds depth limit")
+                }
+                if let object = item.value as? [String: Any] {
+                    objectMembers += object.count
+                    guard objectMembers <= bridge.htmlPolicy.maximumAttributes else {
+                        throw serializationThrowable("JSON value exceeds member limit")
+                    }
+                    for (key, value) in object {
+                        guard key.utf8.count <= bridge.htmlPolicy.maximumSelectorBytes else {
+                            throw serializationThrowable("JSON object key is too long")
+                        }
+                        stack.append((value, item.depth + 1))
+                    }
+                } else if let array = item.value as? [Any] {
+                    guard array.count <= bridge.htmlPolicy.maximumNodes else {
+                        throw serializationThrowable("JSON array exceeds element limit")
+                    }
+                    for value in array {
+                        stack.append((value, item.depth + 1))
+                    }
+                } else if let value = item.value as? String {
+                    guard value.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                        throw serializationThrowable("JSON string is too long")
+                    }
+                } else if item.value is NSNumber || item.value is NSNull {
+                    continue
+                } else {
+                    throw serializationThrowable("unsupported JSON value")
+                }
+            }
+        }
+
+        func decoderValue(_ value: Any) -> RVal {
+            .obj(ObjInstance(
+                dexType: decoder,
+                payload: JSONValueDecoderBox(value),
+                isHost: true
+            ))
+        }
+
+        func deserialize(
+            _ strategy: RVal,
+            value: Any,
+            vm: DexInterpreter
+        ) throws -> RVal {
+            if case let .obj(object) = strategy,
+               let listSerializer = object.payload as? ArrayListSerializerBox {
+                guard let array = value as? [Any] else {
+                    throw serializationThrowable("expected JSON array")
+                }
+                try requireCollectionCapacity(array.count, "JSON list decode")
+                var elements: [RVal] = []
+                elements.reserveCapacity(array.count)
+                for element in array {
+                    elements.append(try deserialize(
+                        listSerializer.elementSerializer,
+                        value: element,
+                        vm: vm
+                    ))
+                }
+                return hostList(elements, isMutable: false)
+            }
+            guard case let .obj(serializer) = strategy else {
+                throw serializationThrowable("invalid deserialization strategy")
+            }
+            return try vm.call(
+                classDescriptor: serializer.dexType,
+                method: "deserialize",
+                prototype: "(Lkotlinx/serialization/encoding/Decoder;)Ljava/lang/Object;",
+                args: [strategy, decoderValue(value)]
+            )
+        }
+
+        func composite(_ args: [RVal], _ method: String) throws -> JSONCompositeDecoderBox {
+            guard case let .obj(object) = try argument(args, 0, method),
+                  let box = object.payload as? JSONCompositeDecoderBox else {
+                throw VMError.verify("\(method) receiver")
+            }
+            return box
+        }
+
+        func element(
+            _ args: [RVal],
+            _ method: String
+        ) throws -> Any {
+            let box = try composite(args, method)
+            guard case let .int(rawIndex) = try argument(args, 2, method),
+                  rawIndex >= 0,
+                  let value = box.value(at: Int(rawIndex)) else {
+                throw serializationThrowable("missing or invalid JSON element")
+            }
+            guard !(value is NSNull) else {
+                throw serializationThrowable("unexpected null JSON element")
+            }
+            return value
+        }
+
+        let scope = RVal.obj(ObjInstance(
+            dexType: "Luy/kohesive/injekt/api/InjektScope;",
+            isHost: true
+        ))
+        bridge.register(
+            class: "Luy/kohesive/injekt/InjektKt;",
+            "getInjekt",
+            prototype: "()Luy/kohesive/injekt/api/InjektScope;",
+            isStatic: true
+        ) { _, _ in scope }
+        bridge.register(
+            class: "Luy/kohesive/injekt/api/FullTypeReference;",
+            "<init>",
+            prototype: "()V"
+        ) { _, _ in .null }
+        bridge.register(
+            class: "Luy/kohesive/injekt/api/FullTypeReference;",
+            "getType",
+            prototype: "()Ljava/lang/reflect/Type;"
+        ) { _, _ in
+            .obj(ObjInstance(
+                dexType: "Ljava/lang/reflect/Type;",
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: "Luy/kohesive/injekt/api/InjektFactory;",
+            "getInstance",
+            prototype: "(Ljava/lang/reflect/Type;)Ljava/lang/Object;"
+        ) { _, _ in
+            .obj(ObjInstance(
+                dexType: "Lkotlinx/serialization/json/Json;",
+                isHost: true
+            ))
+        }
+
+        let generatedDescriptor =
+            "Lkotlinx/serialization/internal/PluginGeneratedSerialDescriptor;"
+        bridge.objectFactories[generatedDescriptor] = { _ in
+            .obj(ObjInstance(dexType: generatedDescriptor, isHost: true))
+        }
+        bridge.register(
+            class: generatedDescriptor,
+            "<init>",
+            prototype: "(Ljava/lang/String;Lkotlinx/serialization/internal/GeneratedSerializer;I)V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(
+                args, 0, "PluginGeneratedSerialDescriptor.<init>"
+            ), case let .int(elementCount) = try argument(
+                args, 3, "PluginGeneratedSerialDescriptor.<init>"
+            ) else {
+                throw VMError.verify("PluginGeneratedSerialDescriptor constructor arguments")
+            }
+            let serialName = try requiredString(
+                args, 1, "PluginGeneratedSerialDescriptor.<init>"
+            )
+            guard serialName.utf8.count <= 4_096,
+                  elementCount >= 0, elementCount <= 1_024 else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "serialization descriptor exceeds limits"
+                )
+            }
+            object.payload = SerialDescriptorBox(
+                serialName: serialName,
+                expectedElementCount: Int(elementCount)
+            )
+            return .null
+        }
+        bridge.register(
+            class: generatedDescriptor,
+            "addElement",
+            prototype: "(Ljava/lang/String;Z)V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(
+                args, 0, "PluginGeneratedSerialDescriptor.addElement"
+            ), let descriptor = object.payload as? SerialDescriptorBox,
+                  case let .int(isOptional) = try argument(
+                    args, 2, "PluginGeneratedSerialDescriptor.addElement"
+                  ) else {
+                throw VMError.verify("PluginGeneratedSerialDescriptor.addElement arguments")
+            }
+            let name = try requiredString(
+                args, 1, "PluginGeneratedSerialDescriptor.addElement"
+            )
+            guard name.utf8.count <= 4_096,
+                  descriptor.elements.count < descriptor.expectedElementCount else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "serialization descriptor element exceeds limits"
+                )
+            }
+            descriptor.elements.append((name, isOptional != 0))
+            return .null
+        }
+
+        let arrayListSerializer = "Lkotlinx/serialization/internal/ArrayListSerializer;"
+        bridge.objectFactories[arrayListSerializer] = { _ in
+            .obj(ObjInstance(dexType: arrayListSerializer, isHost: true))
+        }
+        bridge.register(
+            class: arrayListSerializer,
+            "<init>",
+            prototype: "(Lkotlinx/serialization/KSerializer;)V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(
+                args, 0, "ArrayListSerializer.<init>"
+            ) else { throw VMError.verify("ArrayListSerializer receiver") }
+            object.payload = ArrayListSerializerBox(elementSerializer: try argument(
+                args, 1, "ArrayListSerializer.<init>"
+            ))
+            return .null
+        }
+
+        bridge.register(
+            class: "Lkotlinx/serialization/json/Json;",
+            "decodeFromString",
+            prototype: "(Lkotlinx/serialization/DeserializationStrategy;Ljava/lang/String;)Ljava/lang/Object;"
+        ) { vm, args in
+            let source = try requiredString(args, 2, "Json.decodeFromString")
+            guard source.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                throw serializationThrowable("JSON input is too long")
+            }
+            let root: Any
+            do {
+                root = try JSONSerialization.jsonObject(
+                    with: Data(source.utf8),
+                    options: [.fragmentsAllowed]
+                )
+            } catch {
+                throw serializationThrowable("malformed JSON")
+            }
+            try validateJSON(root)
+            return try deserialize(
+                try argument(args, 1, "Json.decodeFromString"),
+                value: root,
+                vm: vm
+            )
+        }
+
+        bridge.register(
+            class: decoder,
+            "beginStructure",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;)Lkotlinx/serialization/encoding/CompositeDecoder;"
+        ) { _, args in
+            guard case let .obj(valueObject) = try argument(args, 0, "Decoder.beginStructure"),
+                  let value = valueObject.payload as? JSONValueDecoderBox,
+                  let object = value.value as? [String: Any],
+                  case let .obj(descriptorObject) = try argument(
+                    args, 1, "Decoder.beginStructure"
+                  ), let descriptor = descriptorObject.payload as? SerialDescriptorBox else {
+                throw serializationThrowable("expected JSON object structure")
+            }
+            return .obj(ObjInstance(
+                dexType: compositeDecoder,
+                payload: JSONCompositeDecoderBox(object: object, descriptor: descriptor),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: compositeDecoder,
+            "decodeSequentially",
+            prototype: "()Z"
+        ) { _, _ in .int(0) }
+        bridge.register(
+            class: compositeDecoder,
+            "decodeElementIndex",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;)I"
+        ) { _, args in
+            let box = try composite(args, "CompositeDecoder.decodeElementIndex")
+            guard box.nextPresentIndex < box.presentIndices.count else {
+                return .int(-1)
+            }
+            let index = box.presentIndices[box.nextPresentIndex]
+            box.nextPresentIndex += 1
+            return .int(Int32(index))
+        }
+        bridge.register(
+            class: compositeDecoder,
+            "decodeIntElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)I"
+        ) { _, args in
+            let value = try element(args, "CompositeDecoder.decodeIntElement")
+            guard !(value is Bool), let number = value as? NSNumber else {
+                throw serializationThrowable("expected JSON integer")
+            }
+            let result = number.doubleValue
+            guard result.isFinite, result.rounded(.towardZero) == result,
+                  result >= Double(Int32.min), result <= Double(Int32.max) else {
+                throw serializationThrowable("JSON integer is out of range")
+            }
+            return .int(Int32(result))
+        }
+        bridge.register(
+            class: compositeDecoder,
+            "decodeFloatElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)F"
+        ) { _, args in
+            let value = try element(args, "CompositeDecoder.decodeFloatElement")
+            guard !(value is Bool), let number = value as? NSNumber else {
+                throw serializationThrowable("expected JSON number")
+            }
+            let result = number.floatValue
+            guard result.isFinite else {
+                throw serializationThrowable("JSON float is out of range")
+            }
+            return .float(result)
+        }
+        bridge.register(
+            class: compositeDecoder,
+            "decodeStringElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)Ljava/lang/String;"
+        ) { _, args in
+            guard let value = try element(
+                args, "CompositeDecoder.decodeStringElement"
+            ) as? String else {
+                throw serializationThrowable("expected JSON string")
+            }
+            return string(value)
+        }
+        bridge.register(
+            class: compositeDecoder,
+            "decodeSerializableElement",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;ILkotlinx/serialization/DeserializationStrategy;Ljava/lang/Object;)Ljava/lang/Object;"
+        ) { vm, args in
+            try deserialize(
+                try argument(args, 3, "CompositeDecoder.decodeSerializableElement"),
+                value: try element(args, "CompositeDecoder.decodeSerializableElement"),
+                vm: vm
+            )
+        }
+        bridge.register(
+            class: compositeDecoder,
+            "endStructure",
+            prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;)V"
+        ) { _, _ in .null }
+        bridge.register(
+            class: "Lkotlinx/serialization/internal/PluginExceptionsKt;",
+            "throwMissingFieldException",
+            prototype: "(IILkotlinx/serialization/descriptors/SerialDescriptor;)V",
+            isStatic: true
+        ) { _, _ in
+            throw serializationThrowable("required JSON field is missing")
+        }
     }
 
     /// StringBuilder: payload carries [String]; capacity ignored in M1.
@@ -1205,6 +1684,14 @@ public final class HostBridge {
         ))
     }
 
+    private static func boxedLong(_ value: Int64) -> RVal {
+        .obj(ObjInstance(
+            dexType: "Ljava/lang/Long;",
+            payload: value,
+            isHost: true
+        ))
+    }
+
     private static func registerPrimitiveBoxes(_ bridge: HostBridge) {
         bridge.register(
             class: "Ljava/lang/Boolean;",
@@ -1264,11 +1751,187 @@ public final class HostBridge {
             }
             return .int(value)
         }
+        bridge.register(
+            class: "Ljava/lang/Long;",
+            "valueOf",
+            prototype: "(J)Ljava/lang/Long;",
+            isStatic: true
+        ) { _, args in
+            guard case let .long(value) = try argument(args, 0, "Long.valueOf") else {
+                throw VMError.verify("Long.valueOf argument")
+            }
+            return boxedLong(value)
+        }
+        bridge.register(class: "Ljava/lang/Number;", "intValue", prototype: "()I") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Number.intValue") else {
+                throw VMError.verify("Number.intValue receiver")
+            }
+            if let value = object.payload as? Int32 { return .int(value) }
+            if let value = object.payload as? Int64 {
+                return .int(Int32(truncatingIfNeeded: value))
+            }
+            throw VMError.verify("Number.intValue receiver")
+        }
+        bridge.register(class: "Ljava/lang/Number;", "longValue", prototype: "()J") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Number.longValue") else {
+                throw VMError.verify("Number.longValue receiver")
+            }
+            if let value = object.payload as? Int64 { return .long(value) }
+            if let value = object.payload as? Int32 { return .long(Int64(value)) }
+            throw VMError.verify("Number.longValue receiver")
+        }
     }
 
     private static func requireCollectionCapacity(_ count: Int, _ method: String) throws {
         guard count <= 1_000_000 else {
             throw VMError.verify("\(method) exceeds 1000000 collection elements")
+        }
+    }
+
+    private static func registerJavaTimeSurface(_ bridge: HostBridge) {
+        let dateFormatter = "Ljava/time/format/DateTimeFormatter;"
+        let localDate = "Ljava/time/LocalDate;"
+        let zoneID = "Ljava/time/ZoneId;"
+        let zonedDateTime = "Ljava/time/ZonedDateTime;"
+        let instant = "Ljava/time/Instant;"
+
+        bridge.register(
+            class: dateFormatter,
+            "ofPattern",
+            prototype: "(Ljava/lang/String;)Ljava/time/format/DateTimeFormatter;",
+            isStatic: true
+        ) { _, args in
+            let pattern = try requiredString(args, 0, "DateTimeFormatter.ofPattern")
+            guard !pattern.isEmpty, pattern.utf8.count <= 256 else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "invalid date pattern"
+                )
+            }
+            return .obj(ObjInstance(
+                dexType: dateFormatter,
+                payload: pattern,
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: localDate,
+            "parse",
+            prototype: "(Ljava/lang/CharSequence;Ljava/time/format/DateTimeFormatter;)Ljava/time/LocalDate;",
+            isStatic: true
+        ) { _, args in
+            let input = try requiredString(args, 0, "LocalDate.parse")
+            guard input.utf8.count <= 256,
+                  case let .obj(formatObject) = try argument(args, 1, "LocalDate.parse"),
+                  let pattern = formatObject.payload as? String else {
+                throw hostThrowable(
+                    "Ljava/time/format/DateTimeParseException;",
+                    "invalid local date"
+                )
+            }
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = pattern
+            formatter.isLenient = false
+            guard let parsed = formatter.date(from: input),
+                  formatter.string(from: parsed) == input else {
+                throw hostThrowable(
+                    "Ljava/time/format/DateTimeParseException;",
+                    "invalid local date"
+                )
+            }
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+            let components = calendar.dateComponents([.year, .month, .day], from: parsed)
+            guard let year = components.year,
+                  let month = components.month,
+                  let day = components.day else {
+                throw hostThrowable(
+                    "Ljava/time/format/DateTimeParseException;",
+                    "invalid local date"
+                )
+            }
+            return .obj(ObjInstance(
+                dexType: localDate,
+                payload: LocalDateBox(year: year, month: month, day: day),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: zoneID,
+            "systemDefault",
+            prototype: "()Ljava/time/ZoneId;",
+            isStatic: true
+        ) { _, _ in
+            .obj(ObjInstance(
+                dexType: zoneID,
+                payload: ZoneIDBox(timeZone: .current),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: localDate,
+            "atStartOfDay",
+            prototype: "(Ljava/time/ZoneId;)Ljava/time/ZonedDateTime;"
+        ) { _, args in
+            guard case let .obj(dateObject) = try argument(args, 0, "LocalDate.atStartOfDay"),
+                  let date = dateObject.payload as? LocalDateBox,
+                  case let .obj(zoneObject) = try argument(args, 1, "LocalDate.atStartOfDay"),
+                  let zone = zoneObject.payload as? ZoneIDBox else {
+                throw VMError.verify("LocalDate.atStartOfDay arguments")
+            }
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = zone.timeZone
+            guard let start = calendar.date(from: DateComponents(
+                calendar: calendar,
+                timeZone: zone.timeZone,
+                year: date.year,
+                month: date.month,
+                day: date.day,
+                hour: 0,
+                minute: 0,
+                second: 0
+            )) else {
+                throw hostThrowable(
+                    "Ljava/time/DateTimeException;",
+                    "invalid zoned date"
+                )
+            }
+            let milliseconds = Int64((start.timeIntervalSince1970 * 1_000).rounded())
+            return .obj(ObjInstance(
+                dexType: zonedDateTime,
+                payload: EpochMillisecondsBox(value: milliseconds),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: "Ljava/time/chrono/ChronoZonedDateTime;",
+            "toInstant",
+            prototype: "()Ljava/time/Instant;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(
+                args, 0, "ChronoZonedDateTime.toInstant"
+            ), let epoch = object.payload as? EpochMillisecondsBox else {
+                throw VMError.verify("ChronoZonedDateTime.toInstant receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: instant,
+                payload: epoch,
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: instant,
+            "toEpochMilli",
+            prototype: "()J"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Instant.toEpochMilli"),
+                  let epoch = object.payload as? EpochMillisecondsBox else {
+                throw VMError.verify("Instant.toEpochMilli receiver")
+            }
+            return .long(epoch.value)
         }
     }
 
@@ -2918,12 +3581,27 @@ public final class HostBridge {
     private static func registerSourceModelSurface(_ bridge: HostBridge) {
         let smanga = "Leu/kanade/tachiyomi/source/model/SManga;"
         let companion = "Leu/kanade/tachiyomi/source/model/SManga$Companion;"
+        let schapter = "Leu/kanade/tachiyomi/source/model/SChapter;"
+        let chapterCompanion = "Leu/kanade/tachiyomi/source/model/SChapter$Companion;"
+        let mangaUpdate = "Leu/kanade/tachiyomi/source/model/SMangaUpdate;"
         let mangasPage = "Leu/kanade/tachiyomi/source/model/MangasPage;"
 
         func mangaBox(_ args: [RVal], _ method: String, index: Int = 0) throws -> SMangaBox {
             guard case let .obj(object) = try argument(args, index, method),
                   let box = object.payload as? SMangaBox else {
                 throw VMError.verify("\(method) manga argument")
+            }
+            return box
+        }
+
+        func chapterBox(
+            _ args: [RVal],
+            _ method: String,
+            index: Int = 0
+        ) throws -> SChapterBox {
+            guard case let .obj(object) = try argument(args, index, method),
+                  let box = object.payload as? SChapterBox else {
+                throw VMError.verify("\(method) chapter argument")
             }
             return box
         }
@@ -3050,6 +3728,72 @@ public final class HostBridge {
             return genres.isEmpty ? .null : string(genres.joined(separator: ", "))
         }
 
+        let chapterCompanionValue = RVal.obj(ObjInstance(
+            dexType: chapterCompanion,
+            isHost: true
+        ))
+        bridge.staticFields["\(schapter)->Companion"] = chapterCompanionValue
+        bridge.register(
+            class: chapterCompanion,
+            "create",
+            prototype: "()Leu/kanade/tachiyomi/source/model/SChapter;"
+        ) { _, _ in
+            .obj(ObjInstance(
+                dexType: schapter,
+                payload: SChapterBox(),
+                isHost: true
+            ))
+        }
+        for (suffix, keyPath) in [
+            ("Url", \SChapterCompat.url),
+            ("Name", \SChapterCompat.name),
+        ] {
+            bridge.register(
+                class: schapter,
+                "set\(suffix)",
+                prototype: "(Ljava/lang/String;)V"
+            ) { _, args in
+                let box = try chapterBox(args, "SChapter.set\(suffix)")
+                box.value[keyPath: keyPath] = try requiredString(
+                    args, 1, "SChapter.set\(suffix)"
+                )
+                return .null
+            }
+            bridge.register(
+                class: schapter,
+                "get\(suffix)",
+                prototype: "()Ljava/lang/String;"
+            ) { _, args in
+                string(try chapterBox(args, "SChapter.get\(suffix)").value[
+                    keyPath: keyPath
+                ])
+            }
+        }
+        bridge.register(
+            class: schapter,
+            "setChapter_number",
+            prototype: "(F)V"
+        ) { _, args in
+            let box = try chapterBox(args, "SChapter.setChapter_number")
+            guard case let .float(value) = try argument(
+                args, 1, "SChapter.setChapter_number"
+            ) else { throw VMError.verify("SChapter.setChapter_number value") }
+            box.value.chapterNumber = value
+            return .null
+        }
+        bridge.register(
+            class: schapter,
+            "setDate_upload",
+            prototype: "(J)V"
+        ) { _, args in
+            let box = try chapterBox(args, "SChapter.setDate_upload")
+            guard case let .long(value) = try argument(
+                args, 1, "SChapter.setDate_upload"
+            ) else { throw VMError.verify("SChapter.setDate_upload value") }
+            box.value.dateUpload = value
+            return .null
+        }
+
         bridge.register(
             class: "Leu/kanade/tachiyomi/source/online/HttpSource;",
             "setUrlWithoutDomain",
@@ -3062,6 +3806,49 @@ public final class HostBridge {
             }
             box.value.url = urlWithoutDomain(rawURL)
             return .null
+        }
+
+        bridge.objectFactories[mangaUpdate] = { _ in
+            .obj(ObjInstance(dexType: mangaUpdate, isHost: true))
+        }
+        bridge.register(
+            class: mangaUpdate,
+            "<init>",
+            prototype: "(Leu/kanade/tachiyomi/source/model/SManga;Ljava/util/List;)V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "SMangaUpdate.<init>") else {
+                throw VMError.verify("SMangaUpdate constructor receiver")
+            }
+            let manga = try argument(args, 1, "SMangaUpdate.<init>")
+            _ = try mangaBox(args, "SMangaUpdate.<init>", index: 1)
+            let chapters = try listBox(args, "SMangaUpdate.<init>", index: 2).elements
+            for chapter in chapters {
+                _ = try chapterBox([chapter], "SMangaUpdate.<init> chapter")
+            }
+            object.payload = SMangaUpdateBox(manga: manga, chapters: chapters)
+            return .null
+        }
+        bridge.register(
+            class: mangaUpdate,
+            "getManga",
+            prototype: "()Leu/kanade/tachiyomi/source/model/SManga;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "SMangaUpdate.getManga"),
+                  let box = object.payload as? SMangaUpdateBox else {
+                throw VMError.verify("SMangaUpdate.getManga receiver")
+            }
+            return box.manga
+        }
+        bridge.register(
+            class: mangaUpdate,
+            "getChapters",
+            prototype: "()Ljava/util/List;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "SMangaUpdate.getChapters"),
+                  let box = object.payload as? SMangaUpdateBox else {
+                throw VMError.verify("SMangaUpdate.getChapters receiver")
+            }
+            return hostList(box.chapters, isMutable: false)
         }
 
         bridge.objectFactories[mangasPage] = { _ in
@@ -3114,6 +3901,25 @@ public final class HostBridge {
         guard case let .obj(object) = value,
               let box = object.payload as? SMangaBox else { return nil }
         return box.value
+    }
+
+    public static func chapterCompat(from value: RVal) -> SChapterCompat? {
+        guard case let .obj(object) = value,
+              let box = object.payload as? SChapterBox else { return nil }
+        return box.value
+    }
+
+    public static func mangaUpdateCompat(from value: RVal) -> SMangaUpdateCompat? {
+        guard case let .obj(object) = value,
+              let box = object.payload as? SMangaUpdateBox,
+              let manga = mangaCompat(from: box.manga) else { return nil }
+        var chapters: [SChapterCompat] = []
+        chapters.reserveCapacity(box.chapters.count)
+        for chapter in box.chapters {
+            guard let converted = chapterCompat(from: chapter) else { return nil }
+            chapters.append(converted)
+        }
+        return SMangaUpdateCompat(manga: manga, chapters: chapters)
     }
 
     /// Converts an interpreted tachiyomix `MangasPage` host value into the

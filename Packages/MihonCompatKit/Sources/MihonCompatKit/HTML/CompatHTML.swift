@@ -82,9 +82,10 @@ public enum CompatHTMLError: Swift.Error, Sendable, Equatable, CustomStringConve
 /// Shared state for one parsed document. Element wrappers retain this context
 /// so selector work is cumulative across every call derived from the document.
 final class CompatHTMLContext {
-    private struct DirectChildHasPlan {
+    private struct SelectorCompatibilityPlan {
         let baseQuery: String
         let childQueries: [String]
+        let dataNeedles: [String]
     }
 
     let document: SwiftSoup.Document
@@ -106,8 +107,10 @@ final class CompatHTMLContext {
             throw CompatHTMLError.selectorTooLarge(limit: policy.maximumSelectorBytes)
         }
 
-        let directChildPlan = Self.directChildHasPlan(query)
-        let passes = 1 + (directChildPlan?.childQueries.count ?? 0)
+        let compatibilityPlan = Self.compatibilityPlan(query)
+        let passes = 1
+            + (compatibilityPlan?.childQueries.count ?? 0)
+            + (compatibilityPlan?.dataNeedles.count ?? 0)
         let baseCost = queryBytes.multipliedReportingOverflow(by: max(1, nodeCount))
         let cost = baseCost.partialValue.multipliedReportingOverflow(by: passes)
         guard !baseCost.overflow, !cost.overflow,
@@ -118,7 +121,7 @@ final class CompatHTMLContext {
 
         do {
             let elements: [SwiftSoup.Element]
-            if let plan = directChildPlan {
+            if let plan = compatibilityPlan {
                 let candidates = try Self.selectRaw(root, query: plan.baseQuery)
                 let evaluators = try plan.childQueries.map {
                     try SwiftSoup.QueryParser.parse($0)
@@ -129,6 +132,12 @@ final class CompatHTMLContext {
                             try evaluator.matches(candidate, child)
                         }
                         if !hasDirectMatch { return false }
+                    }
+                    for needle in plan.dataNeedles {
+                        guard candidate.data().range(
+                            of: needle,
+                            options: [.caseInsensitive]
+                        ) != nil else { return false }
                     }
                     return true
                 }
@@ -160,15 +169,16 @@ final class CompatHTMLContext {
     }
 
     /// SwiftSoup 2.9.6 predates Jsoup's relative-selector handling inside
-    /// `:has(...)`. Extract top-level `:has(> child)` clauses and enforce them
-    /// against direct children while leaving the rest of the selector to the
-    /// full CSS engine. Nested/quoted parentheses are scanned, not split by a
-    /// regular expression, so `:contains(...)` remains intact.
-    private static func directChildHasPlan(_ query: String) -> DirectChildHasPlan? {
+    /// `:has(...)` and does not implement `:containsData(...)`. Extract those
+    /// top-level clauses and enforce them while leaving the rest of the selector
+    /// to the full CSS engine. Nested/quoted parentheses are scanned, not split
+    /// by a regular expression, so embedded pseudo-selectors remain intact.
+    private static func compatibilityPlan(_ query: String) -> SelectorCompatibilityPlan? {
         let bytes = Array(query.utf8)
         var output: [UInt8] = []
         output.reserveCapacity(bytes.count)
         var children: [String] = []
+        var dataNeedles: [String] = []
         var index = 0
         var nesting = 0
         var quote: UInt8?
@@ -210,6 +220,18 @@ final class CompatHTMLContext {
                     continue
                 }
             }
+            if nesting == 0, isContainsDataToken(bytes, at: index),
+               let close = matchingParenthesis(bytes, open: index + 13) {
+                var start = index + 14
+                var end = close
+                while start < end, isASCIIWhitespace(bytes[start]) { start += 1 }
+                while end > start, isASCIIWhitespace(bytes[end - 1]) { end -= 1 }
+                guard start < end else { return nil }
+                let rawNeedle = String(decoding: bytes[start..<end], as: UTF8.self)
+                dataNeedles.append(SwiftSoup.TokenQueue.unescape(rawNeedle))
+                index = close + 1
+                continue
+            }
 
             output.append(byte)
             if byte == 0x28 {
@@ -220,12 +242,13 @@ final class CompatHTMLContext {
             index += 1
         }
 
-        guard !children.isEmpty else { return nil }
+        guard !children.isEmpty || !dataNeedles.isEmpty else { return nil }
         let base = String(decoding: output, as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return DirectChildHasPlan(
+        return SelectorCompatibilityPlan(
             baseQuery: base.isEmpty ? "*" : base,
-            childQueries: children
+            childQueries: children,
+            dataNeedles: dataNeedles
         )
     }
 
@@ -235,6 +258,24 @@ final class CompatHTMLContext {
         let a = bytes[index + 2] | 0x20
         let s = bytes[index + 3] | 0x20
         return h == 0x68 && a == 0x61 && s == 0x73 && bytes[index + 4] == 0x28
+    }
+
+    private static func isContainsDataToken(_ bytes: [UInt8], at index: Int) -> Bool {
+        let token: [UInt8] = [
+            0x3A, 0x63, 0x6F, 0x6E, 0x74, 0x61, 0x69,
+            0x6E, 0x73, 0x64, 0x61, 0x74, 0x61, 0x28,
+        ]
+        guard index + token.count <= bytes.count else { return false }
+        for offset in token.indices {
+            let candidate = bytes[index + offset]
+            let expected = token[offset]
+            if (0x41...0x5A).contains(candidate) {
+                if candidate + 0x20 != expected { return false }
+            } else if candidate != expected {
+                return false
+            }
+        }
+        return true
     }
 
     private static func matchingParenthesis(_ bytes: [UInt8], open: Int) -> Int? {

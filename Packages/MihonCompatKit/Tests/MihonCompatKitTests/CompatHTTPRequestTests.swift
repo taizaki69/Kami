@@ -305,4 +305,49 @@ final class CompatHTTPRequestTests: XCTestCase {
             args: [list, .null, .null, .null, .int(0), .null, .null, .int(0x3F), .null]
         ))
     }
+
+    func testKotlinSubstringDefaultHelpersMatchDelimiterSemantics() throws {
+        let (vm, bridge) = try makeVM()
+        let prototype = "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ljava/lang/String;"
+        let script = "prefix window.__DATA__ = {\"id\":42}; suffix;"
+
+        let after = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "substringAfter$default",
+            prototype: prototype,
+            isStatic: true,
+            args: [
+                HostBridge.string(script),
+                HostBridge.string("window.__DATA__ = "),
+                .null,
+                .int(0x02),
+                .null,
+            ]
+        )
+        XCTAssertEqual(vmStringValue(after), "{\"id\":42}; suffix;")
+
+        let before = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "substringBeforeLast$default",
+            prototype: prototype,
+            isStatic: true,
+            args: [after, HostBridge.string(";"), .null, .int(0x02), .null]
+        )
+        XCTAssertEqual(vmStringValue(before), "{\"id\":42}; suffix")
+
+        let missing = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "substringAfter$default",
+            prototype: prototype,
+            isStatic: true,
+            args: [
+                HostBridge.string("unchanged"),
+                HostBridge.string("missing"),
+                .null,
+                .int(0x02),
+                .null,
+            ]
+        )
+        XCTAssertEqual(vmStringValue(missing), "unchanged")
+    }
 }
