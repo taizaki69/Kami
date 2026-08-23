@@ -12,7 +12,9 @@ work was recovered, completed, verified, and pushed.
 - Repository: <https://github.com/taizaki69/Kami>
 - Visibility: private
 - Default branch: `main`
-- Current code/test checkpoint: `e5988c34692e795180f020dee67a4a90a993ee80`
+- Current code/test checkpoint: `8d496330d1c5fd9e413164d12902d7b7cdb97eb7`
+- Bounded HTML/popular parsing baseline: `f55a695f57aba7685fa51b563107f277e7503d37`
+- Previous macOS test-compiler portability baseline: `e5988c34692e795180f020dee67a4a90a993ee80`
 - Current async transport/runtime implementation baseline: `6cb46b5ccbe600ca93847fdd270f8bfa02ecc690`
 - Previous isolated HTTP transport baseline: `e58bf8e83bbc562e240f0f507f76cd8c42655e1c`
 - Previous opcode-inventory baseline: `1293540`
@@ -31,35 +33,41 @@ work was recovered, completed, verified, and pushed.
 
 Always continue from the latest `origin/main`. The current runtime SHA above is
 the known-good executable state; the commit updating this handoff follows it
-and contains documentation only.
+and contains documentation plus the Windows release-verification helper only.
 
 ## Current resume point
 
 Stop state on 2026-08-23 (America/Lima):
 
-- Commit `6cb46b5` is pushed to `main`. It adds exact async host registration and
-  a public `DexInterpreter.callAsync` path that captures nested DEX frames,
-  awaits without blocking, resumes inside-out, preserves the shared instruction
-  budget, re-enters typed DEX handlers at the original invoke, and propagates
-  Task/OkHttp-call cancellation.
-- `HostBridge.minimal(transport:)` now wires Mihon's `await` and `awaitSuccess`
-  only when a source-scoped transport is explicitly injected. The response
-  allow-list is bounded and includes `Response`, `ResponseBody`, `Headers`, and
-  `okio.BufferedSource`; non-2xx `awaitSuccess` results throw Mihon's typed
-  `HttpException` with its status code.
-- The pinned BatCave popular path sends the exact expected POST through an actor
-  fake transport, resumes its real nested DEX path, and now stops at the exact
-  unresolved `JsoupExtensionsKt.asJsoup$default` signature. A second real-APK
-  test proves a 503 response reaches `HttpException(code: 503)`.
-- All 143 MihonCompatKit tests pass locally on Windows/Swift 6.3.3, including 10
-  pinned real-extension paths and 4 focused async interpreter/transport tests.
-  A clean KamiCore dependency build/test also passes.
+- Commit `f55a695` is pushed to `main`. It pins SwiftSoup 2.9.6 and places a
+  resource-bounded HTML5/CSS layer behind the exact Jsoup methods reached by the
+  pinned BatCave APK. Limits cover input bytes, DOM nodes/depth/attributes,
+  selector length/results/cumulative work, and extracted strings.
+- The host bridge now supplies the reached `Document`, `Element`, `Elements`,
+  `SManga`, `MangasPage`, and `HttpSource.setUrlWithoutDomain` behavior. The
+  real BatCave popular worker sends its exact POST, crosses the deterministic
+  async transport, parses production selectors, and returns an exact two-entry
+  app-facing `MangasPage` with relative URLs and pagination.
+- Commit `8d49633` is pushed to `main`. BatCave's real nonblank text-search worker
+  now trims and Java-form-encodes a page-2 query, builds the exact GET with its
+  600-second cache policy, and parses the response into the expected no-next-page
+  manga result. The R8-renamed worker is invoked directly because its external
+  KeiSource superclass bridge is not implemented yet.
+- All 150 MihonCompatKit tests pass locally on Windows/Swift 6.3.3, including 11
+  pinned real-extension paths, 5 focused HTML/parser-limit tests, the bounded
+  Java URL-encoding regression, and 4 async interpreter/transport tests. A clean
+  KamiCore dependency build/test also passes.
+- The earlier `6cb46b5` async runtime still captures nested DEX frames, awaits
+  without blocking, resumes inside-out with shared budgets and typed handlers,
+  propagates cancellation, and exposes bounded OkHttp response/body values.
+- A real-APK regression still proves a 503 response reaches Mihon's exact
+  `HttpException(code: 503)`.
 - The first macOS Swift CI attempt exposed only a compiler type-check timeout in
-  one large test-fixture expression. Commit `e5988c3` splits that expression and
-  the full local suite still passes. Exact-head reruns could not start because
-  GitHub reported an account payment/spending-limit block; resolve Actions
-  billing and rerun all three workflows before treating macOS verification as
-  current. The preceding `6cb46b5` iOS Build and IPA Package runs did pass.
+  one large test-fixture expression, fixed by `e5988c3`. The newest `8d49633`
+  Swift CI, iOS Build, and IPA Package jobs all have zero steps and the explicit
+  account payment/spending-limit annotation. Resolve Actions billing and rerun
+  all three workflows before treating macOS/iOS verification as current. The
+  preceding `6cb46b5` iOS Build and IPA Package runs did pass.
 - GitHub CLI is installed and authenticated as `taizaki69`; repository and
   workflow access were working. No authentication setup should be needed on
   this computer.
@@ -68,25 +76,34 @@ Stop state on 2026-08-23 (America/Lima):
 - Issue #1 has the completed dispatch-milestone evidence in
   [progress comment 5384204450](https://github.com/taizaki69/Kami/issues/1#issuecomment-5384204450)
   and remains open intentionally.
+- Issue #2 has the popular/text-search checkpoint in
+  [progress comment 5387657297](https://github.com/taizaki69/Kami/issues/2#issuecomment-5387657297)
+  and remains open for details, chapters, pages, and `KamiSource` exposure.
 
-### Next milestone: cross the measured Jsoup boundary
+### Next milestone: BatCave details and chapters
 
-Continue issue #2 from this exact canonical signature:
+Popular and paginated text search now return exact `MangasPage` values. First
+add an ordinary page-2 popular assertion and the public latest-updates path if
+they require no new generic surface, then drive details from the pinned source's
+real generated methods. The authoritative 1.6.9 source flow is:
 
 ```text
-Leu/kanade/tachiyomi/util/JsoupExtensionsKt;->asJsoup$default(
-    Lokhttp3/Response;Ljava/lang/String;ILjava/lang/Object;
-)Lorg/jsoup/nodes/Document;
+getMangaByUrl / fetchMangaUpdate
+  -> HttpUrl host/path validation
+  -> client.get(...).asJsoup()
+  -> parseMangaDetails(Document)
+  -> SManga fields + richer CSS selectors
+  -> parseChapterList(Document)
+  -> script data extraction + kotlinx serialization
+  -> SMangaUpdate
 ```
 
-First map the exact BatCave DOM/selector calls reached after this method, then
-implement only that bounded Jsoup-compatible slice. Keep the HTML fixture and
-transport deterministic and offline. Cap input bytes, node/depth/attribute/text
-growth, and selector work before parsing hostile response HTML. Continue to
-record every next missing canonical signature instead of adding broad guessed
-APIs. The acceptance point is a real BatCave `MangasPage` value with exact
-fields; only after that should popular pagination/search, details, chapters,
-and pages be advanced in order.
+Use deterministic offline HTML and continue accepting only exact canonical
+signatures measured from the locked APK. Details will exercise `Document.location`,
+`:has`/`:contains`, `SManga` status/author/artist/description/genre/memo fields,
+and additional Kotlin collection/string helpers. Chapters then cross the much
+larger JSON serialization, `SChapter`, date parsing, and `SMangaUpdate` boundary.
+Record the first exact unresolved signature before implementing each slice.
 
 Do not enable arbitrary downloaded APK execution while the signer gate in
 issue #3 remains open. Keep `HostBridge` deny-by-default and never execute
@@ -156,6 +173,7 @@ if the new machine installs different versions:
 
 ```bat
 scripts\windows_dev_test.bat Packages\MihonCompatKit test
+scripts\windows_dev_test.bat Packages\MihonCompatKit release
 ```
 
 The iOS app itself still requires macOS and Xcode.
@@ -190,7 +208,8 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 143 Swift tests passed locally on Windows/Swift 6.3.3; exact-head macOS CI is linked below |
+| MihonCompatKit | 150 Swift tests passed locally on Windows/Swift 6.3.3; exact-head macOS CI is blocked before dispatch by Actions billing |
+| Optimized package build | `scripts\windows_dev_test.bat Packages\MihonCompatKit release` compiled and linked SwiftSoup, MihonCompatKit, and `compat-audit.exe` |
 | Real APK constructors | Akuma, MangaDex, and BatCave passed |
 | Structural verifier | 9 focused regressions cover instruction geometry, branch/fallthrough boundaries, and aligned, bounded, correctly typed payloads and switch targets |
 | Exception/control verifier | 13 focused regressions cover strict try/catch decoding, resolved `Throwable` validation, typed handler state/execution, and AOSP branch/result/exception-entry rules |
@@ -201,21 +220,39 @@ At the implementation baseline:
 | Request-model regressions | 2 focused tests cover request construction, duration/cache conversion, URL scheme rejection, CRLF-header rejection, and body bounds |
 | HTTP transport regressions | 8 focused tests cover source isolation, bounded deterministic encoding, redirect secret stripping/downgrade rejection, streamed response limits, cancellation, and cookie scope |
 | Async interpreter/response regressions | 4 focused tests cover nested frame resumption, sync-entry diagnostics, typed DEX handler re-entry, cancellation, injected transport, charset decoding, one-shot reads, and close state |
-| BatCave execution | Exact metadata getters pass; popular sends the expected POST, receives a bounded response, resumes, and stops at `JsoupExtensionsKt.asJsoup$default`; a 503 maps to `HttpException(code: 503)` |
-| Swift CI | `6cb46b5` reached compilation and found the fixture type-check timeout in [run 32655420934](https://github.com/taizaki69/Kami/actions/runs/32655420934); fixed locally in `e5988c3`, whose [rerun 32655643551](https://github.com/taizaki69/Kami/actions/runs/32655643551) was blocked before runner dispatch by Actions billing |
-| iOS Simulator and unsigned device builds | `6cb46b5` passed [run 32655420894](https://github.com/taizaki69/Kami/actions/runs/32655420894); the `e5988c3` [run 32655643547](https://github.com/taizaki69/Kami/actions/runs/32655643547) was blocked before dispatch by Actions billing |
-| Unsigned IPA packaging | `6cb46b5` passed [run 32655420893](https://github.com/taizaki69/Kami/actions/runs/32655420893); the `e5988c3` [run 32655643569](https://github.com/taizaki69/Kami/actions/runs/32655643569) was blocked before dispatch by Actions billing |
+| HTML/selector hardening | 5 focused tests cover BatCave CSS/URL semantics plus input, base-URL, node, depth, attribute, selector length/result/work, and extracted-string limits |
+| BatCave execution | Exact metadata getters pass; popular and paginated text search build exact requests and parse exact `MangasPage` values; a 503 maps to `HttpException(code: 503)` |
+| Swift CI | Latest `8d49633` [run 32656940114](https://github.com/taizaki69/Kami/actions/runs/32656940114) was blocked before runner dispatch by Actions billing; the job has zero steps and the explicit billing annotation |
+| iOS Simulator and unsigned device builds | `6cb46b5` passed [run 32655420894](https://github.com/taizaki69/Kami/actions/runs/32655420894); latest `8d49633` [run 32656940145](https://github.com/taizaki69/Kami/actions/runs/32656940145) was blocked before dispatch by Actions billing |
+| Unsigned IPA packaging | `6cb46b5` passed [run 32655420893](https://github.com/taizaki69/Kami/actions/runs/32655420893); latest `8d49633` [run 32656940112](https://github.com/taizaki69/Kami/actions/runs/32656940112) was blocked before dispatch by Actions billing |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
-The successful iOS/IPA runs validate the `6cb46b5` runtime implementation and
-produced `Kami-unsigned-ipa`. Commit `e5988c3` is a test-source portability
-follow-up with local full-suite evidence only until GitHub Actions billing is
-restored. Rerun Swift CI, iOS Build, and IPA Package for that exact checkpoint.
+The successful iOS/IPA runs validate the `6cb46b5` async runtime implementation
+and produced `Kami-unsigned-ipa`. Commits `e5988c3`, `f55a695`, and `8d49633`
+have local full-suite evidence only until GitHub Actions billing is restored.
+Rerun Swift CI, iOS Build, and IPA Package for the latest exact checkpoint.
 
 ## What the latest continuation completed
 
-Commit `6cb46b5` crosses the asynchronous extension HTTP boundary without
-pretending the source is end-to-end complete:
+Commit `f55a695` crosses the measured Jsoup boundary without pretending the
+source is end-to-end complete:
+
+- SwiftSoup 2.9.6 is exactly pinned as the Swift 5.9-compatible HTML5/CSS engine
+  and recorded under its MIT license.
+- Kami owns independent untrusted-input limits around parsing, DOM shape,
+  selector work/results, and extracted strings.
+- Exact Jsoup document/element/elements registrations plus the reached
+  `SManga`/`MangasPage` model surface let BatCave's real parser return an exact
+  app-facing popular page from deterministic HTML.
+- Five focused hardening tests and the pinned real-APK result bring the suite to
+  148 tests.
+
+Commit `8d49633` then adds the measured Kotlin trim and Java UTF-8 form-encoding
+surface. The real BatCave text-search worker proves its exact page-2 GET, cache
+policy, parsed manga fields, and false pagination result; the focused encoder
+test and pinned search path bring the suite to 150 tests.
+
+Earlier commit `6cb46b5` crossed the asynchronous extension HTTP boundary:
 
 - `DexInterpreter.callAsync` snapshots exact nested frames at async host
   invocations, awaits without blocking, resumes inside-out, preserves the
@@ -231,9 +268,9 @@ pretending the source is end-to-end complete:
 - Bounded `Response`, `ResponseBody`, `Headers`, and `BufferedSource` host values
   expose the reached status/header/body/charset/one-shot read behavior using
   only the already bounded transport response.
-- Four focused async regressions and two new pinned BatCave paths bring the
-  suite to 143 tests and move the exact real-APK frontier from `awaitSuccess` to
-  `JsoupExtensionsKt.asJsoup$default`.
+- Four focused async regressions and two pinned BatCave paths brought that
+  historical suite to 143 tests and moved the real-APK frontier from
+  `awaitSuccess` to `JsoupExtensionsKt.asJsoup$default`.
 
 Commit `e5988c3` then splits one compound DEX test-fixture expression so the
 macOS compiler can type-check it without timing out; it makes no runtime
@@ -652,15 +689,14 @@ The rest of the product backlog is in `TODO.md`.
    `invoke-super`, and invoke word-count/kind checks are already in.
 4. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
-5. Continue issue #2 from the exact
-   `JsoupExtensionsKt.asJsoup$default(Response, String, int, Object)` seam. Map
-   the BatCave-reached DOM/selector calls and implement a bounded parser slice
-   with byte, node, depth, attribute, text, and selector-work limits. Keep the
-   pinned test on a deterministic fake transport and HTML fixture; do not make
-   live requests in the test suite.
-6. Prove an exact BatCave `MangasPage` result, then popular pagination/search,
-   details, chapters, and pages. Continue recording the next exact canonical
-   signature at every boundary.
+5. Continue issue #2 after the now-passing popular and paginated text-search
+   `MangasPage` paths. Add page-2 popular and latest-update assertions when they
+   reuse the bounded surface, then drive details and record its first exact
+   unresolved signature.
+6. Advance details field-by-field before chapters. Chapters introduce script
+   extraction, JSON serialization, `SChapter`, date parsing, and `SMangaUpdate`;
+   pages then introduce JSON request/response models and `Page`. Keep every test
+   deterministic and offline and retain the existing parser/selector limits.
 7. Expose the interpreted source through the existing `KamiSource` contract
    only after exact popular/search, details, chapters, and pages tests pass.
 8. Implement issue #3 before enabling execution of arbitrary repository
@@ -689,6 +725,7 @@ an exact real-APK assertion when reachable, and CI coverage.
 | Source-scoped HTTP transport | `Packages/MihonCompatKit/Sources/MihonCompatKit/Networking/CompatHTTPTransport.swift` |
 | Request-model regressions | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/CompatHTTPRequestTests.swift` |
 | Async VM/response regressions | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/AsyncInterpreterTests.swift` |
+| HTML compatibility and limits | `Packages/MihonCompatKit/Sources/MihonCompatKit/HTML/CompatHTML.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/HTMLCompatibilityTests.swift` |
 | Real APK execution frontier | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/RealExtensionExecutionTests.swift` |
 | Repository client | `Packages/MihonCompatKit/Sources/MihonCompatKit/Repository/ExtensionRepository.swift` |
 | App source seam | `Packages/MihonCompatKit/Sources/MihonCompatKit/Models/CompatModels.swift` (`KamiSource`) |

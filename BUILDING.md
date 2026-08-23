@@ -4,7 +4,7 @@
 
 | Component | Verified how |
 |---|---|
-| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 — **94/94 tests pass**, including 8 real-APK execution/frontier assertions, 28 pre-execution verifier regressions, an AOSP binary-op ordering regression, 2 receiver-dispatch regressions, and 2 bounded request-model tests; the last published macOS CI baseline passed 63/63 and release `compat-audit` builds |
+| MihonCompatKit (parsers, VM, repo client, backup reader) | `swift test` on Windows/Swift 6.3.3 — **150/150 tests pass**, including 11 real-APK paths, 5 bounded HTML/selector regressions, 46 pre-execution-verifier tests, and async HTTP/DEX coverage; exact-head macOS verification is pending restoration of GitHub Actions billing |
 | compat-audit CLI | built and run on Windows against 3 SHA-256-locked extension APKs; uploaded by Swift CI on macOS |
 | KamiCore (models, SQLite store, MangaDex source) | `swift test` passes in GitHub Actions; package builds as an app dependency for Simulator and device |
 | App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |
@@ -32,6 +32,7 @@ when run from some shells — use the provided helper.
 ```bash
 swift test --package-path Packages/MihonCompatKit        # bash
 scripts\windows_dev_test.bat Packages\MihonCompatKit test # Windows cmd
+scripts\windows_dev_test.bat Packages\MihonCompatKit release # optimized CLI/library build
 swift run --package-path Packages/MihonCompatKit compat-audit inspect some-extension.apk
 ```
 
@@ -50,6 +51,11 @@ Keiyoushi release assets and verifies the SHA-256 values recorded in
 - `Swift CI`: corpus fetch, MihonCompatKit tests, release CLI build, KamiCore tests.
 - `iOS Build`: generic Simulator plus unsigned generic-device compilation.
 - `IPA Package`: unsigned device build and downloadable IPA artifact.
+
+As of commit `8d49633`, all three workflows are blocked before runner dispatch
+by the account payment/spending-limit setting. Their jobs contain zero steps;
+this is an account state, not a source/test failure. The local Windows package
+suite and optimized `compat-audit` build pass at that checkpoint.
 
 A signed install still requires credentials owned by the user; no certificate,
 profile, password, or Apple account secret belongs in this repository.

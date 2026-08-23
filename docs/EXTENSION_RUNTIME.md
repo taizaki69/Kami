@@ -19,13 +19,18 @@ Measured real-APK behavior today:
   pairs and collections, Mihon filters and iteration, and coroutine setup. It
   builds its exact bounded POST form request, crosses a deterministic injected
   async transport, resumes nested real DEX frames, and receives bounded OkHttp
-  response/body values before stopping at
-  `JsoupExtensionsKt.asJsoup$default(Response, String, int, Object)`.
+  response/body values. Its real parser then crosses
+  `JsoupExtensionsKt.asJsoup$default(Response, String, int, Object)`, runs the
+  production CSS selectors, resolves relative URLs, constructs `SManga` values,
+  and returns an exact two-entry `MangasPage` with pagination.
 - A separate pinned BatCave regression proves `awaitSuccess` maps a 503 response
   to Mihon's typed `HttpException` with the exact status code.
-- No test claims a completed popular/search response, details, chapters,
-  pages, HTML parsing, JSON serialization, preferences, or Cloudflare behavior
-  yet. The pinned suite never performs live network I/O.
+- BatCave's real nonblank text-search worker trims and Java-form-encodes a page-2
+  query, builds the exact cached GET, and parses its result into `MangasPage`.
+- Popular and text-search parsing are proven only with deterministic offline
+  response HTML. No test yet claims filtered search, details, chapters, pages,
+  JSON serialization, preferences, Cloudflare behavior, or an interpreted
+  `KamiSource` adapter. The pinned suite never performs live network I/O.
 
 ## Architecture
 
@@ -37,7 +42,8 @@ classes*.dex                        validated structural parse
    ↓ DexInterpreter                 partial M1; async frame resume works
    ↓ Java/Kotlin HostBridge         partial exact-signature M2 surface
    ↓ source-scoped HTTP transport   bounded async request/response slice works
-   ↓ tachiyomix API bridge          not implemented
+   ↓ bounded HTML/CSS bridge        BatCave popular/text-search slice works
+   ↓ tachiyomix API bridge          SManga/MangasPage slice; no KamiSource yet
 KamiSource (Swift protocol)         working for native sources
    ↓ SourceRegistry / app / DB      working
 ```
@@ -139,7 +145,8 @@ synthetic and pinned-corpus tests:
 - Confined Java reflection over DEX fields and the source-base field bag;
   primitive boxes, atomics, concurrent maps, bounded lists, and iterators.
 - Kotlin `Intrinsics`, `Result`, basic synchronous continuation setup, lazy
-  values, pairs, `isBlank`, regex construction, and mutable reference boxes.
+  values, pairs, `isBlank`, trimming, Java-compatible UTF-8 form URL encoding,
+  regex construction, and mutable reference boxes.
 - Mihon filter/filter-list construction and state access, plus construction
   shims for `HttpSource` and `ParsedHttpSource` superclasses.
 - The date-pattern object needed by the pinned BatCave constructor.
@@ -153,12 +160,19 @@ synthetic and pinned-corpus tests:
 - Bounded `Response`, `ResponseBody`, `Headers`, and `okio.BufferedSource`
   models cover status/header access, common charsets, one-shot bytes/text reads,
   close state, and Mihon's non-2xx `HttpException` behavior.
+- SwiftSoup 2.9.6 supplies HTML5 parsing and CSS semantics behind an exact
+  Jsoup-compatible document/element/elements slice. Kami caps input bytes, DOM
+  nodes/depth/attributes, selector length/results/cumulative work, and extracted
+  strings before values return to DEX.
+- The reached tachiyomix model slice constructs and mutates `SManga`, applies
+  `setUrlWithoutDomain`, constructs `MangasPage`, and converts that result to the
+  public Swift compatibility models without silently dropping entries.
 - Kotlin duration encoding/conversion reached by OkHttp cache-control setup.
 
-The measured next layer begins at the exact
-`JsoupExtensionsKt.asJsoup$default` seam. The longer tail remains Jsoup DOM and
-selector behavior, string/collection overloads, serialization, preferences,
-and Android context/UI shims. A class appearing in the analyzer's
+The measured next layer is BatCave filtered search/latest, followed by its
+details, chapters, and pages paths. The longer tail remains additional Jsoup
+DOM behavior, string/collection overloads, serialization, preferences, and
+Android context/UI shims. A class appearing in the analyzer's
 `implementedClasses` set is only a coarse prioritization signal; it does not
 mean every method on that class is callable.
 
@@ -183,7 +197,9 @@ overlong LEB128 values, excessive field/entry counts, encrypted or multi-disk
 ZIPs, oversized entries, decompression bombs, invalid DEX versions, and failed
 ZIP/DEX/zlib/gzip checksums. Interpreter execution has instruction, call-depth,
 array-size, host-collection-size, and cancellation limits. Native host calls
-require an exact method prototype and static/instance kind.
+require an exact method prototype and static/instance kind. Response HTML is
+bounded before parsing, and its DOM shape, attributes, selector inputs/results,
+cumulative selector work, and extracted strings have independent limits.
 
 Checksums establish corruption detection, not publisher identity. APK signer
 verification must land before downloaded extensions are enabled for execution;
@@ -192,14 +208,15 @@ that gate is tracked in
 
 ## Verification
 
-`MihonCompatKit` currently has 143 passing tests locally on Windows/Swift 6.3.3.
-They include 10 pinned real-extension executions and 4 focused async
+`MihonCompatKit` currently has 150 passing tests locally on Windows/Swift 6.3.3.
+They include 11 pinned real-extension executions, 5 focused HTML/parser-limit
+regressions, a Java URL-encoding regression, and 4 focused async
 interpreter/transport regressions, alongside the existing parser, verifier,
 request-model, repository, and compression coverage. GitHub Swift CI fetches
 the SHA-256-locked APK corpus before running it.
 
 The first `6cb46b5` macOS run found a compiler type-check timeout in one large
-test-fixture expression. The expression was split in `e5988c3` and all 143 tests
+test-fixture expression. The expression was split in `e5988c3`; all 150 tests
 pass locally; exact-head GitHub reruns could not start because the account's
 Actions payment/spending limit blocked runner dispatch.
 

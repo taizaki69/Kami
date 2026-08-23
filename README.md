@@ -22,14 +22,17 @@ methods. BatCave's real popular-manga path now runs through Kotlin class
 initialization, filters, collections, iteration, coroutine setup, and a bounded
 OkHttp model. It constructs the exact BatCave popular POST request, crosses an
 injected source-scoped async transport, resumes nested DEX frames, and exposes
-bounded `Response`, `ResponseBody`, and `BufferedSource` values. The measured
-path now stops at the unresolved Jsoup `asJsoup$default` HTML-parser boundary;
-a separate real-APK regression proves non-2xx responses become Mihon's
-`HttpException`. This is a measured M1/M2 runtime slice, **not end-to-end source
-compatibility**: no interpreted HTML has produced a manga result, and search,
-details, chapters, pages, preferences, and much of the Kotlin/Java surface
-remain open (`docs/EXTENSION_RUNTIME.md`). Kami currently reads through its
-native MangaDex source.
+bounded `Response`, `ResponseBody`, and `BufferedSource` values. A bounded
+SwiftSoup-backed Jsoup bridge now runs BatCave's production CSS selectors and
+the real APK returns an exact `MangasPage` from deterministic response HTML,
+including relative-URL resolution and pagination. Its real text-search branch
+also trims and Java-form-encodes a page-2 query, preserves the source's cache
+policy, and returns the parsed result. A separate real-APK regression proves
+non-2xx responses become Mihon's `HttpException`. This is a measured M1/M2
+runtime slice, **not end-to-end source compatibility**: filtered search,
+details, chapters, pages, preferences, the `KamiSource` adapter, and much of the
+Kotlin/Java surface remain open (`docs/EXTENSION_RUNTIME.md`). Kami currently
+reads through its native MangaDex source.
 
 ## Layout
 
@@ -61,7 +64,7 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 143 tests run on Windows with Swift 6.3
+The compatibility kit and all 150 tests run on Windows with Swift 6.3
 (`scripts/windows_dev_test.bat`). GitHub Actions is configured to run the pinned
 real-APK suite on macOS, compiles both Simulator and unsigned device targets,
 and publishes an unsigned IPA artifact. The `compat-audit` CLI produced the

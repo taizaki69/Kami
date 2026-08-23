@@ -28,16 +28,19 @@ bounded `Response`, `ResponseBody`, `Headers`, and `okio.BufferedSource` values,
 including one-shot body reads and common response charsets.
 
 The pinned BatCave popular path now crosses the fake transport, consumes the
-bounded response, and reaches
-`JsoupExtensionsKt.asJsoup$default(Response, String, int, Object)`. That exact
-HTML-parser signature is the current measured frontier.
+bounded response, parses it through `JsoupExtensionsKt.asJsoup$default`, and
+returns an exact `MangasPage` from the source's production selectors. The
+fixture remains deterministic and offline. BatCave's nonblank text-search path
+also proves the exact page-2 GET and its 600-second cache policy before parsing
+the result through the same bounded surface.
 
 ## Remaining extension-facing stack
 
 Still required for useful source results and broader extension compatibility:
 
-- The exact Jsoup document/element/selector surface reached by the pinned APK,
-  with input and DOM resource limits.
+- Additional Jsoup document/element APIs only as the next pinned source paths
+  measure them; the BatCave popular slice already enforces input, DOM, extracted
+  string, result-count, and cumulative selector-work limits.
 - Additional request/response overloads (including JSON and byte-array bodies)
   only as measured extensions reach them.
 - Persistent per-source cookies and preferences; the current compat cookie jar

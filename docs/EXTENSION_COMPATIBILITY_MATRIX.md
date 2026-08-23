@@ -20,8 +20,8 @@ is no compatibility claim.
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
 | DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| DEX execution | Partial M1/M2 working | The 143-test suite includes 10 exact pinned-APK paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, and typed handler re-entry are checked |
-| End-to-end source operations | Not yet complete | BatCave popular crosses a deterministic injected transport and receives a bounded response, then stops at `JsoupExtensionsKt.asJsoup$default`; no manga result is parsed yet |
+| DEX execution | Partial M1/M2 working | The 150-test suite includes 11 exact pinned-APK paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, and bounded HTML/CSS execution are checked |
+| End-to-end source operations | Partial | BatCave popular and paginated text search cross deterministic injected transport and parse production selectors into exact `MangasPage` values; filtered search, details, chapters, pages, and `KamiSource` exposure remain open |
 
 ## Per-extension execution
 
@@ -29,16 +29,21 @@ is no compatibility claim.
 |---|---:|---|:---:|:---:|---|---|:---:|:---:|:---:|:---:|
 | MangaDex (`all.mangadex`) | 1.4.212 | `543dcf6a…306fa3` | ✅ | ✅ | — | — | — | — | — | — |
 | Akuma (`all.akuma`) | 1.4.10 | `9f5e744e…ba39a` | ✅ | ✅ | — | — | — | — | — | — |
-| BatCave (`en.batcave`) | 1.6.9 | `f5338a90…34fab6` | ✅ | ✅ | ✅ base URL, lang, name, ID | ⚠️ response delivered; stops at Jsoup | — | — | — | — |
+| BatCave (`en.batcave`) | 1.6.9 | `f5338a90…34fab6` | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ deterministic `MangasPage` | ✅ paginated text query | — | — | — |
 
 All three constructors execute their real no-argument DEX paths and return
 objects of the declared entry type. BatCave's popular path additionally proves
 class initialization, filter construction and iteration, its Kotlin ABI, and
 bounded OkHttp request construction. It asserts the exact POST URL and ordered
 form fields, crosses a deterministic source-scoped transport, resumes nested
-DEX frames, and receives a bounded response. It then asserts the unresolved
-`JsoupExtensionsKt.asJsoup$default` call. That is a precise HTML-parser
-frontier, not a successful popular operation.
+DEX frames, and receives a bounded response. It then crosses the exact
+`JsoupExtensionsKt.asJsoup$default` call and parses the source's real selectors,
+relative links, thumbnails, and pagination into two exact
+`SManga` values and a `MangasPage`. The response fixture is offline; this does
+not claim live-site availability or a complete app-facing source. The pinned
+text-search worker additionally proves whitespace trimming, Java-compatible
+UTF-8 form encoding, GET construction, page routing, source cache policy, and
+the no-next-page result. Filtered search is not yet covered.
 
 ## Current measured API workload
 
@@ -70,15 +75,20 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 ## Test evidence
 
-- 143/143 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+- 150/150 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present.
 - The `6cb46b5` iOS Build and IPA Package workflows passed. Swift CI found a
   macOS compiler type-check timeout in a large test expression; `e5988c3` splits
-  it and passes the full local suite, but exact-head workflow reruns were blocked
-  before runner dispatch by the account's Actions payment/spending limit.
-- Ten real-extension tests require exact successful values or exact typed
-  boundaries. The BatCave transport test requires the exact request and Jsoup
-  frontier; its 503 test requires the exact Mihon `HttpException` code.
+  it and passes the full local suite. The latest `8d49633` Swift CI, iOS Build,
+  and IPA Package jobs were blocked with zero steps before runner dispatch by
+  the account's Actions payment/spending limit.
+- Eleven real-extension tests require exact successful values or exact typed
+  boundaries. The BatCave popular and text-search tests require exact requests
+  and parsed manga/page fields; its 503 test requires the exact Mihon
+  `HttpException` code.
+- Five focused HTML regressions cover the BatCave selectors and URL resolution,
+  invalid bases, input/node/depth/attribute limits, selector syntax/length/result
+  and cumulative-work limits, and extracted-string bounds.
 - Four focused async regressions prove nested DEX-frame resumption, the typed
   sync-entry diagnostic, DEX handler re-entry, cancellation, and bounded
   response/body/charset/closed-state behavior.
@@ -111,9 +121,10 @@ tests, not the heuristic percentage, are the acceptance signal.
 ## Honest frontier
 
 Kami can download, validate structurally, inspect, classify, and execute a
-controlled real-extension path through bounded async response delivery. It
-cannot yet parse that response into a manga page or use an unmodified extension
-as a reader source. Remaining DEX work (notably
+controlled real-extension path through bounded async response delivery and
+parse BatCave popular/text-search HTML into manga pages. It cannot yet run the
+remaining source operations or use an unmodified extension as an app reader
+source. Remaining DEX work (notably
 broader external hierarchy and super/default resolution beyond parsed class
 graphs, opcode coverage, and differential semantics) is tracked in
 [#1](https://github.com/taizaki69/Kami/issues/1), the first
