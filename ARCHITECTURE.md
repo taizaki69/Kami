@@ -17,6 +17,7 @@ MihonCompatKit, never in the app.
 │  ExtensionAdmissionService                   │
 │  ExtensionSourceFactory · SourceRegistry     │
 │  SourceBrowseRequest                         │
+│  ReaderSettings · ReaderImagePipeline        │
 │  LibraryService                              │
 │  Native sources: MangaDex                    │
 └──────────────┬───────────────────────────────┘
@@ -47,6 +48,12 @@ MihonCompatKit, never in the app.
   Windows during development and keeps the parsers unit-testable anywhere.
 - **One database actor.** All persistence goes through `LibraryStore`
   (SQLite, WAL, versioned migrations). Views never see SQL.
+- **Reader images cross one bounded seam.** A source's `ImageRequest` URL and
+  headers enter the source-scoped `ReaderImagePipeline`, which reuses the
+  compatibility transport's validation, redirect, response-stream, and cookie
+  isolation rules. The actor deduplicates in-flight identities and owns a
+  bounded compressed LRU. Apple-specific ImageIO downsampling and decoded-image
+  viewport retention stay in the app layer; UIKit never enters KamiCore.
 - **Downloaded sources require a persisted capability.** APK v1/v2/v3 signer
   verification runs before manifest/DEX work. `ExtensionAdmissionService`
   binds package, version, APK digest, source IDs, signer history, and the
@@ -78,6 +85,10 @@ MihonCompatKit, never in the app.
 - UI: SwiftUI + `@MainActor` observable models.
 - Sources: async/await throughout; every source call is cancellable.
 - Persistence: actor-serialized SQLite.
+- Reader images: one source-scoped pipeline actor owns transport tasks and
+  compressed cache state; its `@MainActor` store coordinates visible loads,
+  bounded prefetch, and lifecycle cancellation. ImageIO decoding runs in a
+  detached user-initiated task before returning a bounded `UIImage`.
 - Interpreter: the M1 runtime has a shared instruction budget and call-depth
   guard. Each app-facing interpreted source actor owns one mutable VM and uses
   a bounded cancellation-aware queue to prevent overlapping entry across

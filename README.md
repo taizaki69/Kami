@@ -93,11 +93,23 @@ passes the source's full filter schema with either default or user-edited
 state. Result resets and pagination also ignore stale responses instead of
 mixing results from superseded requests.
 
+The native reader now has persistent LTR, RTL, and continuous webtoon modes,
+direction-aware tap zones, paged pinch/double-tap zoom, configurable background,
+keep-screen-awake, retry, progress/history persistence, and bounded prefetch.
+Page bytes no longer use `AsyncImage`: a source-scoped actor forwards the exact
+`ImageRequest` headers through the hardened streaming transport, deduplicates
+loads, keeps a bounded compressed LRU, and feeds off-main ImageIO downsampling.
+Decoded paged images are limited to the current page and its neighbors, while
+webtoon pages release decoded images outside the lazy viewport. Runtime-to-
+reader cookie continuity, dual-page spreads, and physical-device performance
+profiling remain open; see `docs/READER.md`.
+
 This is still not a claim of broad extension execution: the runtime profile
 catalog currently recognizes only the exact measured BatCave 1.6.9, Kawii
 Manga 1.6.1, and MangaMelon 1.6.1 builds. Automatic profile admission beyond
-that exact catalog, dynamic/network-backed filter lists, preferences, custom
-image-request behavior, and much of the Kotlin/Java surface remain open
+that exact catalog, dynamic/network-backed filter lists, preferences, a
+measured extension-defined custom image-request override, and much of the
+Kotlin/Java surface remain open
 (`docs/EXTENSION_RUNTIME.md`). Kami starts
 with native MangaDex and can additionally restore a supported, authenticated
 downloaded source.
@@ -133,13 +145,13 @@ security boundaries, and the recommended next implementation sequence.
 ## Verified on Windows too
 
 The compatibility kit and all 182 tests run on Windows with Swift 6.3, together
-with 9 portable KamiCore tests (`scripts/windows_dev_test.bat`). GitHub Actions
-runs the pinned real-APK suite plus all 20 macOS KamiCore tests, compiles both
+with 12 portable KamiCore tests (`scripts/windows_dev_test.bat`). GitHub Actions
+runs the pinned real-APK suite plus all 23 macOS KamiCore tests, compiles both
 Simulator and unsigned device targets, and publishes an unsigned IPA artifact.
-Exact implementation commit `ad2b118` passed
-[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32676159196),
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32676159129), and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32676159183).
+Exact reader implementation commit `6f6387e` passed
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32678304601),
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32678304615), and
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32678304614).
 The `compat-audit` CLI produced the measured compatibility matrix from the
 locked corpus.
 

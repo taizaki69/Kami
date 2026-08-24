@@ -19,7 +19,8 @@ work was recovered, completed, verified, and pushed.
   Do not add a project license without the creator's explicit decision; see
   `LICENSES.md` and issue #5.
 - Default branch: `main`
-- Current code/test checkpoint: `ad2b11869b1256ee7f1b7421c1ea66a78d367063`
+- Current code/test checkpoint: `6f6387e2707df51969c837a01f97388d07dc7331`
+- Native daily-reader foundation baseline: `6f6387e2707df51969c837a01f97388d07dc7331`
 - User-facing filtered Browse baseline: `ad2b11869b1256ee7f1b7421c1ea66a78d367063`
 - Third current filtered-profile baseline: `d4c036ddf109277fa6ec38d13beac8f6b52da09b`
 - Authenticated source-surface discovery baseline: `8d12fc4685aaf91fec92aff23b9e35d5253302d6`
@@ -59,6 +60,26 @@ and contains documentation only.
 
 Stop state on 2026-08-23 (America/Lima):
 
+- Commit `6f6387e` is pushed to `main`. The native reader now has persistent
+  left-to-right, right-to-left, and continuous webtoon modes; direction-aware
+  tap zones; paged double-tap/pinch zoom and pan; configurable background,
+  prefetch, webtoon gap, and keep-awake; retry/chrome/progress; restored
+  last-page position; history persistence; and mark-read on the final page.
+- Reader images now use the exact source `ImageRequest` URL and headers instead
+  of `AsyncImage`. A source-scoped actor provides streamed response limits,
+  redirect/header policy, an isolated cookie jar, in-flight deduplication, a
+  bounded compressed LRU, capped prefetch, cancellation-safe reset, and
+  off-main ImageIO validation/downsampling. Paged decoded images are limited to
+  the current page and neighbors; lazy webtoon pages release decoded images as
+  they leave the viewport. Runtime-to-reader cookie continuity is still open.
+- Local verification for `6f6387e` passes all 182 MihonCompatKit and 12
+  portable KamiCore tests. Its exact-head workflows pass:
+  [Swift CI 32678304601](https://github.com/taizaki69/Kami/actions/runs/32678304601)
+  runs 182 MihonCompatKit and 23 macOS KamiCore tests plus the optimized CLI,
+  [iOS Build 32678304615](https://github.com/taizaki69/Kami/actions/runs/32678304615)
+  compiles Simulator and unsigned device targets, and
+  [IPA Package 32678304614](https://github.com/taizaki69/Kami/actions/runs/32678304614)
+  uploads the unsigned IPA.
 - Commit `ad2b118` is pushed to `main`. Browse now renders all eight
   app-facing Mihon filter cases: headers, separators, selects, text,
   checkboxes, tri-state values, nested groups, and sort selections. The sheet
@@ -423,7 +444,7 @@ At the implementation baseline:
 | Check | Result |
 |---|---|
 | MihonCompatKit | 182 Swift tests passed locally on Windows/Swift 6.3.3, including 6 APK-signature regressions and full Kawii/MangaMelon profiles |
-| KamiCore | 9 portable tests passed locally on Windows/Swift 6.3.3; all 20 tests passed on macOS with Browse request routing, SQLite repository/trust persistence, install/restore/factory, enabled-state, update-policy, and registry lifecycle coverage |
+| KamiCore | 12 portable tests passed locally on Windows/Swift 6.3.3; all 23 tests passed on macOS, including reader settings/prefetch, exact image headers, in-flight deduplication/cache, error limits, Browse routing, SQLite persistence, install/restore/factory, update policy, and registry lifecycle coverage |
 | Optimized package builds | Windows release builds passed for both MihonCompatKit/`compat-audit.exe` and KamiCore |
 | Real APK constructors | Akuma, MangaDex, BatCave, Kawii Manga, and MangaMelon passed |
 | Structural verifier | 10 focused regressions cover instruction geometry, branch/fallthrough boundaries, R8's unreachable alignment NOP, and aligned, bounded, correctly typed payloads and switch targets |
@@ -440,25 +461,42 @@ At the implementation baseline:
 | Kawii Manga execution | Exact metadata, popular/latest/search, combined details/chapters, and pages pass from the locked APK; all five exact GETs carry the custom `x-app-key` header |
 | MangaMelon execution | Exact metadata, static `Sort`/`Select` filters, popular/latest/filtered search, combined details/chapters, memo, and ordered pages pass from the locked APK; exact default-inclusive Base64 form JSON is asserted and a mutated schema fails before transport |
 | Filtered Browse UI | All eight app-facing filter cases render transactionally; text search preserves the full source shape, blank-query Apply routes to filtered search, Clear exits filter-only mode, and reset generations reject stale result appends |
+| Native reader | LTR/RTL paged and continuous webtoon targets compile; persistent settings, tap/chrome/zoom/retry/progress/history/read-state behavior and bounded decoded-page retention are wired; portable tests prove settings/prefetch bounds and the source-header-aware image pipeline |
 | Pinned source adapters | 3 BatCave regressions cover every claimed `KamiSource` method/default image request, pre-parse SHA tamper rejection, and serialized concurrent VM/transport entry; 1 Kawii and 3 MangaMelon regressions cover their measured contracts; KamiCore covers registry insertion/deduplication and MangaMelon factory admission |
 | APK signer verification | 6 focused regressions cover real Keiyoushi v2, AOSP v1/v3 and verified rotation, content/signature tampering, unsigned input, fingerprint normalization, and scheme stripping |
 | Persisted extension admission | 3 focused macOS test methods cover repository/user trust, unrelated-signer rejection, declared source-ID capability registration, verified signer rotation, and downgrade/same-version replacement rejection |
 | Install/restore/source factory | 3 macOS install tests plus 5 portable factory tests cover repository-key install, explicit legacy confirmation, cancellation, startup restoration, exact-file replacement rejection, declared source-ID enforcement, real BatCave/MangaMelon construction, and refusal to guess an unmeasured profile |
-| Swift CI | Exact implementation head `ad2b118` [run 32676159196](https://github.com/taizaki69/Kami/actions/runs/32676159196) passed 182 MihonCompatKit tests, optimized CLI build, 20 KamiCore tests, and artifact upload |
-| iOS Simulator and unsigned device builds | Exact implementation head `ad2b118` [run 32676159129](https://github.com/taizaki69/Kami/actions/runs/32676159129) passed both targets |
-| Unsigned IPA packaging | Exact implementation head `ad2b118` [run 32676159183](https://github.com/taizaki69/Kami/actions/runs/32676159183) passed and uploaded `Kami-unsigned-ipa` |
+| Swift CI | Exact implementation head `6f6387e` [run 32678304601](https://github.com/taizaki69/Kami/actions/runs/32678304601) passed 182 MihonCompatKit tests, optimized CLI build, 23 KamiCore tests, and artifact upload |
+| iOS Simulator and unsigned device builds | Exact implementation head `6f6387e` [run 32678304615](https://github.com/taizaki69/Kami/actions/runs/32678304615) passed both targets |
+| Unsigned IPA packaging | Exact implementation head `6f6387e` [run 32678304614](https://github.com/taizaki69/Kami/actions/runs/32678304614) passed and uploaded `Kami-unsigned-ipa` |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
 The exact-head public-repository runs validate every implementation checkpoint
-through `ad2b118`, including all three app-facing source profiles,
+through `6f6387e`, including all three app-facing source profiles,
 signer-authenticated admission gate, durable install/restore flow, exact-byte
-factory, source selection UI, filtered Browse, and source registration. They
-produced both `compat-audit` and `Kami-unsigned-ipa` artifacts.
+factory, source selection UI, filtered Browse, source registration, and the
+native reader foundation. They produced both `compat-audit` and
+`Kami-unsigned-ipa` artifacts.
 
 ## What the latest continuation completed
 
-Commit `ad2b118` exposes the measured filter contract as a native reader
-feature:
+Commit `6f6387e` establishes the first bounded daily-driver reader foundation:
+
+- Persistent LTR, RTL, and webtoon experiences share progress, history,
+  keep-awake restoration, settings, chrome, retries, and a tested prefetch
+  plan. Paged images support zoom/pan and direction-aware tap zones; webtoon
+  progress follows the page with the largest visible intersection.
+- `ReaderImagePipeline` forwards exact source headers through the hardened
+  transport, caps streamed compressed images and cache/prefetch state,
+  deduplicates identical work, and prevents canceled lifecycle generations
+  from clearing or caching newer requests. ImageIO rejects extreme metadata
+  and downsamples away from the main actor.
+- Three portable regressions bring KamiCore to 12 Windows and 23 macOS tests.
+  Both Xcode destinations and unsigned IPA packaging pass at the exact code
+  checkpoint. Remaining reader work is kept explicit in `docs/READER.md`.
+
+Earlier commit `ad2b118` exposes the measured filter contract as a native
+Browse feature:
 
 - `SourceFilterSheet` transactionally renders header, separator, select, text,
   checkbox, tri-state, nested group, and sort cases. Apply supports blank-query
@@ -1096,14 +1134,18 @@ The rest of the product backlog is in `TODO.md`.
 
 ## Recommended next implementation sequence
 
-1. Select a fourth current extension whose reached surface expands preferences
-   or a custom image-request override. Keep the exact-byte factory, admission
-   capability, declared source-ID gate, and no-native-code rule unchanged.
-2. Generalize exact catalog generation incrementally from authenticated corpus
-   evidence. Metadata and stable wrapper-chain discovery are complete; do not
-   infer private R8 workers or execute an unknown artifact heuristically.
-3. Preserve exact prototype/staticness dispatch and use `compat-audit methods`
-   plus canonical unresolved diagnostics for every new bridge decision.
+1. Turn authenticated APK metadata and stable public wrapper discovery into a
+   reusable execution-plan generator. Validate each generated plan against an
+   exact corpus artifact before admission; do not infer R8-private workers or
+   execute an unknown artifact heuristically. This is the path from three
+   specimens to a shared compatibility runtime rather than manual source ports.
+2. Add issue #4's deterministic, redacted unresolved API/opcode report and a
+   corpus batch runner. Use those reports to prioritize shared Kotlin/Java/
+   Mihon API families by how many extensions they unlock.
+3. Select a fourth current extension that exercises preferences or a custom
+   image-request override, then use it as evidence for shared runtime APIs and
+   safe runtime-to-reader cookie continuity. Preserve exact-byte admission,
+   declared source-ID gates, and the no-native-code rule.
 4. Continue issue #1 with broader external hierarchy and super/default
    resolution, remaining opcodes, and differential AOSP coverage. Code-item
    geometry, strict try/catch decoding and resolved `Throwable` validation,
@@ -1111,13 +1153,13 @@ The rest of the product backlog is in `TODO.md`.
    primitive/constructor/reference dataflow, runtime casts/catches,
    receiver-directed virtual/interface-default lookup, lexical parsed-DEX
    `invoke-super`, and invoke word-count/kind checks are already in.
-5. Add aggregate parser/runtime resource accounting and streaming or
+5. Complete reader chapter transitions and source-cookie sharing, then add
+   iPad spreads, fit/crop controls, memory-pressure purging, and download-cache
+   integration without weakening image limits.
+6. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
-6. Measure dynamic/network-backed filter lists and a real custom image-request
-   override before widening those adapter surfaces; keep both explicitly
-   unclaimed meanwhile.
-7. Add issue #4 diagnostics as local, deterministic, redacted output so the
-   compatibility corpus can grow from reproducible failures.
+7. Profile the reader on a physical iPhone/iPad with large webtoon chapters and
+   smoke-test a user-signed build; CI intentionally remains unsigned.
 
 Every new runtime capability should arrive with a synthetic malformed fixture,
 an exact real-APK assertion when reachable, and CI coverage.
@@ -1146,6 +1188,8 @@ an exact real-APK assertion when reachable, and CI coverage.
 | End-to-end adapter proof | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/PinnedInterpretedSourceTests.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/KawiiMangaInterpretedSourceTests.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/MangaMelonInterpretedSourceTests.swift`, `Packages/KamiCore/Tests/KamiCoreTests/ExtensionSourceFactoryTests.swift` |
 | Filtered Browse UI | `App/Sources/BrowseView.swift`, `App/Sources/SourceFilterSheet.swift` |
 | Browse request routing | `Packages/KamiCore/Sources/KamiCore/Sources/SourceBrowseRequest.swift`, `Packages/KamiCore/Tests/KamiCoreTests/SourceBrowseRequestTests.swift` |
+| Native reader UI | `App/Sources/ReaderView.swift`, `ReaderPageImage.swift`, `ReaderSettingsSheet.swift`, `docs/READER.md` |
+| Reader settings/image boundary | `Packages/KamiCore/Sources/KamiCore/Models/ReaderSettings.swift`, `Packages/KamiCore/Sources/KamiCore/Services/ReaderImagePipeline.swift`, `Packages/KamiCore/Tests/KamiCoreTests/ReaderSupportTests.swift` |
 | Repository client | `Packages/MihonCompatKit/Sources/MihonCompatKit/Repository/ExtensionRepository.swift` |
 | App source seam | `Packages/MihonCompatKit/Sources/MihonCompatKit/Models/CompatModels.swift` (`KamiSource`) |
 | Persistence | `Packages/KamiCore/Sources/KamiCore/Database/` |

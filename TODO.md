@@ -108,7 +108,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 - [ ] Categories UI + management
 - [ ] Migration flow (multi-source search + chapter matching)
 - [ ] Backup/restore UI + import report
-- [ ] Reader: RTL, webtoon continuous mode, prefetch, settings sheet
+- [x] Reader foundation: persistent LTR/RTL/webtoon modes, direction-aware tap
+      zones, paged zoom/pan, settings, keep-awake, bounded header-aware image
+      loading/prefetch, off-main downsampling, retry, and progress/history
+- [ ] Reader completion: previous/next chapter flow, configurable tap actions,
+      fit/crop/brightness controls, runtime-to-reader cookie continuity,
+      memory-pressure purging, and download/disk-cache integration
 - [ ] Cloudflare WKWebView bridge + cookie sync (M4)
 - [ ] Global search across enabled sources
 
