@@ -22,7 +22,8 @@ is no compatibility claim.
 | DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
 | Structural execution-plan inspection | Working for the bounded single-source lib 1.6 shape | Non-executing inspection deterministically finds the entry and stable public wrapper for BatCave, Kawii Manga, and MangaMelon; legacy lib 1.4, factories, multidex, native `.so`, ambiguous/missing DEX, invalid identity, and missing wrapper shapes are explicit blockers. A plan establishes no signer trust, catalog admission, or execution proof |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| DEX execution | Partial M1/M2 working | The 185-test suite includes 21 exact pinned-APK source/execution paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, and serialized adapter ownership are checked |
+| Compatibility diagnostics | Partial, privacy-safe local/runtime and static corpus seams working | Pinned sources deduplicate propagated typed VM gaps by operation stage and ignore arbitrary errors; `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths. Static invocations are prioritization only, not runtime failure or admission proof. App export UI, below-catch first-gap capture, broader field/bridge instrumentation, and regression promotion remain open |
+| DEX execution | Partial M1/M2 working | The 189-test suite includes 21 exact pinned-APK source/execution paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, and serialized adapter ownership are checked |
 | Admission restoration and source factory | Working for exact measured profiles | Startup re-reads the enabled installed APK, rechecks hash/signature/signer history/user trust/manifest, and gives the sole factory a fresh capability; the factory repeats exact-byte authentication, rejects undeclared source IDs, and refuses unmeasured profiles |
 | End-to-end source operations | Working for three exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, and MangaMelon 1.6.1 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon adds exact static `Sort`/`Select` filtered search. BatCave additionally proves default image requests and the installed-source registry path. Automatic catalog expansion, dynamic filters, preferences, custom image requests, and live-site availability remain open |
 
@@ -142,18 +143,32 @@ StringBuilder) but remain in this table because the class-level analyzer does
 not equate a few bridged methods with full class compatibility. Real method
 tests, not the heuristic percentage, are the acceptance signal.
 
+The newer `compat-audit gaps <apk-or-directory>` report supersedes that class-
+only snapshot for ongoing prioritization. It scans decoded instruction
+boundaries, reconciles classes defined across all DEX entries, compares exact
+external method prototypes/staticness with the current host registry, and
+ranks each surface by extension and invocation count. It still deliberately
+does not claim that every unregistered virtual/interface reference will fail;
+runtime receiver dispatch and dead code require operation-level evidence.
+
 ## Test evidence
 
-- 185/185 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+- 189/189 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present.
-- Exact implementation commit `c122193` passes
-  [Swift CI 32680137538](https://github.com/taizaki69/Kami/actions/runs/32680137538),
-  [iOS Build 32680137584](https://github.com/taizaki69/Kami/actions/runs/32680137584),
-  and [IPA Package 32680137545](https://github.com/taizaki69/Kami/actions/runs/32680137545).
+- Exact implementation commit `e56bd9a` passes
+  [Swift CI 32683073872](https://github.com/taizaki69/Kami/actions/runs/32683073872),
+  [iOS Build 32683073885](https://github.com/taizaki69/Kami/actions/runs/32683073885),
+  and [IPA Package 32683073873](https://github.com/taizaki69/Kami/actions/runs/32683073873).
 - Three plan-inspection regressions prove deterministic current-profile plans,
   explicit legacy lib 1.4 blockers, and malformed-APK failure. The optimized
   CLI batch audit continues after malformed entries, reports every subsequent
   artifact, and returns a nonzero final status.
+- Four diagnostics regressions prove typed-only runtime recording and
+  deduplication, DEX-symbol redaction, an actionable `.popular` report from a
+  failed real BatCave source operation, and deterministic order-independent
+  static aggregation across all three current profiles. Two complete release
+  CLI corpus runs were byte-identical and contained none of the checked path,
+  URL, authorization, cookie, bearer, token, or password markers.
 - Six verifier regressions cover five real Keiyoushi v2 APKs, AOSP v1 and v3,
   verified certificate rotation, signed-content and signer-signature tampering,
   unsigned input, fingerprint normalization, and v3-block stripping. Twenty-three
@@ -226,7 +241,10 @@ durable install/update, exact-byte startup restoration, selection UI,
 capability-consuming construction, stable public wrapper routing, and Browse
 registration are working. Browse renders every app-facing filter case,
 preserves the full source filter shape for text search, and supports
-blank-query static filtered search. Automatic catalog expansion, dynamic filter sources,
+blank-query static filtered search. Typed runtime compatibility reports and a
+non-executing static gap/corpus audit are working without changing admission;
+app export UX, deeper first-gap/field instrumentation, regression promotion,
+and a broader locked corpus remain open. Automatic catalog expansion, dynamic filter sources,
 preferences, and custom image-request overrides remain open. Remaining
 DEX work (notably
 broader external hierarchy and super/default resolution beyond parsed class

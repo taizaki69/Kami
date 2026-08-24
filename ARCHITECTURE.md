@@ -29,11 +29,11 @@ MihonCompatKit, never in the app.
 │  APK: ZipArchive · Inflate · BinaryXML ·     │
 │       APKSignatureVerifier                   │
 │  Dex: DexFile + bounded M1 interpreter       │
-│  Sources: structural plan inspector +        │
-│           measured interpreted profiles      │
+│  Sources: structural plan + typed gap        │
+│           reports + measured profiles        │
 │  Repository: index.pb/index.min.json client  │
 │  Backup: TachibkReader                       │
-│  Analyzer: ExtensionAnalyzer + compat-audit  │
+│  Analyzer: static gap/corpus audit + CLI     │
 └──────────────────────────────────────────────┘
 ```
 
@@ -83,6 +83,14 @@ MihonCompatKit, never in the app.
   The exact catalog consumes the same plan only after byte/signature/manifest
   authentication; `compat-audit` may inspect untrusted bytes but cannot admit
   or execute them. Automatic admission must remain a separate explicit gate.
+- **Compatibility reports are evidence, never admission.** Runtime reports
+  accept only typed VM linkage/opcode failures and store API identities plus an
+  operation stage; arbitrary error descriptions and dynamic request/response
+  values are ignored. The static audit never executes DEX and exposes only a
+  sanitized plan status, DEX API identities, opcode counts, and package/version.
+  An unregistered virtual/interface invocation is ranked as a possible shared
+  host-surface gap, not claimed as a runtime failure. Neither report may create
+  trust, catalog membership, source-ID authority, or registry access.
 - **Untrusted code boundary.** Extension APKs are data until the interpreter
   runs them; even then they only reach iOS capabilities through explicit
   bridges (HTTP, preferences, cookies, WebView) with budgets and isolation

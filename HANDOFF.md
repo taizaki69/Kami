@@ -19,7 +19,8 @@ work was recovered, completed, verified, and pushed.
   Do not add a project license without the creator's explicit decision; see
   `LICENSES.md` and issue #5.
 - Default branch: `main`
-- Current code/test checkpoint: `c1221935f25c7edd01b9efdc5ec794cf22454c8c`
+- Current code/test checkpoint: `e56bd9ac2450eb7b558837e7fbc40633e81f3c98`
+- Privacy-safe compatibility-diagnostics baseline: `e56bd9ac2450eb7b558837e7fbc40633e81f3c98`
 - Shared structural execution-plan baseline: `c1221935f25c7edd01b9efdc5ec794cf22454c8c`
 - Native daily-reader foundation baseline: `6f6387e2707df51969c837a01f97388d07dc7331`
 - User-facing filtered Browse baseline: `ad2b11869b1256ee7f1b7421c1ea66a78d367063`
@@ -61,6 +62,34 @@ and contains documentation only.
 
 Stop state on 2026-08-23 (America/Lima):
 
+- Commit `e56bd9a` is pushed to `main`. Every exact interpreted source now owns
+  a bounded thread-safe `InterpretedCompatibilityRecorder`. Failed app-facing
+  operations record only propagated typed unresolved class, exact method
+  signature, field, or unsupported-opcode VM errors, deduplicated and counted
+  by operation stage. Cancellation, budgets, verifier strings, HTTP/parser
+  failures, and arbitrary error descriptions are ignored so dynamic URLs,
+  queries, headers, cookies, bodies, credentials, and user data never enter the
+  report. A real BatCave `.popular` failure regression proves the report is
+  actionable without serializing the source URL.
+- `InterpretedCompatibilityAudit` non-executingly scans decoded instruction
+  boundaries across all APK DEX entries, reconciles locally defined classes,
+  compares exact external method prototype/staticness with `HostBridge`, and
+  aggregates unregistered invocations, unsupported opcodes, and sanitized plan
+  blockers. `compat-audit gaps` supports one file or deterministic directory
+  order, replaces filenames with artifact ordinals, continues after generic
+  malformed-artifact errors, and returns failure only after reporting the full
+  batch. Unregistered virtual/interface invocations remain an explicitly
+  heuristic priority signal, not runtime failure, trust, admission, or
+  execution proof.
+- Local verification for `e56bd9a` passes all 189 MihonCompatKit and 12
+  portable KamiCore tests plus the optimized Windows CLI build. Two full
+  release `gaps` corpus reports were byte-identical (`SHA-256
+  c0eebf80a9846bc45a02ffacd2e26691f0deb1f8efecc12c445bd96f1679b8c2`) and
+  contained none of the checked local-path, APK-filename, URL, authorization,
+  cookie, bearer, token, or password markers. Its exact-head workflows pass:
+  [Swift CI 32683073872](https://github.com/taizaki69/Kami/actions/runs/32683073872),
+  [iOS Build 32683073885](https://github.com/taizaki69/Kami/actions/runs/32683073885),
+  and [IPA Package 32683073873](https://github.com/taizaki69/Kami/actions/runs/32683073873).
 - Commit `c122193` is pushed to `main`. A reusable
   `InterpretedExtensionPlanInspector` now performs bounded, non-executing
   manifest/ZIP/DEX discovery shared by the exact runtime and
@@ -342,7 +371,7 @@ Stop state on 2026-08-23 (America/Lima):
   records exact local and CI evidence. The issue is closed as completed at
   `3708aa1`; general compatibility remains separate work.
 
-### Completed discovery/third-profile milestone and next frontier
+### Completed diagnostics/discovery milestones and next frontier
 
 The first interpreted `KamiSource`, signer-authenticated admission gate, durable
 installation/selection flow, and exact-byte source factory are complete under
@@ -364,10 +393,14 @@ selected extension store + declared signing identity
 Issue #3's valid, tampered, wrong-signer, rotated-signer, unsigned, and stripped
 fixtures plus the install/restore/factory regressions enforce this order. Stable
 public wrapper discovery and three current lib 1.6 profiles are now complete;
-MangaMelon proves the first exact static filtered-search path. The next
-high-leverage milestone is a fourth current extension that expands a new axis,
-preferably preferences or a custom image-request override. Dynamic/network-
-backed filters are also still open. Generate more of the exact catalog only
+MangaMelon proves the first exact static filtered-search path. Typed runtime
+gap reporting and the non-executing static corpus ranking seam are now also
+complete. The next high-leverage milestone is to lock a broader representative
+current lib 1.6 corpus, then select a fourth current extension that expands a
+new axis, preferably preferences or a custom image-request override. Add
+below-catch first-gap/field instrumentation and fixed-gap regression promotion
+alongside that corpus work. Dynamic/network-backed filters are also still
+open. Generate more of the exact catalog only
 from authenticated evidence, and do not let discovery create a parallel
 admission bypass. Keep `HostBridge` deny-by-default and never execute extension
 native libraries.
@@ -380,7 +413,12 @@ git pull --ff-only
 git status --short --branch
 swift test --package-path Packages/MihonCompatKit
 swift build --package-path Packages/MihonCompatKit -c release --product compat-audit
+swift run --package-path Packages/MihonCompatKit compat-audit gaps Tests/corpus
 ```
+
+The checked-in corpus intentionally contains a malformed `aosp-unsigned.apk`,
+so the final command reports all later artifacts and then exits 70. That is the
+expected batch-error contract, not an early audit failure.
 
 On this Windows checkout, use the checked-in helper for the test command if
 needed. Keep execution offline and limited to `Tests/corpus/*.apk`; only
@@ -429,6 +467,7 @@ Windows; Swift 5.9 or newer is the intended minimum.
 swift test --package-path Packages/MihonCompatKit
 swift test --package-path Packages/KamiCore
 swift build --package-path Packages/MihonCompatKit -c release --product compat-audit
+swift run --package-path Packages/MihonCompatKit compat-audit gaps Tests/corpus
 ```
 
 On Windows, prefer the checked-in helper when the Swift driver behaves
@@ -440,6 +479,14 @@ if the new machine installs different versions:
 scripts\windows_dev_test.bat Packages\MihonCompatKit test
 scripts\windows_dev_test.bat Packages\MihonCompatKit release
 ```
+
+After changing a public MihonCompatKit value layout at `e56bd9a`, an incremental
+KamiCore test binary retained stale dependency ABI and crashed in
+`swiftCore.dll`; this was not reproducible after
+`scripts\windows_dev_test.bat Packages\KamiCore clean`, and the clean rebuild
+passed 12/12. If a future Windows-only access violation appears immediately
+after a public dependency change, clean that dependent package before treating
+it as a source regression.
 
 The iOS app itself still requires macOS and Xcode.
 
@@ -473,11 +520,12 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 185 Swift tests passed locally on Windows/Swift 6.3.3, including 6 APK-signature regressions, 3 structural-plan regressions, and full Kawii/MangaMelon profiles |
+| MihonCompatKit | 189 Swift tests passed locally on Windows/Swift 6.3.3, including 6 APK-signature regressions, 3 structural-plan regressions, 4 privacy-safe diagnostics regressions, and full Kawii/MangaMelon profiles |
 | KamiCore | 12 portable tests passed locally on Windows/Swift 6.3.3; all 23 tests passed on macOS, including reader settings/prefetch, exact image headers, in-flight deduplication/cache, error limits, Browse routing, SQLite persistence, install/restore/factory, update policy, and registry lifecycle coverage |
 | Optimized package builds | Windows release builds passed for both MihonCompatKit/`compat-audit.exe` and KamiCore |
 | Real APK constructors | Akuma, MangaDex, BatCave, Kawii Manga, and MangaMelon passed |
 | Structural execution plans | BatCave, Kawii Manga, and MangaMelon produce deterministic single-DEX lib 1.6 plans; Akuma/MangaDex report lib 1.4 blockers; malformed input throws; full CLI batches continue after per-file errors and fail at the end |
+| Compatibility diagnostics | Typed runtime gaps are stage-deduplicated while arbitrary errors are ignored; a failed BatCave operation yields the exact missing method without its URL; static reports are deterministic/order-independent, sanitized, non-executing, and carry no admission authority; two release CLI corpus runs matched byte-for-byte with zero checked secret/path markers |
 | Structural verifier | 10 focused regressions cover instruction geometry, branch/fallthrough boundaries, R8's unreachable alignment NOP, and aligned, bounded, correctly typed payloads and switch targets |
 | Exception/control verifier | 13 focused regressions cover strict try/catch decoding, resolved `Throwable` validation, typed handler state/execution, and AOSP branch/result/exception-entry rules |
 | Register dataflow verifier | 21 focused regressions cover dead-code bounds, parameter seeding, common-supertype joins, polymorphic constants, exact primitive/wide/reference assignments, array covariance, result/invoke types, wide-pair clobbering, exception edges, and constructor/uninitialized-object state |
@@ -497,13 +545,14 @@ At the implementation baseline:
 | APK signer verification | 6 focused regressions cover real Keiyoushi v2, AOSP v1/v3 and verified rotation, content/signature tampering, unsigned input, fingerprint normalization, and scheme stripping |
 | Persisted extension admission | 3 focused macOS test methods cover repository/user trust, unrelated-signer rejection, declared source-ID capability registration, verified signer rotation, and downgrade/same-version replacement rejection |
 | Install/restore/source factory | 3 macOS install tests plus 5 portable factory tests cover repository-key install, explicit legacy confirmation, cancellation, startup restoration, exact-file replacement rejection, declared source-ID enforcement, real BatCave/MangaMelon construction, and refusal to guess an unmeasured profile |
-| Swift CI | Exact implementation head `c122193` [run 32680137538](https://github.com/taizaki69/Kami/actions/runs/32680137538) passed 185 MihonCompatKit tests, optimized CLI build, 23 KamiCore tests, and artifact upload |
-| iOS Simulator and unsigned device builds | Exact implementation head `c122193` [run 32680137584](https://github.com/taizaki69/Kami/actions/runs/32680137584) passed both targets with zero warning lines |
-| Unsigned IPA packaging | Exact implementation head `c122193` [run 32680137545](https://github.com/taizaki69/Kami/actions/runs/32680137545) passed and uploaded `Kami-unsigned-ipa` |
+| Swift CI | Exact implementation head `e56bd9a` [run 32683073872](https://github.com/taizaki69/Kami/actions/runs/32683073872) passed 189 MihonCompatKit tests, optimized CLI build, 23 KamiCore tests, and artifact upload |
+| iOS Simulator and unsigned device builds | Exact implementation head `e56bd9a` [run 32683073885](https://github.com/taizaki69/Kami/actions/runs/32683073885) passed both targets with zero `warning:` lines |
+| Unsigned IPA packaging | Exact implementation head `e56bd9a` [run 32683073873](https://github.com/taizaki69/Kami/actions/runs/32683073873) passed and uploaded `Kami-unsigned-ipa` |
 | Repository integrity | implementation worktree was clean after push; staged and working diffs passed `git diff --check`; prior full `git fsck --full` found no corruption |
 
 The exact-head public-repository runs validate every implementation checkpoint
-through `c122193`, including shared non-executing plan discovery, all three app-facing source profiles,
+through `e56bd9a`, including typed runtime/static compatibility diagnostics,
+shared non-executing plan discovery, all three app-facing source profiles,
 signer-authenticated admission gate, durable install/restore flow, exact-byte
 factory, source selection UI, filtered Browse, source registration, and the
 native reader foundation. They produced both `compat-audit` and
@@ -511,7 +560,25 @@ native reader foundation. They produced both `compat-audit` and
 
 ## What the latest continuation completed
 
-Commit `c122193` establishes the first shared structural-plan seam:
+Commit `e56bd9a` establishes the first privacy-safe compatibility measurement
+seam without expanding execution or admission:
+
+- Exact interpreted sources expose a bounded deterministic runtime report after
+  an operation fails. Only typed VM API/opcode identities and the operation
+  stage are admitted; arbitrary error text and dynamic request/response values
+  cannot be serialized.
+- `InterpretedCompatibilityAudit` and `compat-audit gaps` rank unregistered
+  external method prototypes and unsupported opcodes across a corpus without
+  executing DEX. The public report embeds only sanitized plan status, and the
+  CLI emits artifact ordinals and generic errors rather than paths/filenames.
+- Four focused regressions bring MihonCompatKit to 189 tests. Local full tests,
+  clean dependent-package tests, optimized compilation, byte-for-byte corpus
+  determinism/privacy checks, both Xcode destinations, unsigned IPA packaging,
+  and all three exact-head workflows pass. Issue #4 stays open for app export,
+  below-catch first-gap and broader field/bridge instrumentation, and automatic
+  fixed-gap regression promotion.
+
+Earlier commit `c122193` establishes the first shared structural-plan seam:
 
 - `InterpretedExtensionPlanInspector` turns bounded manifest/ZIP/DEX facts into
   either a deterministic `InterpretedExtensionExecutionPlan` or capability-
@@ -1122,7 +1189,9 @@ Not proven or implemented:
   across incomplete external hierarchy data remains open.
 - Automatic safe profile admission beyond the three-entry exact catalog.
 - A signed installation on a physical iPhone or iPad.
-- Production compatibility telemetry or a final distribution/licensing model.
+- App-facing Diagnostics/file export, below-catch first-gap capture, complete
+  runtime field/bridge telemetry, automatic fixed-gap regression promotion, or
+  a final distribution/licensing model.
 
 Do not generalize the three pinned adapters into broad extension support.
 
@@ -1181,23 +1250,25 @@ Address these before treating arbitrary downloaded extensions as safe.
 | P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining external hierarchy and super/default resolution, opcode, and differential semantics work |
 | Completed | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | Exact pinned BatCave profile completed at `3708aa1`; general compatibility remains separate work |
 | Completed | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | v1/v2/v3 verification and persisted admission completed at `a902d06`; the later install/restore/factory product path is complete at `4d42def` |
-| Diagnostics (partial) | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Structural-plan blockers are deterministic and privacy-safe at `c122193`; unresolved API/opcode aggregation and export remain |
+| Diagnostics (partial) | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Typed stage-counted runtime reports plus deterministic redacted static/corpus method/opcode/blocker ranking are complete at `e56bd9a`; app file export, below-catch first-gap/field/bridge coverage, and regression promotion remain |
 | Distribution | [#5 Choose Kami's distribution and licensing model](https://github.com/taizaki69/Kami/issues/5) | Preserve all options; do not add a project license without an explicit owner decision |
 
 The rest of the product backlog is in `TODO.md`.
 
 ## Recommended next implementation sequence
 
-1. Extend the completed structural-plan audit with issue #4's deterministic,
-   redacted unresolved API/opcode report and an aggregate corpus summary. Keep
-   paths, URLs, signer material, source-returned data, and private extension
-   strings out of exported diagnostics. Rank shared Kotlin/Java/Mihon API
-   families by how many current extensions they unlock.
-2. Lock a broader representative current lib 1.6 corpus by exact release URL
+1. Lock a broader representative current lib 1.6 corpus by exact release URL
    and SHA-256, run non-executing plan/ABI reports over it, and record candidate
    versus blocker counts. Do not treat corpus presence or a structural plan as
    signer trust, admission, or execution proof.
-3. Select a fourth current extension from that evidence that exercises
+2. Extend issue #4's typed recorder at the interpreter/bridge throw seam so
+   caught-and-transformed linkage gaps still preserve the first unsupported
+   surface, add exact external-field/bridge coverage, and add deterministic
+   tooling that turns a fixed corpus gap into a focused regression. Keep the
+   app's eventual user-selected file export on the same local-only redaction
+   contract.
+3. Select a fourth current extension from the broader static rankings and
+   runtime evidence that exercises
    preferences or a custom image-request override, then use it as evidence for
    shared runtime APIs and safe runtime-to-reader cookie continuity. Preserve
    exact-byte admission, declared source-ID gates, and the no-native-code rule.
@@ -1236,6 +1307,7 @@ an exact real-APK assertion when reachable, and CI coverage.
 | DEX parser | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/DexFile.swift` |
 | Interpreter | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexInterpreter.swift` |
 | Structural plan discovery | `Packages/MihonCompatKit/Sources/MihonCompatKit/Sources/InterpretedExtensionPlan.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/InterpretedExtensionPlanTests.swift`, `Packages/MihonCompatKit/Sources/CompatAudit/AuditMain.swift` |
+| Compatibility diagnostics | `Packages/MihonCompatKit/Sources/MihonCompatKit/Sources/InterpretedCompatibilityDiagnostics.swift`, `Packages/MihonCompatKit/Sources/MihonCompatKit/Analyzer/InterpretedCompatibilityAudit.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/InterpretedCompatibilityDiagnosticsTests.swift`, `Packages/MihonCompatKit/Sources/CompatAudit/AuditMain.swift` |
 | Pinned app-facing source | `Packages/MihonCompatKit/Sources/MihonCompatKit/Sources/PinnedInterpretedSource.swift` |
 | Method resolution | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexMethodResolver.swift` |
 | Register/invoke verifier | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexRegisterVerifier.swift` |

@@ -78,6 +78,10 @@ compatibility:
 
 ## Diagnostics
 
-Production compatibility telemetry and the Diagnostics screen are not yet
-implemented. When added, request diagnostics must remain local and redact URL
-queries, authorization, cookies, bodies, and other source secrets by default.
+Pinned interpreted sources now expose a bounded local report containing only
+typed unresolved VM surfaces, counted by source-operation stage. Arbitrary
+transport/parser errors are ignored, so URL queries, authorization, cookies,
+bodies, and response values never enter it. `compat-audit gaps` provides a
+separate non-executing static/corpus priority report with no filenames or
+request data. The app Diagnostics screen and user-selected file export remain
+open; they must preserve the same local-only redaction boundary.

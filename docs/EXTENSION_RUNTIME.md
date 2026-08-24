@@ -290,10 +290,16 @@ Stable public `KeiSource` wrapper routing now works whether a wrapper remains on
 a local superclass or is vertically merged by R8 into the generated entry, and
 the second and third current extensions are proven end to end. Bounded shared
 plan generation now replaces duplicated structural discovery, but it does not
-expand admission. The next layer is privacy-safe unresolved API/opcode
-diagnostics across a larger corpus, followed by a fourth measured source that
-expands preferences or custom image requests without weakening exact byte/
-signer/admission checks. Dynamic/network-backed filter lists also remain open. The longer tail remains
+expand admission. A privacy-safe diagnostics layer now records propagated typed
+VM linkage/opcode failures by app-facing stage and provides a non-executing
+static corpus audit of unregistered external invocations, unsupported opcodes,
+and plan blockers. The static method list is deliberately a priority signal,
+not runtime proof: virtual/interface dispatch may resolve through a different
+receiver class. The next layer is a broader locked current corpus plus
+first-gap capture below extension catch handlers and regression-promotion
+tooling, followed by a fourth measured source that expands preferences or
+custom image requests without weakening exact byte/signer/admission checks.
+Dynamic/network-backed filter lists also remain open. The longer tail remains
 additional Jsoup DOM behavior, string/collection overloads, broader
 serialization, preferences, and Android context/UI shims. A class appearing in
 the analyzer's
@@ -339,6 +345,17 @@ values; a plan only says that the bounded parser recognized a currently
 supported shape. Unknown bytes cannot reach `ExtensionSourceFactory` or
 `SourceRegistry` from that result.
 
+Compatibility diagnostics are outside the trust decision too.
+`InterpretedCompatibilityRecorder` accepts only typed unresolved class, exact
+method signature, field, and unsupported-opcode VM errors; cancellations,
+budgets, verifier text, HTTP/parser failures, and arbitrary error descriptions
+are discarded. Its bounded deterministic report contains only sanitized
+package/version, operation stage, and DEX API/opcode identity. The static
+auditor executes no bytecode and embeds only a sanitized plan status rather
+than the raw manifest/archive inspection. `compat-audit gaps` replaces input
+filenames with artifact ordinals and emits generic per-artifact parse failures.
+Neither path authenticates, admits, installs, or registers an extension.
+
 Checksums establish corruption detection, not publisher identity. The completed
 signer gate verifies v1/v2/v3 signatures and APK content digests, normalizes
 certificate identities exactly as Mihon does, verifies v3 rotation lineage, and
@@ -354,9 +371,10 @@ compatibility.
 
 ## Verification
 
-`MihonCompatKit` currently has 185 passing tests locally on Windows/Swift 6.3.3.
+`MihonCompatKit` currently has 189 passing tests locally on Windows/Swift 6.3.3.
 They include 6 focused signer regressions, 21 pinned real-extension source/
 execution paths, 3 deterministic structural-plan regressions,
+4 privacy-safe runtime/static diagnostics regressions,
 7 focused HTML/parser-limit regressions, Java URL-encoding and bounded Kotlin
 string/collection-helper
 regressions, generated chapter/page JSON success/failure paths, and 4 focused
@@ -371,11 +389,11 @@ restore/factory rejection, enabled-state preservation, and downloaded registry
 replacement/removal. Swift CI verifies the SHA-256-locked APK corpus before
 running it.
 
-Exact implementation commit `c122193` passes
-[Swift CI 32680137538](https://github.com/taizaki69/Kami/actions/runs/32680137538),
-[iOS Build 32680137584](https://github.com/taizaki69/Kami/actions/runs/32680137584),
-and [IPA Package 32680137545](https://github.com/taizaki69/Kami/actions/runs/32680137545).
-Those runs cover the 185-test compatibility suite, optimized CLI build, 23
+Exact implementation commit `e56bd9a` passes
+[Swift CI 32683073872](https://github.com/taizaki69/Kami/actions/runs/32683073872),
+[iOS Build 32683073885](https://github.com/taizaki69/Kami/actions/runs/32683073885),
+and [IPA Package 32683073873](https://github.com/taizaki69/Kami/actions/runs/32683073873).
+Those runs cover the 189-test compatibility suite, optimized CLI build, 23
 KamiCore tests, Simulator/device compilation, and unsigned IPA artifact. The
 iOS build log contains no warning lines after adding the complete iPad
 orientation set.

@@ -228,7 +228,8 @@ simplest `ParsedHttpSource` shapes; cannot be the general strategy.
 2. **Repository compatibility** (both index formats, §4) — works **today**, implemented
    in `MihonCompatKit/Repository`.
 3. **APK inspection + DEX analysis pipeline** (implemented: ZIP/inflate, binary
-   AndroidManifest XML, DEX parsing, external-reference audit) — the measurement
+   AndroidManifest XML, DEX parsing, structural plans, and a deterministic
+   redacted static method/opcode/blocker corpus audit) — the measurement
    instrument that drives which runtime APIs get implemented next, and powers the
    in-app Extension Analyzer + installability diagnostics.
 4. **DEX interpreter track** (`MihonCompatKit/Dex/Runtime`): the initial M1
@@ -269,6 +270,7 @@ feasibility problem**. The blockers, honestly categorized:
 | DEX parsing/analysis | **Done** (this repo, pure Swift) |
 | APK/manifest parsing | **Done** (pure Swift, incl. binary AXML) |
 | Repo index compatibility | **Done** (JSON + proto) |
+| Compatibility diagnostics | **Partial**: exact sources expose bounded typed stage-counted VM gap reports, and `compat-audit gaps` emits a deterministic non-executing static/corpus priority report without paths or request data; app export UX, below-catch first-gap/field coverage, and regression promotion remain open |
 | DEX execution | **Partial M1/M2 plus three pinned app-facing profiles work**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual selection, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, stable public source-wrapper routing across measured R8 layouts, pinned constructors/getters, BatCave, Kawii Manga, and MangaMelon popular/search/latest/details/chapters/pages execute through bounded async response delivery and exact compatibility models; MangaMelon additionally proves exact static filtered search, while general downloaded-extension compatibility remains open |
 | Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI including query trimming/form encoding and bounded string/collection helpers, bounded collections and comparator sorting, structured coroutine lambdas, atomics/reflection, source filters with validated app-state reapplication, source-base constructors, bounded OkHttp requests, source-scoped async transport, response/body/Okio values including UTF-8/ByteString/Base64 request encoding, bounded Jsoup HTML/CSS including direct-child and `:containsData` semantics, generated-serializer JSON encoding/decoding including defaults/longs/string memo objects, a measured Java-time subset, and reached `SManga`/`MangasPage`/`SChapter`/`SMangaUpdate`/`Page` models; preferences, dynamic filters, additional DOM APIs, and the long tail remain open |
 | Cloudflare/WebView | Native WKWebView bridge design (see NETWORKING.md) |

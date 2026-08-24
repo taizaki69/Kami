@@ -95,6 +95,18 @@ artifacts are reported unsupported instead of guessed. A structural plan is
 only a description: it is not signer authentication, catalog admission, or
 proof that an extension's operations will execute.
 
+Compatibility failures now have a privacy-safe measurement seam. Exact pinned
+sources record only typed unresolved class/method/field and unsupported-opcode
+errors, deduplicated by app-facing operation stage; arbitrary error strings,
+HTTP failures, request values, and parser data never enter the report.
+`compat-audit gaps` separately performs a bounded, non-executing scan of one APK
+or a directory, ranks external method invocations that are not exactly
+registered on the current host bridge, aggregates unsupported opcodes and plan
+blockers, and emits deterministic artifact ordinals instead of local paths or
+filenames. Those static method findings are prioritization signals—not proof
+that a virtual/interface call will fail, signer trust, admission, or execution
+compatibility.
+
 Browse now renders the complete app-facing Mihon filter hierarchy: headers,
 separators, selects, text fields, checkboxes, tri-state controls, nested groups,
 and sortable fields. Editing is transactional, Apply can run a filter-only
@@ -154,16 +166,17 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 185 tests run on Windows with Swift 6.3, together
+The compatibility kit and all 189 tests run on Windows with Swift 6.3, together
 with 12 portable KamiCore tests (`scripts/windows_dev_test.bat`). GitHub Actions
 runs the pinned real-APK suite plus all 23 macOS KamiCore tests, compiles both
 Simulator and unsigned device targets, and publishes an unsigned IPA artifact.
-Exact structural-plan implementation commit `c122193` passed
-[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32680137538),
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32680137584), and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32680137545).
-The `compat-audit` CLI produces both the measured compatibility matrix and
-deterministic per-APK structural-plan blockers from the locked corpus.
+Exact compatibility-diagnostics implementation commit `e56bd9a` passed
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32683073872),
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32683073885), and
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32683073873).
+The `compat-audit` CLI produces the measured compatibility matrix,
+deterministic per-APK structural-plan blockers, and a redacted static
+gap/corpus report from the locked corpus.
 
 ## Non-goals / legality
 

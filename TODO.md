@@ -16,7 +16,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       external-list indirection — validated against live Keiyoushi index
       (1372 extensions parsed)
 - [x] Backup reader for legacy (zlib) `.tachibk` + proto schema decode
-- [x] `compat-audit` CLI (inspect/missing/index/methods/disasm/opcodes/plan) —
+- [x] `compat-audit` CLI (inspect/missing/index/methods/disasm/opcodes/plan/gaps) —
       deterministic file and directory inspection, run on the locked corpus
 
 ## P0 — App foundation
@@ -104,8 +104,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       legacy lib 1.4 specimens remain explicit blockers
 - [ ] Expand beyond the exact three-profile catalog with a fourth current
       extension that measures preferences or a custom image-request override
-- [ ] Privacy-safe unresolved API/opcode telemetry and exportable compatibility
-      report — [#4](https://github.com/taizaki69/Kami/issues/4)
+- [~] Privacy-safe compatibility telemetry — typed runtime class/method/field/
+      opcode failures are stage-deduplicated without arbitrary error strings,
+      and `compat-audit gaps` emits a deterministic path-free static/corpus
+      priority report. App-facing file export, first-gap capture below caught
+      DEX errors, field/bridge coverage, and fixed-gap-to-regression promotion
+      tooling remain — [#4](https://github.com/taizaki69/Kami/issues/4)
 - [ ] zstd decompression for current-Mihon backups (schema work done)
 
 ## P1 — Daily driver
