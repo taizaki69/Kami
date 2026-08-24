@@ -134,6 +134,7 @@ public actor ReaderImagePipeline {
     }
 
     public func clear() {
+        guard !Task.isCancelled else { return }
         for request in inFlight.values { request.task.cancel() }
         inFlight.removeAll(keepingCapacity: false)
         cache.removeAll(keepingCapacity: false)

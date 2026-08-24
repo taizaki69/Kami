@@ -140,7 +140,7 @@ struct SourceBrowseView: View {
         .onSubmit(of: .search) {
             Task { await load(page: 1, reset: true) }
         }
-        .onChange(of: query) { value in
+        .onChange(of: query) { _, value in
             if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Task { await load(page: 1, reset: true) }
             }
@@ -148,7 +148,7 @@ struct SourceBrowseView: View {
         .task {
             if items.isEmpty { await load(page: 1, reset: true) }
         }
-        .onChange(of: mode) { _ in
+        .onChange(of: mode) { _, _ in
             filterSearchEnabled = false
             appliedFilters = defaultFilters
             Task { await load(page: 1, reset: true) }

@@ -8,6 +8,7 @@ import KamiCore
 final class ReaderImageStore: ObservableObject {
     private let pipeline: ReaderImagePipeline
     private var prefetchTask: Task<Void, Never>?
+    private var clearTask: Task<Void, Never>?
 
     init(sourceID: String) {
         pipeline = ReaderImagePipeline(sourceID: sourceID)
@@ -27,6 +28,8 @@ final class ReaderImageStore: ObservableObject {
     }
 
     func reset() async {
+        clearTask?.cancel()
+        clearTask = nil
         prefetchTask?.cancel()
         prefetchTask = nil
         await pipeline.clear()
@@ -35,8 +38,9 @@ final class ReaderImageStore: ObservableObject {
     func stop() {
         prefetchTask?.cancel()
         prefetchTask = nil
+        clearTask?.cancel()
         let pipeline = self.pipeline
-        Task { await pipeline.clear() }
+        clearTask = Task { await pipeline.clear() }
     }
 }
 

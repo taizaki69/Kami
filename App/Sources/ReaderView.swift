@@ -111,13 +111,13 @@ struct ReaderView: View {
             }
             imageStore.stop()
         }
-        .onChange(of: keepScreenAwake) { _ in
+        .onChange(of: keepScreenAwake) { _, _ in
             applyIdleTimerSetting()
         }
-        .onChange(of: prefetchPages) { _ in
+        .onChange(of: prefetchPages) { _, _ in
             schedulePrefetch(around: currentIndex)
         }
-        .onChange(of: currentIndex) { newIndex in
+        .onChange(of: currentIndex) { _, newIndex in
             guard pages.indices.contains(newIndex) else { return }
             schedulePrefetch(around: newIndex)
             persistProgress(newIndex)
