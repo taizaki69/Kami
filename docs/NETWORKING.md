@@ -47,6 +47,12 @@ exact `headersBuilder` override so `x-app-key` reaches every deterministic JSON
 GET. Percent-encoded query growth is charged against the final 8 KiB URL limit
 before intermediate output can grow past it.
 
+The pinned MangaMelon path proves an API envelope that first encodes every DTO
+default, then applies the exact UTF-8 → Okio `ByteString` → Base64 sequence and
+places the result in a bounded form body. Popular, latest, filtered search,
+details, chapters, and pages all cross the same source-scoped fake transport;
+tests assert the decoded JSON for every request and remain fully offline.
+
 Each pinned `KamiSource` owns its transport together with one mutable
 interpreter behind a bounded actor queue, so a suspended request cannot permit
 another caller to enter the same VM concurrently. Production transport

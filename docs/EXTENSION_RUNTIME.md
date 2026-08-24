@@ -6,8 +6,8 @@
 
 Kami has crossed from DEX analysis into controlled execution. The partial M1
 interpreter runs synthetic conformance fixtures and progressively deeper paths
-from four pinned, current Mihon extension APKs. Exact BatCave and Kawii Manga
-profiles now cross the app-facing `KamiSource` boundary end to end under
+from five pinned Mihon extension APKs. Exact BatCave, Kawii Manga, and
+MangaMelon profiles now cross the app-facing `KamiSource` boundary end to end under
 deterministic offline fixtures. This is not yet a complete verifier, Java or
 Kotlin runtime, general tachiyomix source bridge, or arbitrary-extension
 implementation.
@@ -27,13 +27,15 @@ that same gate.
 the durable APK once into a bounded immutable buffer, rehashes it, re-verifies
 the full signing identity and manifest, selects an exact measured profile, and
 rejects any constructed source ID that the repository did not declare. The
-current catalog contains exact BatCave 1.6.9 and Kawii Manga 1.6.1 profiles; an authenticated but
+current catalog contains exact BatCave 1.6.9, Kawii Manga 1.6.1, and MangaMelon
+1.6.1 profiles; an authenticated but
 unmeasured extension is stored securely and left disabled rather than executed
 heuristically.
 
 Measured real-APK behavior today:
 
-- Akuma 1.4.10, MangaDex 1.4.212, BatCave 1.6.9, and Kawii Manga 1.6.1 entry constructors return
+- Akuma 1.4.10, MangaDex 1.4.212, BatCave 1.6.9, Kawii Manga 1.6.1, and
+  MangaMelon 1.6.1 entry constructors return
   real DEX objects.
 - BatCave 1.6.9 returns its real base URL, language, name, and 64-bit source ID.
 - BatCave's real `getPopularManga` path executes class initialization, Kotlin
@@ -75,11 +77,18 @@ Measured real-APK behavior today:
   `HttpUrl.Builder` queries, nullable and boolean generated serialization,
   ordered `distinct`, character-delimiter substring defaults, nullable string
   equality, and Kotlin `Instant` epoch conversion.
+- MangaMelon derives a static `Sort`/`Select` filter schema from its exact APK,
+  validates app mutations against the immutable names/options/shape, and sends
+  the original DEX filter instances through the stable wrapper. Its complete
+  popular/latest/filtered-search/details/chapters/pages regression proves
+  default-inclusive JSON encoding, bounded UTF-8/Okio/Base64 form data,
+  structured coroutine lambdas, `Long` decoding, stable comparator sorting,
+  string-valued chapter memo JSON, and ordered pages.
 - These source-result paths are proven only with deterministic offline response
   fixtures. `PinnedInterpretedSource` maps them through the complete app-facing
   contract and proves a default reader image request, but no test claims
-  filtered search, the optional related-manga JSON memo, preferences,
-  Cloudflare behavior, custom image-request overrides, or live-site
+  dynamic/network-backed filter lists, preferences, Cloudflare behavior,
+  custom image-request overrides, or live-site
   availability. The pinned suite never performs live network I/O.
 
 ## Architecture
@@ -88,15 +97,15 @@ Measured real-APK behavior today:
 Extension APK                       (untrusted)
    ↓ install + signature trust      durable, capability-gated
 content-addressed APK               persisted; re-authenticated on restore
-   ↓ exact profile catalog          BatCave 1.6.9 + Kawii 1.6.1; others fail closed
+   ↓ exact profile catalog          BatCave + Kawii + MangaMelon; others fail closed
    ↓ bounded ZIP/DEFLATE + CRC      working
 AndroidManifest.xml (AXML)          working
 classes*.dex                        validated structural parse
    ↓ DexInterpreter                 partial M1; async frame resume works
    ↓ Java/Kotlin HostBridge         partial exact-signature M2 surface
    ↓ source-scoped HTTP transport   bounded async request/response slice works
-   ↓ bounded HTML/JSON bridges      both measured core source paths work
-   ↓ tachiyomix API bridge          two exact pinned profiles work
+   ↓ bounded HTML/JSON bridges      all three measured core source paths work
+   ↓ tachiyomix API bridge          three exact pinned profiles work
 KamiSource (Swift protocol)         native + admitted measured adapters work
    ↓ SourceRegistry / app / DB      restore, enable/disable, Browse work
 ```
@@ -199,14 +208,16 @@ synthetic and pinned-corpus tests:
 - `java.lang.Object`, `String`, and `StringBuilder` basics.
 - Confined Java reflection over DEX fields and the source-base field bag;
   primitive boxes, atomics, concurrent maps, bounded lists, and iterators.
-- Kotlin `Intrinsics`, `Result`, basic synchronous continuation setup, lazy
+- Kotlin `Intrinsics`, `Result`, basic structured continuation/coroutine setup, lazy
   values, pairs, `isBlank`, trimming, Java-compatible UTF-8 form URL encoding,
   bounded regex find, bounded default `joinToString`, delimiter substring/split
   helpers (including character-delimiter last-occurrence defaults), nullable
-  case-aware equality, ordered `distinct` with a comparison budget,
+  case-aware equality, ordered `distinct` with a comparison budget, bounded
+  stable comparator sorting,
   prefix/suffix checks, close-finally behavior, and mutable reference boxes.
-- Mihon filter/filter-list construction and state access, plus construction
-  shims for `HttpSource` and `ParsedHttpSource` superclasses.
+- Mihon filter/filter-list construction and state access, bounded app-facing
+  filter conversion, exact-shape state reapplication, plus construction shims
+  for `HttpSource` and `ParsedHttpSource` superclasses.
 - The date-pattern object needed by the pinned BatCave constructor plus the
   measured `LocalDate`/system-zone/start-of-day/epoch-millisecond path used by
   chapter dates. This is an exact tested subset, not full `java.time` parity.
@@ -236,7 +247,9 @@ synthetic and pinned-corpus tests:
   `serialize`/`deserialize` methods, supports string and Okio-buffered input,
   preserves generated optional/default and required-field behavior, and caps
   encoded/decoded bytes, nodes/depth/members/keys/strings, descriptors, and
-  collections. It is not a claim of full kotlinx serialization.
+  collections. The MangaMelon path additionally proves `encodeDefaults`, JSON
+  `Long` values, and a bounded string-valued `JsonObject` memo subset. It is not
+  a claim of full kotlinx serialization.
 - The reached tachiyomix model slice constructs and mutates `SManga`, applies
   `setUrlWithoutDomain`, constructs `MangasPage`, `SChapter`, `SMangaUpdate`, and
   `Page`, and converts those results to public Swift compatibility models
@@ -246,16 +259,17 @@ synthetic and pinned-corpus tests:
 - Kotlin duration encoding/conversion reached by OkHttp cache-control setup.
 - Kotlin `Instant.parseOrNull` and exact epoch-millisecond conversion reached by
   Kawii chapter dates.
+- UTF-8-only `String.getBytes`, immutable Okio `ByteString` slicing, and Base64
+  encoding reached by MangaMelon's request envelope.
 
 Signer-authenticated admission, durable installation/selection, exact-byte
 restoration, and capability-consuming source construction are now measured.
 Stable public `KeiSource` wrapper routing now works whether a wrapper remains on
 a local superclass or is vertically merged by R8 into the generated entry, and
-the second current extension is proven end to end. The next layer is automatic
-profile discovery beyond the exact catalog: derive safe candidate metadata and
-stable entrypoints from authenticated APKs, then prove a third current source
-without mapping any R8-private worker. Filtered-search semantics and a real
-custom image-request override follow. The longer tail remains
+the second and third current extensions are proven end to end. The next layer
+is a fourth measured source that expands preferences or custom image requests,
+plus safe catalog generation without weakening exact byte/signer/admission
+checks. Dynamic/network-backed filter lists also remain open. The longer tail remains
 additional Jsoup DOM behavior, string/collection overloads, broader
 serialization, preferences, and Android context/UI shims. A class appearing in
 the analyzer's
@@ -266,11 +280,11 @@ mean every method on that class is callable.
 
 The target is a signature-aware bridge from `HttpSource`, `SManga`, `SChapter`,
 `MangasPage`, filters, network helpers, and Jsoup helpers onto `KamiSource`.
-The exact BatCave and Kawii Manga profiles implement the currently measured
+The exact BatCave, Kawii Manga, and MangaMelon profiles implement the currently measured
 subset with one actor per source owning its mutable interpreter and
-source-scoped transport. The app can construct either profile from a restored
-admission, but automatic profile discovery and the remaining APIs are still M3
-work. Per-source network clients must own
+source-scoped transport. The app can construct any of the three profiles from a restored
+admission, but automatic profile admission beyond the exact catalog and the
+remaining APIs are still M3 work. Per-source network clients must own
 rate limits, cookies, and redacted tracing. The first pinned end-to-end adapter
 is tracked in
 [GitHub issue #2](https://github.com/taizaki69/Kami/issues/2).
@@ -309,25 +323,26 @@ compatibility.
 
 ## Verification
 
-`MihonCompatKit` currently has 179 passing tests locally on Windows/Swift 6.3.3.
-They include 6 focused signer regressions, 18 pinned real-extension source/execution paths,
+`MihonCompatKit` currently has 182 passing tests locally on Windows/Swift 6.3.3.
+They include 6 focused signer regressions, 21 pinned real-extension source/execution paths,
 7 focused HTML/parser-limit regressions, Java URL-encoding and bounded Kotlin
 string/collection-helper
 regressions, generated chapter/page JSON success/failure paths, and 4 focused
 async interpreter/transport regressions, plus 3 BatCave adapter/tamper/
-concurrency regressions and the complete Kawii profile regression, alongside the existing parser, bytecode verifier,
-request-model, repository, and compression coverage. KamiCore has 7 portable
-Windows tests; macOS CI runs all 18, including SQLite signer persistence,
+concurrency regressions and complete Kawii/MangaMelon profile regressions,
+alongside the existing parser, bytecode verifier, request-model, repository,
+and compression coverage. KamiCore has 8 portable Windows tests; macOS CI runs
+all 19, including SQLite signer persistence,
 repository-key pinning, install/update and legacy confirmation, exact-byte
 restore/factory rejection, enabled-state preservation, and downloaded registry
 replacement/removal. Swift CI verifies the SHA-256-locked APK corpus before
 running it.
 
-Exact implementation commit `3802653` passes
-[Swift CI 32670599504](https://github.com/taizaki69/Kami/actions/runs/32670599504),
-[iOS Build 32670599479](https://github.com/taizaki69/Kami/actions/runs/32670599479),
-and [IPA Package 32670599498](https://github.com/taizaki69/Kami/actions/runs/32670599498).
-Those runs cover the 179-test compatibility suite, optimized CLI build, 18
+Exact implementation commit `d4c036d` passes
+[Swift CI 32674896127](https://github.com/taizaki69/Kami/actions/runs/32674896127),
+[iOS Build 32674896114](https://github.com/taizaki69/Kami/actions/runs/32674896114),
+and [IPA Package 32674896131](https://github.com/taizaki69/Kami/actions/runs/32674896131).
+Those runs cover the 182-test compatibility suite, optimized CLI build, 19
 KamiCore tests, Simulator/device compilation, and unsigned IPA artifact.
 
 The compatibility matrix records the exact versions, hashes, and methods. New

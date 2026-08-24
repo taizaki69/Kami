@@ -36,7 +36,7 @@ MihonCompatKit, never in the app.
 
 ## Key decisions
 
-- **`KamiSource` is the seam.** Native sources and the pinned BatCave and Kawii
+- **`KamiSource` is the seam.** Native sources and the pinned BatCave, Kawii, and MangaMelon
   Manga DEX-backed sources implement the same protocol; the registry hides
   which is which. Future profiles must preserve this boundary.
   The protocol mirrors tachiyomix semantics (popular/latest/search/details/
