@@ -7,7 +7,7 @@ MihonCompatKit, never in the app.
 ┌──────────────────────────────────────────────┐
 │ App (SwiftUI, iOS 17+)                       │
 │  RootTab: Library/Updates/History/Browse/    │
-│  Extensions · Reader · MangaDetail           │
+│  Extensions · Reader · MangaDetail · Filters │
 └──────────────┬───────────────────────────────┘
                │ KamiSource protocol (async)
 ┌──────────────┴───────────────────────────────┐
@@ -16,6 +16,7 @@ MihonCompatKit, never in the app.
 │  ExtensionInstallationService                │
 │  ExtensionAdmissionService                   │
 │  ExtensionSourceFactory · SourceRegistry     │
+│  SourceBrowseRequest                         │
 │  LibraryService                              │
 │  Native sources: MangaDex                    │
 └──────────────┬───────────────────────────────┘

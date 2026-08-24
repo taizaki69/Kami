@@ -19,7 +19,8 @@ work was recovered, completed, verified, and pushed.
   Do not add a project license without the creator's explicit decision; see
   `LICENSES.md` and issue #5.
 - Default branch: `main`
-- Current code/test checkpoint: `d4c036ddf109277fa6ec38d13beac8f6b52da09b`
+- Current code/test checkpoint: `ad2b11869b1256ee7f1b7421c1ea66a78d367063`
+- User-facing filtered Browse baseline: `ad2b11869b1256ee7f1b7421c1ea66a78d367063`
 - Third current filtered-profile baseline: `d4c036ddf109277fa6ec38d13beac8f6b52da09b`
 - Authenticated source-surface discovery baseline: `8d12fc4685aaf91fec92aff23b9e35d5253302d6`
 - Second current interpreted-profile baseline: `3802653cf89ed102b13de6e357e13b139ead3b6d`
@@ -58,6 +59,28 @@ and contains documentation only.
 
 Stop state on 2026-08-23 (America/Lima):
 
+- Commit `ad2b118` is pushed to `main`. Browse now renders all eight
+  app-facing Mihon filter cases: headers, separators, selects, text,
+  checkboxes, tri-state values, nested groups, and sort selections. The sheet
+  edits a copy, Cancel is non-mutating, Reset restores the source defaults,
+  Clear exits filter-only mode, and Apply deliberately supports blank-query
+  filtered search.
+- Every text search now carries the source's full filter shape with default or
+  user-edited state, so MangaMelon no longer fails its schema gate when
+  searched from the app.
+  `SourceBrowseRequest` makes popular/latest/text/filter-only routing a tested
+  KamiCore seam. Browse also uses reset generations to ignore stale async
+  responses, advances pagination only after success, disables duplicate load-
+  more requests, supports pull-to-refresh, and hides Latest for sources that do
+  not advertise it.
+- Local verification for `ad2b118` passes all 182 MihonCompatKit and 9 portable
+  KamiCore tests. Its exact-head workflows all pass:
+  [Swift CI 32676159196](https://github.com/taizaki69/Kami/actions/runs/32676159196)
+  runs 182 MihonCompatKit and 20 macOS KamiCore tests plus the optimized CLI,
+  [iOS Build 32676159129](https://github.com/taizaki69/Kami/actions/runs/32676159129)
+  compiles Simulator and unsigned device targets, and
+  [IPA Package 32676159183](https://github.com/taizaki69/Kami/actions/runs/32676159183)
+  uploads the unsigned IPA.
 - Commit `d4c036d` is pushed to `main`. MangaMelon 1.6.1 is the third exact
   current lib 1.6 profile and the first to prove app-facing filter state. Its
   authenticated APK supplies a static `Sort`/`Select` schema; the runtime
@@ -77,7 +100,7 @@ Stop state on 2026-08-23 (America/Lima):
   signer, package/version/lib, entry-class, declared source-ID, and factory
   admission checks. Its exact-head Swift CI, iOS Build, and IPA workflows all
   passed.
-- Local verification for `d4c036d` passes 182 MihonCompatKit tests, 8 portable
+- Local verification for `d4c036d` passed 182 MihonCompatKit tests, 8 portable
   KamiCore tests, the five-extension corpus lock/fetch round trip, and optimized
   Windows release builds for both packages. Exact-head GitHub runs are
   [Swift CI 32674896127](https://github.com/taizaki69/Kami/actions/runs/32674896127),
@@ -126,8 +149,8 @@ Stop state on 2026-08-23 (America/Lima):
   and enable/disable UI, re-authenticates enabled installs on startup, disables
   failed restorations, and shows active downloaded sources beside native ones
   in Browse. Downloaded updates replace the old runtime; disabling removes it;
-  the protected native source ID cannot be shadowed. Browse text search now
-  actually calls the selected source's search operation.
+  the protected native source ID cannot be shadowed. Browse routes text and
+  blank-query filtered searches with the source's complete filter shape.
 - The exact measured profile catalog contains BatCave 1.6.9, Kawii Manga
   1.6.1, and MangaMelon 1.6.1. An
   arbitrary authenticated extension can be stored securely, but it cannot be
@@ -228,8 +251,8 @@ Stop state on 2026-08-23 (America/Lima):
   HTML/parser-limit tests, bounded Java URL-encoding and Kotlin
   string/collection/time regressions, and 4 async interpreter/transport tests
   plus 3 BatCave adapter regressions and the complete Kawii and MangaMelon
-  profiles. KamiCore's 8 portable Windows tests pass; exact-head macOS CI runs
-  all 19, including the
+  profiles. KamiCore's 9 portable Windows tests pass; exact-head macOS CI runs
+  all 20, including the Browse request-routing regression and
   SQLite admission, repository persistence, install/restore/factory, enabled
   state, and update-policy suite. The optimized
   MihonCompatKit/`compat-audit` build also passes.
@@ -400,7 +423,7 @@ At the implementation baseline:
 | Check | Result |
 |---|---|
 | MihonCompatKit | 182 Swift tests passed locally on Windows/Swift 6.3.3, including 6 APK-signature regressions and full Kawii/MangaMelon profiles |
-| KamiCore | 8 portable tests passed locally on Windows/Swift 6.3.3; all 19 tests run on macOS with SQLite repository/trust persistence, install/restore/factory, enabled-state, update-policy, and registry lifecycle coverage |
+| KamiCore | 9 portable tests passed locally on Windows/Swift 6.3.3; all 20 tests passed on macOS with Browse request routing, SQLite repository/trust persistence, install/restore/factory, enabled-state, update-policy, and registry lifecycle coverage |
 | Optimized package builds | Windows release builds passed for both MihonCompatKit/`compat-audit.exe` and KamiCore |
 | Real APK constructors | Akuma, MangaDex, BatCave, Kawii Manga, and MangaMelon passed |
 | Structural verifier | 10 focused regressions cover instruction geometry, branch/fallthrough boundaries, R8's unreachable alignment NOP, and aligned, bounded, correctly typed payloads and switch targets |
@@ -416,22 +439,39 @@ At the implementation baseline:
 | BatCave execution | Exact metadata getters pass; popular, paginated text search, and latest updates return exact `MangasPage`; core details return exact `SManga`; combined updates return exact chapters; page list returns exact image URLs; malformed chapter/page payloads are typed failures; a 503 maps to `HttpException(code: 503)` |
 | Kawii Manga execution | Exact metadata, popular/latest/search, combined details/chapters, and pages pass from the locked APK; all five exact GETs carry the custom `x-app-key` header |
 | MangaMelon execution | Exact metadata, static `Sort`/`Select` filters, popular/latest/filtered search, combined details/chapters, memo, and ordered pages pass from the locked APK; exact default-inclusive Base64 form JSON is asserted and a mutated schema fails before transport |
+| Filtered Browse UI | All eight app-facing filter cases render transactionally; text search preserves the full source shape, blank-query Apply routes to filtered search, Clear exits filter-only mode, and reset generations reject stale result appends |
 | Pinned source adapters | 3 BatCave regressions cover every claimed `KamiSource` method/default image request, pre-parse SHA tamper rejection, and serialized concurrent VM/transport entry; 1 Kawii and 3 MangaMelon regressions cover their measured contracts; KamiCore covers registry insertion/deduplication and MangaMelon factory admission |
 | APK signer verification | 6 focused regressions cover real Keiyoushi v2, AOSP v1/v3 and verified rotation, content/signature tampering, unsigned input, fingerprint normalization, and scheme stripping |
 | Persisted extension admission | 3 focused macOS test methods cover repository/user trust, unrelated-signer rejection, declared source-ID capability registration, verified signer rotation, and downgrade/same-version replacement rejection |
 | Install/restore/source factory | 3 macOS install tests plus 5 portable factory tests cover repository-key install, explicit legacy confirmation, cancellation, startup restoration, exact-file replacement rejection, declared source-ID enforcement, real BatCave/MangaMelon construction, and refusal to guess an unmeasured profile |
-| Swift CI | Exact implementation head `d4c036d` [run 32674896127](https://github.com/taizaki69/Kami/actions/runs/32674896127) passed 182 MihonCompatKit tests, optimized CLI build, 19 KamiCore tests, and artifact upload |
-| iOS Simulator and unsigned device builds | Exact implementation head `d4c036d` [run 32674896114](https://github.com/taizaki69/Kami/actions/runs/32674896114) passed both targets |
-| Unsigned IPA packaging | Exact implementation head `d4c036d` [run 32674896131](https://github.com/taizaki69/Kami/actions/runs/32674896131) passed and uploaded `Kami-unsigned-ipa` |
+| Swift CI | Exact implementation head `ad2b118` [run 32676159196](https://github.com/taizaki69/Kami/actions/runs/32676159196) passed 182 MihonCompatKit tests, optimized CLI build, 20 KamiCore tests, and artifact upload |
+| iOS Simulator and unsigned device builds | Exact implementation head `ad2b118` [run 32676159129](https://github.com/taizaki69/Kami/actions/runs/32676159129) passed both targets |
+| Unsigned IPA packaging | Exact implementation head `ad2b118` [run 32676159183](https://github.com/taizaki69/Kami/actions/runs/32676159183) passed and uploaded `Kami-unsigned-ipa` |
 | Repository integrity | clean worktree and `git fsck --full` passed |
 
 The exact-head public-repository runs validate every implementation checkpoint
-through `d4c036d`, including all three app-facing source profiles,
+through `ad2b118`, including all three app-facing source profiles,
 signer-authenticated admission gate, durable install/restore flow, exact-byte
-factory, source selection UI, and Browse registration, and produced both
-`compat-audit` and `Kami-unsigned-ipa` artifacts.
+factory, source selection UI, filtered Browse, and source registration. They
+produced both `compat-audit` and `Kami-unsigned-ipa` artifacts.
 
 ## What the latest continuation completed
+
+Commit `ad2b118` exposes the measured filter contract as a native reader
+feature:
+
+- `SourceFilterSheet` transactionally renders header, separator, select, text,
+  checkbox, tri-state, nested group, and sort cases. Apply supports blank-query
+  search, Reset restores source defaults, Clear exits filter-only mode, and
+  Cancel never mutates the active request state.
+- Browse always sends the complete source filter schema on text search, hides
+  unsupported Latest feeds, supports pull-to-refresh, advances pages only on
+  success, disables duplicate load-more requests, and discards results from
+  superseded reset generations.
+- `SourceBrowseRequest` provides a pure, portable routing seam. Its regression
+  distinguishes popular, latest, trimmed text search, and blank filter-only
+  search. Exact-head CI passes 182 MihonCompatKit and 20 KamiCore tests plus
+  both iOS build destinations and IPA packaging.
 
 Commits `8d12fc4` and `d4c036d` complete authenticated source-surface discovery
 and the third exact current source profile:
@@ -483,8 +523,8 @@ source construction, and selection:
   removed. The Extensions UI installs/updates and enables/disables; AppModel
   restores safely on startup; SourceRegistry replaces/removes downloaded
   runtimes without allowing the native source to be shadowed; Browse displays
-  source origin and now performs nonblank source search correctly.
-- Exact-head workflows prove 182 MihonCompatKit tests, 19 macOS KamiCore tests,
+  source origin and routes source search through the current full filter shape.
+- Exact-head workflows prove 182 MihonCompatKit tests, 20 macOS KamiCore tests,
   optimized CLI output, both iOS build destinations, and the unsigned IPA.
 
 Earlier commits `86125f9` through `a902d06` completed signer-authenticated
@@ -1104,6 +1144,8 @@ an exact real-APK assertion when reachable, and CI coverage.
 | HTML compatibility and limits | `Packages/MihonCompatKit/Sources/MihonCompatKit/HTML/CompatHTML.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/HTMLCompatibilityTests.swift` |
 | Real APK execution frontier | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/RealExtensionExecutionTests.swift` |
 | End-to-end adapter proof | `Packages/MihonCompatKit/Tests/MihonCompatKitTests/PinnedInterpretedSourceTests.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/KawiiMangaInterpretedSourceTests.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/MangaMelonInterpretedSourceTests.swift`, `Packages/KamiCore/Tests/KamiCoreTests/ExtensionSourceFactoryTests.swift` |
+| Filtered Browse UI | `App/Sources/BrowseView.swift`, `App/Sources/SourceFilterSheet.swift` |
+| Browse request routing | `Packages/KamiCore/Sources/KamiCore/Sources/SourceBrowseRequest.swift`, `Packages/KamiCore/Tests/KamiCoreTests/SourceBrowseRequestTests.swift` |
 | Repository client | `Packages/MihonCompatKit/Sources/MihonCompatKit/Repository/ExtensionRepository.swift` |
 | App source seam | `Packages/MihonCompatKit/Sources/MihonCompatKit/Models/CompatModels.swift` (`KamiSource`) |
 | Persistence | `Packages/KamiCore/Sources/KamiCore/Database/` |

@@ -91,6 +91,14 @@ Measured real-APK behavior today:
   custom image-request overrides, or live-site
   availability. The pinned suite never performs live network I/O.
 
+The iOS Browse screen now consumes that filter contract directly. A generic,
+transactional sheet renders every `SourceFilter` case, including nested groups;
+text searches preserve the source's full filter shape, and Apply can
+deliberately route a blank query through filtered search. A pure KamiCore
+request router tests popular/latest/text/filter-only selection independently of
+SwiftUI. Browse reset generations prevent superseded requests from appending
+stale results, and failed next-page requests no longer advance the page counter.
+
 ## Architecture
 
 ```text
@@ -107,7 +115,7 @@ classes*.dex                        validated structural parse
    ↓ bounded HTML/JSON bridges      all three measured core source paths work
    ↓ tachiyomix API bridge          three exact pinned profiles work
 KamiSource (Swift protocol)         native + admitted measured adapters work
-   ↓ SourceRegistry / app / DB      restore, enable/disable, Browse work
+   ↓ SourceRegistry / app / DB      restore, enable/disable, filtered Browse work
 ```
 
 The interpreter consumes `DexFile` code items directly. It follows the Android
@@ -331,18 +339,18 @@ regressions, generated chapter/page JSON success/failure paths, and 4 focused
 async interpreter/transport regressions, plus 3 BatCave adapter/tamper/
 concurrency regressions and complete Kawii/MangaMelon profile regressions,
 alongside the existing parser, bytecode verifier, request-model, repository,
-and compression coverage. KamiCore has 8 portable Windows tests; macOS CI runs
-all 19, including SQLite signer persistence,
+and compression coverage. KamiCore has 9 portable Windows tests; macOS CI runs
+all 20, including Browse feed/search routing, SQLite signer persistence,
 repository-key pinning, install/update and legacy confirmation, exact-byte
 restore/factory rejection, enabled-state preservation, and downloaded registry
 replacement/removal. Swift CI verifies the SHA-256-locked APK corpus before
 running it.
 
-Exact implementation commit `d4c036d` passes
-[Swift CI 32674896127](https://github.com/taizaki69/Kami/actions/runs/32674896127),
-[iOS Build 32674896114](https://github.com/taizaki69/Kami/actions/runs/32674896114),
-and [IPA Package 32674896131](https://github.com/taizaki69/Kami/actions/runs/32674896131).
-Those runs cover the 182-test compatibility suite, optimized CLI build, 19
+Exact implementation commit `ad2b118` passes
+[Swift CI 32676159196](https://github.com/taizaki69/Kami/actions/runs/32676159196),
+[iOS Build 32676159129](https://github.com/taizaki69/Kami/actions/runs/32676159129),
+and [IPA Package 32676159183](https://github.com/taizaki69/Kami/actions/runs/32676159183).
+Those runs cover the 182-test compatibility suite, optimized CLI build, 20
 KamiCore tests, Simulator/device compilation, and unsigned IPA artifact.
 
 The compatibility matrix records the exact versions, hashes, and methods. New

@@ -139,17 +139,18 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 - 182/182 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present.
-- Exact implementation commit `d4c036d` passes
-  [Swift CI 32674896127](https://github.com/taizaki69/Kami/actions/runs/32674896127),
-  [iOS Build 32674896114](https://github.com/taizaki69/Kami/actions/runs/32674896114),
-  and [IPA Package 32674896131](https://github.com/taizaki69/Kami/actions/runs/32674896131).
+- Exact implementation commit `ad2b118` passes
+  [Swift CI 32676159196](https://github.com/taizaki69/Kami/actions/runs/32676159196),
+  [iOS Build 32676159129](https://github.com/taizaki69/Kami/actions/runs/32676159129),
+  and [IPA Package 32676159183](https://github.com/taizaki69/Kami/actions/runs/32676159183).
 - Six verifier regressions cover five real Keiyoushi v2 APKs, AOSP v1 and v3,
   verified certificate rotation, signed-content and signer-signature tampering,
-  unsigned input, fingerprint normalization, and v3-block stripping. Nineteen
+  unsigned input, fingerprint normalization, and v3-block stripping. Twenty
   macOS KamiCore tests cover persisted repository/user trust, unrelated-signer
   rejection, source-ID capability admission, rotation-aware updates,
   downgrade/same-version replacement rejection, repository-key persistence,
-  exact-file startup restoration, install confirmation, and enabled state.
+  exact-file startup restoration, install confirmation, enabled state, and
+  Browse routing for popular/latest/text/filter-only requests.
 - Twenty-one real-extension source/execution tests require exact successful values or exact typed
   boundaries. The BatCave popular, text-search, latest, details, and chapter
   and page tests require exact requests and parsed model fields; invalid
@@ -210,7 +211,9 @@ validated default page image requests. These are three exact measured profiles,
 not a claim that downloaded extensions are generally compatible. Signer trust,
 durable install/update, exact-byte startup restoration, selection UI,
 capability-consuming construction, stable public wrapper routing, and Browse
-registration are working. Automatic catalog expansion, dynamic filter sources,
+registration are working. Browse renders every app-facing filter case,
+preserves the full source filter shape for text search, and supports
+blank-query static filtered search. Automatic catalog expansion, dynamic filter sources,
 preferences, and custom image-request overrides remain open. Remaining
 DEX work (notably
 broader external hierarchy and super/default resolution beyond parsed class

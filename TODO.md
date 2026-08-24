@@ -82,6 +82,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       signer confirmation establish trust, every startup re-authenticates the
       exact bytes, and enabled downloaded sources appear in Browse. The factory
       intentionally supports only exact measured profiles today.
+- [x] Generic source-filter Browse UI: transactional editing for every
+      app-facing Mihon filter case, source-default preservation for text
+      searches, blank-query filtered search, reset/clear, pull-to-refresh, and
+      stale-response-safe pagination
 - [x] Stable interpreted wrapper routing and a second current extension:
       app-facing calls use measured public `KeiSource` wrappers from either a
       local superclass or an R8-merged entry class, and Kawii Manga 1.6.1 runs

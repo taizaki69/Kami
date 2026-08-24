@@ -85,6 +85,14 @@ re-authenticates the exact immutable buffer it executes, and refuses undeclared
 source IDs or unsupported profiles. Enabled downloaded sources appear beside
 the native MangaDex source in Browse.
 
+Browse now renders the complete app-facing Mihon filter hierarchy: headers,
+separators, selects, text fields, checkboxes, tri-state controls, nested groups,
+and sortable fields. Editing is transactional, Apply can run a filter-only
+search with a blank query, and Clear exits filter-only mode. Every text search
+passes the source's full filter schema with either default or user-edited
+state. Result resets and pagination also ignore stale responses instead of
+mixing results from superseded requests.
+
 This is still not a claim of broad extension execution: the runtime profile
 catalog currently recognizes only the exact measured BatCave 1.6.9, Kawii
 Manga 1.6.1, and MangaMelon 1.6.1 builds. Automatic profile admission beyond
@@ -125,13 +133,13 @@ security boundaries, and the recommended next implementation sequence.
 ## Verified on Windows too
 
 The compatibility kit and all 182 tests run on Windows with Swift 6.3, together
-with 8 portable KamiCore tests (`scripts/windows_dev_test.bat`). GitHub Actions
-runs the pinned real-APK suite plus all 19 macOS KamiCore tests, compiles both
+with 9 portable KamiCore tests (`scripts/windows_dev_test.bat`). GitHub Actions
+runs the pinned real-APK suite plus all 20 macOS KamiCore tests, compiles both
 Simulator and unsigned device targets, and publishes an unsigned IPA artifact.
-Exact implementation commit `d4c036d` passed
-[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32674896127),
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32674896114), and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32674896131).
+Exact implementation commit `ad2b118` passed
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32676159196),
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32676159129), and
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32676159183).
 The `compat-audit` CLI produced the measured compatibility matrix from the
 locked corpus.
 
