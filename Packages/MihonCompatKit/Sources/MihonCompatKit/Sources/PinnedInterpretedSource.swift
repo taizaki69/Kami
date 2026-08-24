@@ -11,6 +11,7 @@ public enum PinnedInterpretedSourceError: Error, Sendable, Equatable, LocalizedE
     case manifestMismatch(profile: String)
     case missingEntryClass(profile: String)
     case missingSourceAPIWrapper(profile: String)
+    case unsupportedStructure(profile: String)
     case invalidMetadata(profile: String)
     case invalidInput(operation: String)
     case unsupportedOperation(String)
@@ -33,6 +34,8 @@ public enum PinnedInterpretedSourceError: Error, Sendable, Equatable, LocalizedE
             return "Pinned extension \(profile) is missing its expected source class."
         case let .missingSourceAPIWrapper(profile):
             return "Pinned extension \(profile) is missing its measured source API wrapper."
+        case let .unsupportedStructure(profile):
+            return "Pinned extension \(profile) does not match the bounded structural execution plan."
         case let .invalidMetadata(profile):
             return "Pinned extension \(profile) returned invalid source metadata."
         case let .invalidInput(operation):
@@ -307,47 +310,6 @@ private struct PinnedInterpretedMetadata: Sendable {
     let baseURL: String
 }
 
-private struct ExactInterpretedMethod: Sendable {
-    let name: String
-    let prototype: String
-}
-
-/// Stable lib 1.6 source entrypoints. These signatures are part of the public
-/// Keiyoushi/Mihon source API and are discovered on the authenticated APK's
-/// generated entry-class chain instead of copied into every artifact profile.
-private enum StableInterpretedSourceAPI {
-    static let popular = ExactInterpretedMethod(
-        name: "getPopularManga",
-        prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-    )
-    static let latest = ExactInterpretedMethod(
-        name: "getLatestUpdates",
-        prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-    )
-    static let search = ExactInterpretedMethod(
-        name: "getSearchManga",
-        prototype: "(ILjava/lang/String;Leu/kanade/tachiyomi/source/model/FilterList;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-    )
-    static let mangaUpdate = ExactInterpretedMethod(
-        name: "getMangaUpdate",
-        prototype: "(Leu/kanade/tachiyomi/source/model/SManga;Ljava/util/List;ZZLkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-    )
-    static let pages = ExactInterpretedMethod(
-        name: "getPageList",
-        prototype: "(Leu/kanade/tachiyomi/source/model/SChapter;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
-    )
-    static let filterList = ExactInterpretedMethod(
-        name: "getFilterList",
-        prototype: "()Leu/kanade/tachiyomi/source/model/FilterList;"
-    )
-    static let supportsLatest = ExactInterpretedMethod(
-        name: "getSupportsLatest",
-        prototype: "()Z"
-    )
-
-    static let wrapperMethods = [search, mangaUpdate, filterList, supportsLatest]
-}
-
 private struct PinnedInterpretedProfile: Sendable {
     enum FilterSupport: Sendable {
         case none
@@ -444,26 +406,33 @@ private actor PinnedInterpretedRuntime {
               manifest.packageName == profile.packageName,
               manifest.versionName == profile.versionName,
               manifest.versionCode == profile.versionCode,
-              manifest.extensionLibVersion == "1.6",
-              let entryClassName = manifest.resolvedSourceClass,
-              let entryClassDescriptor = Self.classDescriptor(from: entryClassName) else {
+              manifest.extensionLibVersion == "1.6" else {
+            throw PinnedInterpretedSourceError.manifestMismatch(profile: profile.identifier)
+        }
+
+        let inspection = try InterpretedExtensionPlanInspector().inspect(apkBytes: apkBytes)
+        guard let plan = inspection.plan else {
+            if inspection.blockers.contains(.entryClassMissing) ||
+                inspection.blockers.contains(.entryClassOutsidePrimaryDEX) {
+                throw PinnedInterpretedSourceError.missingEntryClass(profile: profile.identifier)
+            }
+            if inspection.blockers.contains(.stableSourceWrapperMissing) {
+                throw PinnedInterpretedSourceError.missingSourceAPIWrapper(
+                    profile: profile.identifier
+                )
+            }
+            throw PinnedInterpretedSourceError.unsupportedStructure(profile: profile.identifier)
+        }
+        guard plan.packageName == profile.packageName,
+              plan.versionName == profile.versionName,
+              plan.versionCode == profile.versionCode else {
             throw PinnedInterpretedSourceError.manifestMismatch(profile: profile.identifier)
         }
 
         let archive = try ZipArchive(apkBytes)
-        let dex = try DexFile(try archive.data(named: "classes.dex"))
-        guard dex.classIndexByDescriptor[entryClassDescriptor] != nil else {
-            throw PinnedInterpretedSourceError.missingEntryClass(profile: profile.identifier)
-        }
-        guard let sourceAPIWrapperDescriptor = Self.sourceAPIWrapper(
-            dex: dex,
-            entryClassDescriptor: entryClassDescriptor,
-            requiredMethods: StableInterpretedSourceAPI.wrapperMethods
-        ) else {
-            throw PinnedInterpretedSourceError.missingSourceAPIWrapper(
-                profile: profile.identifier
-            )
-        }
+        let dex = try DexFile(try archive.data(named: plan.dexEntryName))
+        let entryClassDescriptor = plan.entryClassDescriptor
+        let sourceAPIWrapperDescriptor = plan.sourceAPIWrapperDescriptor
 
         let vm = DexInterpreter(
             dex: dex,
@@ -740,22 +709,6 @@ private actor PinnedInterpretedRuntime {
         return value
     }
 
-    private static func classDescriptor(from className: String) -> String? {
-        guard !className.isEmpty,
-              className.utf8.count <= 1_024,
-              !className.hasPrefix("."),
-              !className.hasSuffix("."),
-              className.split(separator: ".").allSatisfy({ component in
-                  !component.isEmpty && component.utf8.allSatisfy {
-                      ($0 >= 0x30 && $0 <= 0x39) ||
-                          ($0 >= 0x41 && $0 <= 0x5a) ||
-                          ($0 >= 0x61 && $0 <= 0x7a) ||
-                          $0 == 0x24 || $0 == 0x5f
-                  }
-              }) else { return nil }
-        return "L" + className.replacingOccurrences(of: ".", with: "/") + ";"
-    }
-
     private static func validMetadata(name: String, language: String, baseURL: String) -> Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               name.utf8.count <= 4_096,
@@ -772,49 +725,6 @@ private actor PinnedInterpretedRuntime {
               components.user == nil,
               components.password == nil else { return false }
         return true
-    }
-
-    /// R8 may rename a source's abstract implementation workers, but the
-    /// app-facing `KeiSource` methods remain public and stable. R8 may keep the
-    /// wrapper in a superclass or vertically merge it into the generated entry
-    /// class, so walk only that local chain and require one concrete, public,
-    /// non-static declaration of every measured wrapper method.
-    private static func sourceAPIWrapper(
-        dex: DexFile,
-        entryClassDescriptor: String,
-        requiredMethods: [ExactInterpretedMethod]
-    ) -> String? {
-        guard let entryIndex = dex.classIndexByDescriptor[entryClassDescriptor] else {
-            return nil
-        }
-        var classIndex: Int? = entryIndex
-        var visited: Set<String> = []
-
-        while let currentIndex = classIndex {
-            let definition = dex.classDefs[currentIndex]
-            let descriptor = definition.descriptor
-            guard visited.insert(descriptor).inserted else { return nil }
-            let hasRequiredMethods = requiredMethods.allSatisfy { required in
-                let matches = definition.virtualMethods.filter { encoded in
-                    let reference = dex.methodIds[encoded.methodIndex]
-                    return reference.name == required.name &&
-                        reference.prototype.descriptor == required.prototype
-                }
-                guard matches.count == 1, let method = matches.first else {
-                    return false
-                }
-                let isPublic = method.accessFlags & 0x1 != 0
-                let isStatic = method.accessFlags & 0x8 != 0
-                let isAbstract = method.accessFlags & 0x400 != 0
-                return isPublic && !isStatic && !isAbstract && method.codeOffset != 0
-            }
-            if hasRequiredMethods { return descriptor }
-            let superclassIndex = definition.superclassIndex
-            guard superclassIndex >= 0,
-                  superclassIndex < dex.typeDescriptors.count else { return nil }
-            classIndex = dex.classIndexByDescriptor[dex.typeDescriptors[superclassIndex]]
-        }
-        return nil
     }
 
     private static func sha256Hex(_ bytes: [UInt8]) -> String {

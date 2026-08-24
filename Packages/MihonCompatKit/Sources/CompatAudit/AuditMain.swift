@@ -12,6 +12,7 @@ import MihonCompatKit
 ///   compat-audit index <url-or-file>      Dump an extension store index.
 ///   compat-audit methods <path.apk> [q]   Exact first-DEX method references.
 ///   compat-audit opcodes <apk-or-dir>      Exact all-DEX opcode inventory.
+///   compat-audit plan <apk-or-dir>         Structural execution-plan blockers.
 ///
 /// Works on any Swift host (Windows/Linux/macOS); pure Foundation.
 
@@ -28,6 +29,7 @@ struct CompatAudit {
               compat-audit disasm <path.apk> [class-filter]
               compat-audit methods <path.apk> [text-or-decimal-index]
               compat-audit opcodes <apk-or-directory>
+              compat-audit plan <apk-or-directory>
             """)
             exit(64)
         }
@@ -74,6 +76,9 @@ struct CompatAudit {
 
         case "opcodes":
             opcodeReport(at: args[2])
+
+        case "plan":
+            executionPlanReport(at: args[2])
 
         default:
             print("unknown subcommand \(args[1])")
@@ -185,6 +190,59 @@ struct CompatAudit {
             print("error: \(error)")
             exit(70)
         }
+    }
+
+    /// Inspects one APK or a directory in deterministic filename order without
+    /// executing DEX or establishing signer trust. Unsupported artifacts are a
+    /// successful report with blockers; malformed/unreadable artifacts fail.
+    static func executionPlanReport(at path: String) {
+        do {
+            let urls = try opcodeInputURLs(at: path)
+            let inspector = InterpretedExtensionPlanInspector()
+            var encounteredError = false
+            for (index, url) in urls.enumerated() {
+                if index > 0 { print("") }
+                print("== \(url.lastPathComponent) ==")
+                do {
+                    let bytes = try boundedAPKBytes(at: url)
+                    let inspection = try inspector.inspect(apkBytes: bytes)
+                    print("package:            \(inspection.packageName)")
+                    print("version:            \(inspection.versionName ?? "?") (\(inspection.versionCode.map(String.init) ?? "?"))")
+                    print("extensionLib:       \(inspection.extensionLibVersion ?? "?")")
+                    print("dex files:          \(inspection.dexEntryNames.joined(separator: ", "))")
+                    print("native libraries:   \(inspection.nativeLibraryCount)")
+                    if let plan = inspection.plan {
+                        print("structural plan:    candidate (not admitted or execution-proven)")
+                        print("entry:              \(plan.entryClassDescriptor)")
+                        print("stable wrapper:     \(plan.sourceAPIWrapperDescriptor)")
+                    } else {
+                        print("structural plan:    blocked")
+                        for blocker in inspection.blockers {
+                            print("  - \(blocker.summary)")
+                        }
+                    }
+                } catch {
+                    encounteredError = true
+                    print("error: \(error)")
+                }
+            }
+            if encounteredError { exit(70) }
+        } catch {
+            print("error: \(error)")
+            exit(70)
+        }
+    }
+
+    static func boundedAPKBytes(at url: URL) throws -> [UInt8] {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        guard values.isRegularFile == true,
+              let size = values.fileSize,
+              size <= APKSignatureVerifier.maximumAPKSize else {
+            throw CocoaError(.fileReadTooLarge)
+        }
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        guard data.count == size else { throw CocoaError(.fileReadUnknown) }
+        return [UInt8](data)
     }
 
     static func opcodeInputURLs(at path: String) throws -> [URL] {
