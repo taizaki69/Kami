@@ -168,7 +168,7 @@ public enum SourceFilter: Sendable {
     case group(name: String, filters: [SourceFilter])
     case sort(name: String, values: [String], state: SortSelection?)
 
-    public enum TriState: Int, Sendable {
+    public enum TriState: Int, Sendable, Hashable {
         case ignore = 0, include = 1, exclude = 2
     }
 

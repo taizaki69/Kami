@@ -53,15 +53,26 @@ struct BrowseView: View {
 
 struct SourceBrowseView: View {
     let source: any KamiSource
+    private let defaultFilters: [SourceFilter]
 
-    @EnvironmentObject var model: AppModel
     @State private var mode: Mode = .popular
     @State private var query = ""
     @State private var page = 1
+    @State private var appliedFilters: [SourceFilter]
+    @State private var filterSearchEnabled = false
+    @State private var showingFilters = false
     @State private var items: [SMangaCompat] = []
     @State private var hasNext = false
     @State private var loading = false
     @State private var errorText: String?
+    @State private var loadGeneration = 0
+
+    init(source: any KamiSource) {
+        self.source = source
+        let filters = source.getFilterList()
+        defaultFilters = filters
+        _appliedFilters = State(initialValue: filters)
+    }
 
     enum Mode: String, CaseIterable, Identifiable {
         case popular = "Popular"
@@ -102,8 +113,7 @@ struct SourceBrowseView: View {
                 }
                 if hasNext {
                     Button {
-                        page += 1
-                        Task { await load() }
+                        Task { await load(page: page + 1) }
                     } label: {
                         HStack {
                             Spacer()
@@ -112,61 +122,124 @@ struct SourceBrowseView: View {
                             Spacer()
                         }
                     }
+                    .disabled(loading)
                 }
             } header: {
-                Picker("Mode", selection: $mode) {
-                    ForEach(Mode.allCases) { m in
-                        Text(m.rawValue).tag(m)
+                if source.supportsLatest {
+                    Picker("Mode", selection: $mode) {
+                        ForEach(Mode.allCases) { m in
+                            Text(m.rawValue).tag(m)
+                        }
                     }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
             }
         }
         .navigationTitle(source.name)
         .searchable(text: $query, prompt: "Search \(source.name)")
         .onSubmit(of: .search) {
-            page = 1
-            Task { await load(reset: true) }
+            Task { await load(page: 1, reset: true) }
         }
         .onChange(of: query) { value in
             if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                page = 1
-                Task { await load(reset: true) }
+                Task { await load(page: 1, reset: true) }
             }
         }
         .task {
-            if items.isEmpty { await load(reset: true) }
+            if items.isEmpty { await load(page: 1, reset: true) }
         }
         .onChange(of: mode) { _ in
-            page = 1
-            Task { await load(reset: true) }
+            filterSearchEnabled = false
+            appliedFilters = defaultFilters
+            Task { await load(page: 1, reset: true) }
+        }
+        .refreshable {
+            await load(page: 1, reset: true)
+        }
+        .toolbar {
+            if !defaultFilters.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingFilters = true
+                    } label: {
+                        Image(systemName: filterSearchEnabled
+                              ? "line.3.horizontal.decrease.circle.fill"
+                              : "line.3.horizontal.decrease.circle")
+                    }
+                    .accessibilityLabel(filterSearchEnabled
+                                        ? "Edit active filters"
+                                        : "Filters")
+                }
+            }
+        }
+        .sheet(isPresented: $showingFilters) {
+            SourceFilterSheet(
+                sourceName: source.name,
+                filters: appliedFilters,
+                defaults: defaultFilters,
+                isFiltering: filterSearchEnabled,
+                onApply: { filters in
+                    appliedFilters = filters
+                    filterSearchEnabled = true
+                    Task { await load(page: 1, reset: true) }
+                },
+                onClear: {
+                    appliedFilters = defaultFilters
+                    filterSearchEnabled = false
+                    Task { await load(page: 1, reset: true) }
+                }
+            )
+        }
+        .overlay {
+            if loading && items.isEmpty {
+                ProgressView()
+                    .controlSize(.large)
+            }
         }
     }
 
-    private func load(reset: Bool = false) async {
-        if reset { items = [] }
+    private func load(page requestedPage: Int, reset: Bool = false) async {
+        if !reset && loading { return }
+
+        if reset {
+            loadGeneration += 1
+            items = []
+            hasNext = false
+        }
+        let generation = loadGeneration
+        let requestedMode = mode
+        let requestedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestedFilters = appliedFilters
+
         loading = true
         errorText = nil
-        do {
-            let result: MangasPageCompat
-            let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedQuery.isEmpty {
-                result = try await source.getSearchManga(
-                    page: page,
-                    query: trimmedQuery,
-                    filters: []
-                )
-            } else {
-                switch mode {
-                case .popular: result = try await source.getPopularManga(page: page)
-                case .latest: result = try await source.getLatestUpdates(page: page)
-                }
+        defer {
+            if generation == loadGeneration {
+                loading = false
             }
-            items += result.mangas
+        }
+
+        do {
+            let request = SourceBrowseRequest(
+                page: requestedPage,
+                feed: requestedMode == .popular ? .popular : .latest,
+                query: requestedQuery,
+                filters: requestedFilters,
+                forceSearch: filterSearchEnabled
+            )
+            let result = try await request.execute(on: source)
+
+            guard generation == loadGeneration else { return }
+            if reset {
+                items = result.mangas
+            } else {
+                items += result.mangas
+            }
+            page = requestedPage
             hasNext = result.hasNextPage
         } catch {
+            guard generation == loadGeneration else { return }
             errorText = "The source request failed: \(error.localizedDescription)"
         }
-        loading = false
     }
 }
