@@ -32,6 +32,19 @@ current catalog contains exact BatCave 1.6.9, Kawii Manga 1.6.1, and MangaMelon
 unmeasured extension is stored securely and left disabled rather than executed
 heuristically.
 
+`InterpretedExtensionPlanInspector` is now the reusable, non-executing discovery
+step shared by those exact profiles and `compat-audit plan`. It parses bounded
+manifest, ZIP, and DEX data and either produces a deterministic structural plan
+or stable blockers. The current plan contract requires the extension feature,
+valid package/version identity, lib 1.6, one declared source class, no source
+factory, exactly one unambiguous `classes.dex`, no native `.so` entries, the
+entry class in that DEX, and one concrete public stable-wrapper location on its
+local superclass chain. It does not authenticate a signer, grant an admission
+capability, execute DEX, infer private R8 workers, or prove that network/source
+operations work. The exact runtime calls it only after hash/signature/manifest
+authentication and exact-catalog selection; declared source IDs are still
+validated before any constructed source is returned.
+
 Measured real-APK behavior today:
 
 - Akuma 1.4.10, MangaDex 1.4.212, BatCave 1.6.9, Kawii Manga 1.6.1, and
@@ -109,6 +122,7 @@ content-addressed APK               persisted; re-authenticated on restore
    ↓ bounded ZIP/DEFLATE + CRC      working
 AndroidManifest.xml (AXML)          working
 classes*.dex                        validated structural parse
+   ↓ structural plan inspector      deterministic candidate/blockers; no trust
    ↓ DexInterpreter                 partial M1; async frame resume works
    ↓ Java/Kotlin HostBridge         partial exact-signature M2 surface
    ↓ source-scoped HTTP transport   bounded async request/response slice works
@@ -274,10 +288,12 @@ Signer-authenticated admission, durable installation/selection, exact-byte
 restoration, and capability-consuming source construction are now measured.
 Stable public `KeiSource` wrapper routing now works whether a wrapper remains on
 a local superclass or is vertically merged by R8 into the generated entry, and
-the second and third current extensions are proven end to end. The next layer
-is a fourth measured source that expands preferences or custom image requests,
-plus safe catalog generation without weakening exact byte/signer/admission
-checks. Dynamic/network-backed filter lists also remain open. The longer tail remains
+the second and third current extensions are proven end to end. Bounded shared
+plan generation now replaces duplicated structural discovery, but it does not
+expand admission. The next layer is privacy-safe unresolved API/opcode
+diagnostics across a larger corpus, followed by a fourth measured source that
+expands preferences or custom image requests without weakening exact byte/
+signer/admission checks. Dynamic/network-backed filter lists also remain open. The longer tail remains
 additional Jsoup DOM behavior, string/collection overloads, broader
 serialization, preferences, and Android context/UI shims. A class appearing in
 the analyzer's
@@ -291,8 +307,9 @@ The target is a signature-aware bridge from `HttpSource`, `SManga`, `SChapter`,
 The exact BatCave, Kawii Manga, and MangaMelon profiles implement the currently measured
 subset with one actor per source owning its mutable interpreter and
 source-scoped transport. The app can construct any of the three profiles from a restored
-admission, but automatic profile admission beyond the exact catalog and the
-remaining APIs are still M3 work. Per-source network clients must own
+admission. Their shared structural plan is derived from the authenticated APK
+instead of copied into each profile, but automatic profile admission beyond the
+exact catalog and the remaining APIs are still M3 work. Per-source network clients must own
 rate limits, cookies, and redacted tracing. The first pinned end-to-end adapter
 is tracked in
 [GitHub issue #2](https://github.com/taizaki69/Kami/issues/2).
@@ -316,6 +333,12 @@ array-size, host-collection-size, and cancellation limits. Native host calls
   Extracted JSON is byte-capped before parsing and independently bounded by
   decoded nodes, depth, members, key/string size, and collection capacity.
 
+The structural inspector is deliberately outside the trust decision. Its
+public result omits filesystem paths, URLs, signer material, and source-returned
+values; a plan only says that the bounded parser recognized a currently
+supported shape. Unknown bytes cannot reach `ExtensionSourceFactory` or
+`SourceRegistry` from that result.
+
 Checksums establish corruption detection, not publisher identity. The completed
 signer gate verifies v1/v2/v3 signatures and APK content digests, normalizes
 certificate identities exactly as Mihon does, verifies v3 rotation lineage, and
@@ -331,27 +354,31 @@ compatibility.
 
 ## Verification
 
-`MihonCompatKit` currently has 182 passing tests locally on Windows/Swift 6.3.3.
-They include 6 focused signer regressions, 21 pinned real-extension source/execution paths,
+`MihonCompatKit` currently has 185 passing tests locally on Windows/Swift 6.3.3.
+They include 6 focused signer regressions, 21 pinned real-extension source/
+execution paths, 3 deterministic structural-plan regressions,
 7 focused HTML/parser-limit regressions, Java URL-encoding and bounded Kotlin
 string/collection-helper
 regressions, generated chapter/page JSON success/failure paths, and 4 focused
 async interpreter/transport regressions, plus 3 BatCave adapter/tamper/
 concurrency regressions and complete Kawii/MangaMelon profile regressions,
 alongside the existing parser, bytecode verifier, request-model, repository,
-and compression coverage. KamiCore has 9 portable Windows tests; macOS CI runs
-all 20, including Browse feed/search routing, SQLite signer persistence,
+and compression coverage. KamiCore has 12 portable Windows tests; macOS CI runs
+all 23, including reader settings and image-pipeline boundaries, Browse feed/
+search routing, SQLite signer persistence,
 repository-key pinning, install/update and legacy confirmation, exact-byte
 restore/factory rejection, enabled-state preservation, and downloaded registry
 replacement/removal. Swift CI verifies the SHA-256-locked APK corpus before
 running it.
 
-Exact implementation commit `ad2b118` passes
-[Swift CI 32676159196](https://github.com/taizaki69/Kami/actions/runs/32676159196),
-[iOS Build 32676159129](https://github.com/taizaki69/Kami/actions/runs/32676159129),
-and [IPA Package 32676159183](https://github.com/taizaki69/Kami/actions/runs/32676159183).
-Those runs cover the 182-test compatibility suite, optimized CLI build, 20
-KamiCore tests, Simulator/device compilation, and unsigned IPA artifact.
+Exact implementation commit `c122193` passes
+[Swift CI 32680137538](https://github.com/taizaki69/Kami/actions/runs/32680137538),
+[iOS Build 32680137584](https://github.com/taizaki69/Kami/actions/runs/32680137584),
+and [IPA Package 32680137545](https://github.com/taizaki69/Kami/actions/runs/32680137545).
+Those runs cover the 185-test compatibility suite, optimized CLI build, 23
+KamiCore tests, Simulator/device compilation, and unsigned IPA artifact. The
+iOS build log contains no warning lines after adding the complete iPad
+orientation set.
 
 The compatibility matrix records the exact versions, hashes, and methods. New
 runtime behavior is complete only when it has a focused regression test and,

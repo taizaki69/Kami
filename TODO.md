@@ -16,7 +16,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       external-list indirection — validated against live Keiyoushi index
       (1372 extensions parsed)
 - [x] Backup reader for legacy (zlib) `.tachibk` + proto schema decode
-- [x] `compat-audit` CLI (inspect/missing/index/methods/disasm) — run on 5 real APKs
+- [x] `compat-audit` CLI (inspect/missing/index/methods/disasm/opcodes/plan) —
+      deterministic file and directory inspection, run on the locked corpus
 
 ## P0 — App foundation
 
@@ -95,6 +96,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       stable metadata/wrappers are derived from exact admitted APKs without
       R8-private worker mappings; MangaMelon 1.6.1 proves full core operations
       and static filtered search while preserving admission/source-ID gates
+- [x] Bounded structural execution-plan inspection: shared exact-runtime/CLI
+      discovery checks manifest identity, supported lib version, single-source
+      and single-DEX shape, absence of native `.so` entries, entry placement,
+      and stable public wrappers without executing or admitting unknown APKs;
+      all three current lib 1.6 specimens produce deterministic plans while
+      legacy lib 1.4 specimens remain explicit blockers
 - [ ] Expand beyond the exact three-profile catalog with a fourth current
       extension that measures preferences or a custom image-request override
 - [ ] Privacy-safe unresolved API/opcode telemetry and exportable compatibility

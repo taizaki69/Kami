@@ -19,7 +19,8 @@ work was recovered, completed, verified, and pushed.
   Do not add a project license without the creator's explicit decision; see
   `LICENSES.md` and issue #5.
 - Default branch: `main`
-- Current code/test checkpoint: `6f6387e2707df51969c837a01f97388d07dc7331`
+- Current code/test checkpoint: `c1221935f25c7edd01b9efdc5ec794cf22454c8c`
+- Shared structural execution-plan baseline: `c1221935f25c7edd01b9efdc5ec794cf22454c8c`
 - Native daily-reader foundation baseline: `6f6387e2707df51969c837a01f97388d07dc7331`
 - User-facing filtered Browse baseline: `ad2b11869b1256ee7f1b7421c1ea66a78d367063`
 - Third current filtered-profile baseline: `d4c036ddf109277fa6ec38d13beac8f6b52da09b`
@@ -60,6 +61,35 @@ and contains documentation only.
 
 Stop state on 2026-08-23 (America/Lima):
 
+- Commit `c122193` is pushed to `main`. A reusable
+  `InterpretedExtensionPlanInspector` now performs bounded, non-executing
+  manifest/ZIP/DEX discovery shared by the exact runtime and
+  `compat-audit plan`. It produces either a deterministic lib 1.6 execution
+  structure or stable blockers for invalid identity, factories, unsupported
+  libraries, missing/ambiguous/multiple DEX, native `.so` entries, entry-class
+  placement, and stable public-wrapper discovery.
+- A structural plan is deliberately not signer trust, persisted admission,
+  catalog membership, source-ID authority, or execution proof. The existing
+  three-entry exact catalog remains fail-closed. BatCave, Kawii Manga, and
+  MangaMelon produce repeatable plans; Akuma and MangaDex remain explicit lib
+  1.4 blockers instead of being guessed. The exact profiles now consume the
+  shared plan only after their hash/signature/manifest/catalog gates.
+- The CLI accepts one APK or a directory in deterministic filename order. It
+  continues reporting later artifacts after malformed entries and returns a
+  failing final status if any could not be inspected. The full local corpus
+  audit therefore reports all three current candidates, both legacy blockers,
+  the unrelated AOSP non-extension/native-library shapes, and the intentionally
+  malformed fixture.
+- Local verification for `c122193` passes all 185 MihonCompatKit and 12
+  portable KamiCore tests plus the optimized Windows `compat-audit` build. Its
+  exact-head workflows pass:
+  [Swift CI 32680137538](https://github.com/taizaki69/Kami/actions/runs/32680137538)
+  runs 185 MihonCompatKit and 23 macOS KamiCore tests plus the optimized CLI,
+  [iOS Build 32680137584](https://github.com/taizaki69/Kami/actions/runs/32680137584)
+  compiles Simulator and unsigned device targets with zero warning lines, and
+  [IPA Package 32680137545](https://github.com/taizaki69/Kami/actions/runs/32680137545)
+  uploads the unsigned IPA. The added upside-down portrait orientation removes
+  the earlier iPad multitasking warning without forcing full-screen mode.
 - Commit `6f6387e` is pushed to `main`. The native reader now has persistent
   left-to-right, right-to-left, and continuous webtoon modes; direction-aware
   tap zones; paged double-tap/pinch zoom and pan; configurable background,
@@ -443,10 +473,11 @@ At the implementation baseline:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 182 Swift tests passed locally on Windows/Swift 6.3.3, including 6 APK-signature regressions and full Kawii/MangaMelon profiles |
+| MihonCompatKit | 185 Swift tests passed locally on Windows/Swift 6.3.3, including 6 APK-signature regressions, 3 structural-plan regressions, and full Kawii/MangaMelon profiles |
 | KamiCore | 12 portable tests passed locally on Windows/Swift 6.3.3; all 23 tests passed on macOS, including reader settings/prefetch, exact image headers, in-flight deduplication/cache, error limits, Browse routing, SQLite persistence, install/restore/factory, update policy, and registry lifecycle coverage |
 | Optimized package builds | Windows release builds passed for both MihonCompatKit/`compat-audit.exe` and KamiCore |
 | Real APK constructors | Akuma, MangaDex, BatCave, Kawii Manga, and MangaMelon passed |
+| Structural execution plans | BatCave, Kawii Manga, and MangaMelon produce deterministic single-DEX lib 1.6 plans; Akuma/MangaDex report lib 1.4 blockers; malformed input throws; full CLI batches continue after per-file errors and fail at the end |
 | Structural verifier | 10 focused regressions cover instruction geometry, branch/fallthrough boundaries, R8's unreachable alignment NOP, and aligned, bounded, correctly typed payloads and switch targets |
 | Exception/control verifier | 13 focused regressions cover strict try/catch decoding, resolved `Throwable` validation, typed handler state/execution, and AOSP branch/result/exception-entry rules |
 | Register dataflow verifier | 21 focused regressions cover dead-code bounds, parameter seeding, common-supertype joins, polymorphic constants, exact primitive/wide/reference assignments, array covariance, result/invoke types, wide-pair clobbering, exception edges, and constructor/uninitialized-object state |
@@ -466,13 +497,13 @@ At the implementation baseline:
 | APK signer verification | 6 focused regressions cover real Keiyoushi v2, AOSP v1/v3 and verified rotation, content/signature tampering, unsigned input, fingerprint normalization, and scheme stripping |
 | Persisted extension admission | 3 focused macOS test methods cover repository/user trust, unrelated-signer rejection, declared source-ID capability registration, verified signer rotation, and downgrade/same-version replacement rejection |
 | Install/restore/source factory | 3 macOS install tests plus 5 portable factory tests cover repository-key install, explicit legacy confirmation, cancellation, startup restoration, exact-file replacement rejection, declared source-ID enforcement, real BatCave/MangaMelon construction, and refusal to guess an unmeasured profile |
-| Swift CI | Exact implementation head `6f6387e` [run 32678304601](https://github.com/taizaki69/Kami/actions/runs/32678304601) passed 182 MihonCompatKit tests, optimized CLI build, 23 KamiCore tests, and artifact upload |
-| iOS Simulator and unsigned device builds | Exact implementation head `6f6387e` [run 32678304615](https://github.com/taizaki69/Kami/actions/runs/32678304615) passed both targets |
-| Unsigned IPA packaging | Exact implementation head `6f6387e` [run 32678304614](https://github.com/taizaki69/Kami/actions/runs/32678304614) passed and uploaded `Kami-unsigned-ipa` |
-| Repository integrity | clean worktree and `git fsck --full` passed |
+| Swift CI | Exact implementation head `c122193` [run 32680137538](https://github.com/taizaki69/Kami/actions/runs/32680137538) passed 185 MihonCompatKit tests, optimized CLI build, 23 KamiCore tests, and artifact upload |
+| iOS Simulator and unsigned device builds | Exact implementation head `c122193` [run 32680137584](https://github.com/taizaki69/Kami/actions/runs/32680137584) passed both targets with zero warning lines |
+| Unsigned IPA packaging | Exact implementation head `c122193` [run 32680137545](https://github.com/taizaki69/Kami/actions/runs/32680137545) passed and uploaded `Kami-unsigned-ipa` |
+| Repository integrity | implementation worktree was clean after push; staged and working diffs passed `git diff --check`; prior full `git fsck --full` found no corruption |
 
 The exact-head public-repository runs validate every implementation checkpoint
-through `6f6387e`, including all three app-facing source profiles,
+through `c122193`, including shared non-executing plan discovery, all three app-facing source profiles,
 signer-authenticated admission gate, durable install/restore flow, exact-byte
 factory, source selection UI, filtered Browse, source registration, and the
 native reader foundation. They produced both `compat-audit` and
@@ -480,7 +511,25 @@ native reader foundation. They produced both `compat-audit` and
 
 ## What the latest continuation completed
 
-Commit `6f6387e` establishes the first bounded daily-driver reader foundation:
+Commit `c122193` establishes the first shared structural-plan seam:
+
+- `InterpretedExtensionPlanInspector` turns bounded manifest/ZIP/DEX facts into
+  either a deterministic `InterpretedExtensionExecutionPlan` or capability-
+  oriented blockers without DEX execution or trust side effects. The exact
+  profiles and diagnostic CLI now use the same entry/wrapper discovery.
+- The inspector requires the current single-source, single-DEX lib 1.6 shape,
+  rejects source factories and every embedded `.so`, and never treats a plan as
+  admission or operation-level proof. The exact three-profile runtime catalog
+  and persisted signer/source-ID gates are unchanged.
+- `compat-audit plan` supports bounded single-file and deterministic directory
+  reports. Per-file parse failures no longer hide later corpus results; the
+  final exit remains nonzero when any artifact is malformed.
+- Three focused regressions bring MihonCompatKit to 185 tests. All local tests,
+  the optimized Windows CLI, both Xcode destinations, the unsigned IPA, and all
+  three exact-head workflows pass. The same checkpoint also supplies the full
+  iPad orientation set required for multitasking without a build warning.
+
+Earlier commit `6f6387e` establishes the first bounded daily-driver reader foundation:
 
 - Persistent LTR, RTL, and webtoon experiences share progress, history,
   keep-awake restoration, settings, chrome, retries, and a tested prefetch
@@ -1019,6 +1068,10 @@ Proven today:
 - Real store-index parsing for protobuf and legacy JSON formats.
 - Bounded APK archive, manifest, and DEX structural parsing.
 - Compatibility analysis and the `compat-audit` CLI.
+- Deterministic, non-executing structural plans for the three current lib 1.6
+  specimens, explicit blockers for legacy/unsupported shapes, and directory
+  reporting that preserves later results after per-file errors. This is shape
+  discovery only, not authentication, admission, or runtime proof.
 - Exact execution of the pinned constructors/getters listed above and
   BatCave's interpreted popular, paginated text-search, latest-updates, and core
   details plus combined chapter-update and page-list paths through exact request
@@ -1055,8 +1108,9 @@ Not proven or implemented:
   or a measured custom reader image-request override.
 - Broad Jsoup coverage beyond the measured subset, kotlinx serialization beyond
   the bounded generated encoder/decoder slice,
-  persistent source preferences and cookies, rate limiting, dynamic source
-  profile discovery, or WebView challenge handling. The current cookie jar is
+  persistent source preferences and cookies, rate limiting, automatic complete
+  execution-plan generation/admission beyond the bounded structural candidate,
+  or WebView challenge handling. The current cookie jar is
   source-isolated but in memory.
 - Full DEX opcode coverage or complete hierarchy behavior when class data leaves
   the parsed DEX and bounded host graph. Structural
@@ -1127,38 +1181,44 @@ Address these before treating arbitrary downloaded extensions as safe.
 | P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining external hierarchy and super/default resolution, opcode, and differential semantics work |
 | Completed | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | Exact pinned BatCave profile completed at `3708aa1`; general compatibility remains separate work |
 | Completed | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | v1/v2/v3 verification and persisted admission completed at `a902d06`; the later install/restore/factory product path is complete at `4d42def` |
-| Diagnostics | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Deterministic, redacted unresolved-surface reports |
+| Diagnostics (partial) | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Structural-plan blockers are deterministic and privacy-safe at `c122193`; unresolved API/opcode aggregation and export remain |
 | Distribution | [#5 Choose Kami's distribution and licensing model](https://github.com/taizaki69/Kami/issues/5) | Preserve all options; do not add a project license without an explicit owner decision |
 
 The rest of the product backlog is in `TODO.md`.
 
 ## Recommended next implementation sequence
 
-1. Turn authenticated APK metadata and stable public wrapper discovery into a
-   reusable execution-plan generator. Validate each generated plan against an
-   exact corpus artifact before admission; do not infer R8-private workers or
-   execute an unknown artifact heuristically. This is the path from three
-   specimens to a shared compatibility runtime rather than manual source ports.
-2. Add issue #4's deterministic, redacted unresolved API/opcode report and a
-   corpus batch runner. Use those reports to prioritize shared Kotlin/Java/
-   Mihon API families by how many extensions they unlock.
-3. Select a fourth current extension that exercises preferences or a custom
-   image-request override, then use it as evidence for shared runtime APIs and
-   safe runtime-to-reader cookie continuity. Preserve exact-byte admission,
-   declared source-ID gates, and the no-native-code rule.
-4. Continue issue #1 with broader external hierarchy and super/default
+1. Extend the completed structural-plan audit with issue #4's deterministic,
+   redacted unresolved API/opcode report and an aggregate corpus summary. Keep
+   paths, URLs, signer material, source-returned data, and private extension
+   strings out of exported diagnostics. Rank shared Kotlin/Java/Mihon API
+   families by how many current extensions they unlock.
+2. Lock a broader representative current lib 1.6 corpus by exact release URL
+   and SHA-256, run non-executing plan/ABI reports over it, and record candidate
+   versus blocker counts. Do not treat corpus presence or a structural plan as
+   signer trust, admission, or execution proof.
+3. Select a fourth current extension from that evidence that exercises
+   preferences or a custom image-request override, then use it as evidence for
+   shared runtime APIs and safe runtime-to-reader cookie continuity. Preserve
+   exact-byte admission, declared source-ID gates, and the no-native-code rule.
+4. After the fourth exact end-to-end proof, generate exact catalog records from
+   authenticated structural plans and measured capability evidence instead of
+   hand-copying entry/wrapper structure. Unknown artifacts must still fail
+   closed until their signer, declared source IDs, required host surface, and
+   core operations have independently passed the admission policy.
+5. Continue issue #1 with broader external hierarchy and super/default
    resolution, remaining opcodes, and differential AOSP coverage. Code-item
    geometry, strict try/catch decoding and resolved `Throwable` validation,
    branch/move-result/move-exception rules, bounded exact
    primitive/constructor/reference dataflow, runtime casts/catches,
    receiver-directed virtual/interface-default lookup, lexical parsed-DEX
    `invoke-super`, and invoke word-count/kind checks are already in.
-5. Complete reader chapter transitions and source-cookie sharing, then add
+6. Complete reader chapter transitions and source-cookie sharing, then add
    iPad spreads, fit/crop controls, memory-pressure purging, and download-cache
    integration without weakening image limits.
-6. Add aggregate parser/runtime resource accounting and streaming or
+7. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
-7. Profile the reader on a physical iPhone/iPad with large webtoon chapters and
+8. Profile the reader on a physical iPhone/iPad with large webtoon chapters and
    smoke-test a user-signed build; CI intentionally remains unsigned.
 
 Every new runtime capability should arrive with a synthetic malformed fixture,
@@ -1175,6 +1235,7 @@ an exact real-APK assertion when reachable, and CI coverage.
 | APK and archive parsing | `Packages/MihonCompatKit/Sources/MihonCompatKit/APK/` |
 | DEX parser | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/DexFile.swift` |
 | Interpreter | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexInterpreter.swift` |
+| Structural plan discovery | `Packages/MihonCompatKit/Sources/MihonCompatKit/Sources/InterpretedExtensionPlan.swift`, `Packages/MihonCompatKit/Tests/MihonCompatKitTests/InterpretedExtensionPlanTests.swift`, `Packages/MihonCompatKit/Sources/CompatAudit/AuditMain.swift` |
 | Pinned app-facing source | `Packages/MihonCompatKit/Sources/MihonCompatKit/Sources/PinnedInterpretedSource.swift` |
 | Method resolution | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexMethodResolver.swift` |
 | Register/invoke verifier | `Packages/MihonCompatKit/Sources/MihonCompatKit/Dex/Runtime/DexRegisterVerifier.swift` |

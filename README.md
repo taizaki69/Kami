@@ -85,6 +85,16 @@ re-authenticates the exact immutable buffer it executes, and refuses undeclared
 source IDs or unsupported profiles. Enabled downloaded sources appear beside
 the native MangaDex source in Browse.
 
+The first reusable profile-discovery seam is now shared by that exact runtime
+and `compat-audit plan`. Without executing DEX or granting trust, the bounded
+inspector either produces a deterministic lib 1.6 structural plan or explicit
+blockers for manifest identity, factories, DEX layout, native `.so` entries,
+entry-class placement, and stable public wrappers. The three current profiles
+produce the same plans on repeated inspection; the two legacy lib 1.4 corpus
+artifacts are reported unsupported instead of guessed. A structural plan is
+only a description: it is not signer authentication, catalog admission, or
+proof that an extension's operations will execute.
+
 Browse now renders the complete app-facing Mihon filter hierarchy: headers,
 separators, selects, text fields, checkboxes, tri-state controls, nested groups,
 and sortable fields. Editing is transactional, Apply can run a filter-only
@@ -104,12 +114,12 @@ webtoon pages release decoded images outside the lazy viewport. Runtime-to-
 reader cookie continuity, dual-page spreads, and physical-device performance
 profiling remain open; see `docs/READER.md`.
 
-This is still not a claim of broad extension execution: the runtime profile
-catalog currently recognizes only the exact measured BatCave 1.6.9, Kawii
-Manga 1.6.1, and MangaMelon 1.6.1 builds. Automatic profile admission beyond
-that exact catalog, dynamic/network-backed filter lists, preferences, a
-measured extension-defined custom image-request override, and much of the
-Kotlin/Java surface remain open
+This is still not a claim of broad extension execution: Kami can identify a
+bounded structural candidate, but the runtime profile catalog currently
+recognizes only the exact measured BatCave 1.6.9, Kawii Manga 1.6.1, and
+MangaMelon 1.6.1 builds. Automatic profile admission beyond that exact catalog,
+dynamic/network-backed filter lists, preferences, a measured extension-defined
+custom image-request override, and much of the Kotlin/Java surface remain open
 (`docs/EXTENSION_RUNTIME.md`). Kami starts
 with native MangaDex and can additionally restore a supported, authenticated
 downloaded source.
@@ -144,16 +154,16 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 182 tests run on Windows with Swift 6.3, together
+The compatibility kit and all 185 tests run on Windows with Swift 6.3, together
 with 12 portable KamiCore tests (`scripts/windows_dev_test.bat`). GitHub Actions
 runs the pinned real-APK suite plus all 23 macOS KamiCore tests, compiles both
 Simulator and unsigned device targets, and publishes an unsigned IPA artifact.
-Exact reader implementation commit `6f6387e` passed
-[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32678304601),
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32678304615), and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32678304614).
-The `compat-audit` CLI produced the measured compatibility matrix from the
-locked corpus.
+Exact structural-plan implementation commit `c122193` passed
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32680137538),
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32680137584), and
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32680137545).
+The `compat-audit` CLI produces both the measured compatibility matrix and
+deterministic per-APK structural-plan blockers from the locked corpus.
 
 ## Non-goals / legality
 

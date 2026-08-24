@@ -29,7 +29,8 @@ MihonCompatKit, never in the app.
 │  APK: ZipArchive · Inflate · BinaryXML ·     │
 │       APKSignatureVerifier                   │
 │  Dex: DexFile + bounded M1 interpreter       │
-│  Sources: measured interpreted profiles      │
+│  Sources: structural plan inspector +        │
+│           measured interpreted profiles      │
 │  Repository: index.pb/index.min.json client  │
 │  Backup: TachibkReader                       │
 │  Analyzer: ExtensionAnalyzer + compat-audit  │
@@ -74,6 +75,14 @@ MihonCompatKit, never in the app.
   declared by the repository. Measured profiles route stable public source API
   wrappers from either the generated entry class or its local superclass chain;
   startup failures and unmeasured profiles are disabled rather than run.
+- **Structural plans are descriptions, never capabilities.**
+  `InterpretedExtensionPlanInspector` performs bounded, deterministic manifest,
+  ZIP, and DEX discovery without executing code or establishing signer trust.
+  It accepts only the currently measured single-source lib 1.6 shape, rejects
+  factories, multidex and native `.so` entries, and reports stable blockers.
+  The exact catalog consumes the same plan only after byte/signature/manifest
+  authentication; `compat-audit` may inspect untrusted bytes but cannot admit
+  or execute them. Automatic admission must remain a separate explicit gate.
 - **Untrusted code boundary.** Extension APKs are data until the interpreter
   runs them; even then they only reach iOS capabilities through explicit
   bridges (HTTP, preferences, cookies, WebView) with budgets and isolation

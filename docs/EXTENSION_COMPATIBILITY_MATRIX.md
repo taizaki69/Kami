@@ -20,20 +20,27 @@ is no compatibility claim.
 | ZIP + DEFLATE | Working | STORE/DEFLATE real APK entries parse with size limits, exact decoded size, and CRC-32 verification |
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
 | DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
+| Structural execution-plan inspection | Working for the bounded single-source lib 1.6 shape | Non-executing inspection deterministically finds the entry and stable public wrapper for BatCave, Kawii Manga, and MangaMelon; legacy lib 1.4, factories, multidex, native `.so`, ambiguous/missing DEX, invalid identity, and missing wrapper shapes are explicit blockers. A plan establishes no signer trust, catalog admission, or execution proof |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| DEX execution | Partial M1/M2 working | The 182-test suite includes 21 exact pinned-APK source/execution paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, and serialized adapter ownership are checked |
+| DEX execution | Partial M1/M2 working | The 185-test suite includes 21 exact pinned-APK source/execution paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, and serialized adapter ownership are checked |
 | Admission restoration and source factory | Working for exact measured profiles | Startup re-reads the enabled installed APK, rechecks hash/signature/signer history/user trust/manifest, and gives the sole factory a fresh capability; the factory repeats exact-byte authentication, rejects undeclared source IDs, and refuses unmeasured profiles |
 | End-to-end source operations | Working for three exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, and MangaMelon 1.6.1 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon adds exact static `Sort`/`Select` filtered search. BatCave additionally proves default image requests and the installed-source registry path. Automatic catalog expansion, dynamic filters, preferences, custom image requests, and live-site availability remain open |
 
 ## Per-extension execution
 
-| Extension | Version | SHA-256 | Loads | Constructor | Metadata methods | Popular | Search | Details | Chapters | Pages |
-|---|---:|---|:---:|:---:|---|---|:---:|:---:|:---:|:---:|
-| MangaDex (`all.mangadex`) | 1.4.212 | `543dcf6a…306fa3` | ✅ | ✅ | — | — | — | — | — | — |
-| Akuma (`all.akuma`) | 1.4.10 | `9f5e744e…ba39a` | ✅ | ✅ | — | — | — | — | — | — |
-| BatCave (`en.batcave`) | 1.6.9 | `f5338a90…34fab6` | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ paginated text query | ✅ core fields | ✅ combined update | ✅ exact JSON POST + URLs |
-| Kawii Manga (`ar.kawiimanga`) | 1.6.1 | `9e6110b8…dd52a` | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ text query | ✅ core fields | ✅ combined update | ✅ exact JSON GET + URLs |
-| MangaMelon (`en.mangamelon`) | 1.6.1 | `aedbd5ba…0d9aa` | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ text + `Sort`/`Select` filters | ✅ core fields | ✅ combined update + memo | ✅ exact Base64 form POST + ordered URLs |
+| Extension | Version | SHA-256 | Structural plan | Loads | Constructor | Metadata methods | Popular | Search | Details | Chapters | Pages |
+|---|---:|---|---|:---:|:---:|---|---|:---:|:---:|:---:|:---:|
+| MangaDex (`all.mangadex`) | 1.4.212 | `543dcf6a…306fa3` | blocked: lib 1.4 | ✅ | ✅ | — | — | — | — | — | — |
+| Akuma (`all.akuma`) | 1.4.10 | `9f5e744e…ba39a` | blocked: lib 1.4 | ✅ | ✅ | — | — | — | — | — | — |
+| BatCave (`en.batcave`) | 1.6.9 | `f5338a90…34fab6` | candidate | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ paginated text query | ✅ core fields | ✅ combined update | ✅ exact JSON POST + URLs |
+| Kawii Manga (`ar.kawiimanga`) | 1.6.1 | `9e6110b8…dd52a` | candidate | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ text query | ✅ core fields | ✅ combined update | ✅ exact JSON GET + URLs |
+| MangaMelon (`en.mangamelon`) | 1.6.1 | `aedbd5ba…0d9aa` | candidate | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ text + `Sort`/`Select` filters | ✅ core fields | ✅ combined update + memo | ✅ exact Base64 form POST + ordered URLs |
+
+“Candidate” in this table is intentionally weaker than every execution column.
+It means only that bounded, non-executing inspection found the supported lib 1.6
+single-source structure. The legacy constructors below remain useful shallow VM
+fixtures, but the plan builder does not pretend their lib 1.4 API shape is the
+current stable-wrapper contract.
 
 All five constructors execute their real no-argument DEX paths and return
 objects of the declared entry type. BatCave's popular path additionally proves
@@ -92,7 +99,7 @@ fixtures; dynamic/network-backed filter lists remain unclaimed.
 
 `PinnedInterpretedSource` accepts only the locked BatCave, Kawii, or MangaMelon bytes after
 exact SHA-256, APK signer fingerprint, manifest package/lib/entry-class, and
-DEX class checks. For downloaded execution, `ExtensionAdmissionService.restore`
+shared structural-plan checks. For downloaded execution, `ExtensionAdmissionService.restore`
 first re-authenticates the enabled durable installation and
 `ExtensionSourceFactory` rechecks the exact immutable bytes before selecting
 this profile. It owns one
@@ -137,20 +144,26 @@ tests, not the heuristic percentage, are the acceptance signal.
 
 ## Test evidence
 
-- 182/182 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+- 185/185 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present.
-- Exact implementation commit `ad2b118` passes
-  [Swift CI 32676159196](https://github.com/taizaki69/Kami/actions/runs/32676159196),
-  [iOS Build 32676159129](https://github.com/taizaki69/Kami/actions/runs/32676159129),
-  and [IPA Package 32676159183](https://github.com/taizaki69/Kami/actions/runs/32676159183).
+- Exact implementation commit `c122193` passes
+  [Swift CI 32680137538](https://github.com/taizaki69/Kami/actions/runs/32680137538),
+  [iOS Build 32680137584](https://github.com/taizaki69/Kami/actions/runs/32680137584),
+  and [IPA Package 32680137545](https://github.com/taizaki69/Kami/actions/runs/32680137545).
+- Three plan-inspection regressions prove deterministic current-profile plans,
+  explicit legacy lib 1.4 blockers, and malformed-APK failure. The optimized
+  CLI batch audit continues after malformed entries, reports every subsequent
+  artifact, and returns a nonzero final status.
 - Six verifier regressions cover five real Keiyoushi v2 APKs, AOSP v1 and v3,
   verified certificate rotation, signed-content and signer-signature tampering,
-  unsigned input, fingerprint normalization, and v3-block stripping. Twenty
+  unsigned input, fingerprint normalization, and v3-block stripping. Twenty-three
   macOS KamiCore tests cover persisted repository/user trust, unrelated-signer
   rejection, source-ID capability admission, rotation-aware updates,
   downgrade/same-version replacement rejection, repository-key persistence,
   exact-file startup restoration, install confirmation, enabled state, and
-  Browse routing for popular/latest/text/filter-only requests.
+  Browse routing for popular/latest/text/filter-only requests, plus bounded
+  reader settings, prefetch, and image-pipeline behavior; 12 are portable on
+  Windows.
 - Twenty-one real-extension source/execution tests require exact successful values or exact typed
   boundaries. The BatCave popular, text-search, latest, details, and chapter
   and page tests require exact requests and parsed model fields; invalid
