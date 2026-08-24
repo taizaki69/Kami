@@ -120,7 +120,9 @@ public struct InterpretedExtensionPlanInspector: Sendable {
             blockers.append(.invalidManifestIdentity)
         }
         if !Self.supportedLibraryVersions.contains(manifest.extensionLibVersion ?? "") {
-            blockers.append(.unsupportedLibraryVersion(manifest.extensionLibVersion))
+            blockers.append(.unsupportedLibraryVersion(Self.safeLibraryVersion(
+                manifest.extensionLibVersion
+            )))
         }
         if manifest.resolvedSourceFactory != nil {
             blockers.append(.sourceFactoryUnsupported)
@@ -274,6 +276,17 @@ public struct InterpretedExtensionPlanInspector: Sendable {
                   }
               }) else { return nil }
         return "L" + className.replacingOccurrences(of: ".", with: "/") + ";"
+    }
+
+    private static func safeLibraryVersion(_ value: String?) -> String? {
+        guard let value, !value.isEmpty, value.utf8.count <= 32,
+              value.utf8.allSatisfy({ byte in
+                  (byte >= 0x30 && byte <= 0x39) ||
+                      (byte >= 0x41 && byte <= 0x5a) ||
+                      (byte >= 0x61 && byte <= 0x7a) ||
+                      byte == 0x2b || byte == 0x2d || byte == 0x2e || byte == 0x5f
+              }) else { return nil }
+        return value
     }
 
     /// R8 may rename implementation workers but the public source methods are

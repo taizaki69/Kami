@@ -53,7 +53,7 @@ public enum PinnedInterpretedSourceError: Error, Sendable, Equatable, LocalizedE
 /// The first app-facing DEX-backed source. Construction is deliberately limited
 /// to profiles compiled into Kami. Downloaded adapters use the separate,
 /// persisted `ExtensionAdmissionService` capability before registration.
-public struct PinnedInterpretedSource: KamiSource {
+public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
     public let id: Int64
     public let name: String
     public let language: String
@@ -62,6 +62,7 @@ public struct PinnedInterpretedSource: KamiSource {
 
     private let runtime: PinnedInterpretedRuntime
     private let filters: [SourceFilter]
+    private let compatibilityRecorder: InterpretedCompatibilityRecorder
 
     /// Loads the exact BatCave 1.6.9 artifact through the production transport.
     public static func batCave169(
@@ -143,10 +144,16 @@ public struct PinnedInterpretedSource: KamiSource {
         apkBytes: [UInt8],
         transport: any CompatHTTPTransport
     ) throws {
+        let compatibilityRecorder = InterpretedCompatibilityRecorder(
+            packageName: profile.packageName,
+            versionName: profile.versionName,
+            versionCode: profile.versionCode
+        )
         let runtime = try PinnedInterpretedRuntime(
             profile: profile,
             apkBytes: apkBytes,
-            transport: transport
+            transport: transport,
+            compatibilityRecorder: compatibilityRecorder
         )
         let metadata = runtime.metadata
         self.id = metadata.id
@@ -156,6 +163,7 @@ public struct PinnedInterpretedSource: KamiSource {
         self.baseURL = metadata.baseURL
         self.runtime = runtime
         self.filters = runtime.filters
+        self.compatibilityRecorder = compatibilityRecorder
     }
 
     public func getPopularManga(page: Int) async throws -> MangasPageCompat {
@@ -218,6 +226,10 @@ public struct PinnedInterpretedSource: KamiSource {
     }
 
     public func getFilterList() -> [SourceFilter] { filters }
+
+    public func compatibilityReport() -> InterpretedCompatibilityRuntimeReport {
+        compatibilityRecorder.report()
+    }
 }
 
 /// Exact runtime profiles currently proven against real APKs. This catalog is
@@ -376,6 +388,7 @@ private actor PinnedInterpretedRuntime {
     private let entryClassDescriptor: String
     private let sourceAPIWrapperDescriptor: String
     private let filterListValue: RVal?
+    private let compatibilityRecorder: InterpretedCompatibilityRecorder
     private var executing = false
     private var waiters: [Waiter] = []
     private var nextWaiterID: UInt64 = 0
@@ -383,7 +396,8 @@ private actor PinnedInterpretedRuntime {
     init(
         profile: PinnedInterpretedProfile,
         apkBytes: [UInt8],
-        transport: any CompatHTTPTransport
+        transport: any CompatHTTPTransport,
+        compatibilityRecorder: InterpretedCompatibilityRecorder
     ) throws {
         guard !apkBytes.isEmpty, apkBytes.count <= profile.maximumAPKBytes else {
             throw PinnedInterpretedSourceError.invalidAPKSize(profile: profile.identifier)
@@ -506,6 +520,7 @@ private actor PinnedInterpretedRuntime {
         self.entryClassDescriptor = entryClassDescriptor
         self.sourceAPIWrapperDescriptor = sourceAPIWrapperDescriptor
         self.filterListValue = filterListValue
+        self.compatibilityRecorder = compatibilityRecorder
         self.filters = filters
         self.metadata = PinnedInterpretedMetadata(
             id: id,
@@ -518,36 +533,46 @@ private actor PinnedInterpretedRuntime {
 
     func popular(page: Int) async throws -> MangasPageCompat {
         let page = try Self.pageNumber(page, operation: "popular manga")
-        try await acquire()
-        defer { release() }
-        try Task.checkCancellation()
-        let result = try await vm.callAsync(
-            classDescriptor: entryClassDescriptor,
-            method: StableInterpretedSourceAPI.popular.name,
-            prototype: StableInterpretedSourceAPI.popular.prototype,
-            args: [receiver, .int(page), .null]
-        )
-        guard let converted = HostBridge.mangasPageCompat(from: result) else {
-            throw PinnedInterpretedSourceError.unexpectedResult(operation: "popular manga")
+        do {
+            try await acquire()
+            defer { release() }
+            try Task.checkCancellation()
+            let result = try await vm.callAsync(
+                classDescriptor: entryClassDescriptor,
+                method: StableInterpretedSourceAPI.popular.name,
+                prototype: StableInterpretedSourceAPI.popular.prototype,
+                args: [receiver, .int(page), .null]
+            )
+            guard let converted = HostBridge.mangasPageCompat(from: result) else {
+                throw PinnedInterpretedSourceError.unexpectedResult(operation: "popular manga")
+            }
+            return converted
+        } catch {
+            compatibilityRecorder.record(stage: .popular, error: error)
+            throw error
         }
-        return converted
     }
 
     func latest(page: Int) async throws -> MangasPageCompat {
         let page = try Self.pageNumber(page, operation: "latest updates")
-        try await acquire()
-        defer { release() }
-        try Task.checkCancellation()
-        let result = try await vm.callAsync(
-            classDescriptor: entryClassDescriptor,
-            method: StableInterpretedSourceAPI.latest.name,
-            prototype: StableInterpretedSourceAPI.latest.prototype,
-            args: [receiver, .int(page), .null]
-        )
-        guard let converted = HostBridge.mangasPageCompat(from: result) else {
-            throw PinnedInterpretedSourceError.unexpectedResult(operation: "latest updates")
+        do {
+            try await acquire()
+            defer { release() }
+            try Task.checkCancellation()
+            let result = try await vm.callAsync(
+                classDescriptor: entryClassDescriptor,
+                method: StableInterpretedSourceAPI.latest.name,
+                prototype: StableInterpretedSourceAPI.latest.prototype,
+                args: [receiver, .int(page), .null]
+            )
+            guard let converted = HostBridge.mangasPageCompat(from: result) else {
+                throw PinnedInterpretedSourceError.unexpectedResult(operation: "latest updates")
+            }
+            return converted
+        } catch {
+            compatibilityRecorder.record(stage: .latest, error: error)
+            throw error
         }
-        return converted
     }
 
     func search(
@@ -556,33 +581,38 @@ private actor PinnedInterpretedRuntime {
         filters: [SourceFilter]
     ) async throws -> MangasPageCompat {
         let page = try Self.pageNumber(page, operation: "search")
-        try await acquire()
-        defer { release() }
-        try Task.checkCancellation()
-        let runtimeFilterValue: RVal
-        if let filterListValue {
-            guard HostBridge.applySourceFilters(filters, to: filterListValue) else {
-                throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
+        do {
+            try await acquire()
+            defer { release() }
+            try Task.checkCancellation()
+            let runtimeFilterValue: RVal
+            if let filterListValue {
+                guard HostBridge.applySourceFilters(filters, to: filterListValue) else {
+                    throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
+                }
+                runtimeFilterValue = filterListValue
+            } else {
+                guard filters.isEmpty else {
+                    throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
+                }
+                runtimeFilterValue = .null
             }
-            runtimeFilterValue = filterListValue
-        } else {
-            guard filters.isEmpty else {
-                throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
+            let result = try await vm.callAsync(
+                // Keiyoushi's stable public wrapper routes URL queries and then
+                // virtually dispatches to the extension's R8-renamed worker.
+                classDescriptor: sourceAPIWrapperDescriptor,
+                method: StableInterpretedSourceAPI.search.name,
+                prototype: StableInterpretedSourceAPI.search.prototype,
+                args: [receiver, .int(page), HostBridge.string(query), runtimeFilterValue, .null]
+            )
+            guard let converted = HostBridge.mangasPageCompat(from: result) else {
+                throw PinnedInterpretedSourceError.unexpectedResult(operation: "search")
             }
-            runtimeFilterValue = .null
+            return converted
+        } catch {
+            compatibilityRecorder.record(stage: .search, error: error)
+            throw error
         }
-        let result = try await vm.callAsync(
-            // Keiyoushi's stable public wrapper routes URL queries and then
-            // virtually dispatches to the extension's R8-renamed worker.
-            classDescriptor: sourceAPIWrapperDescriptor,
-            method: StableInterpretedSourceAPI.search.name,
-            prototype: StableInterpretedSourceAPI.search.prototype,
-            args: [receiver, .int(page), HostBridge.string(query), runtimeFilterValue, .null]
-        )
-        guard let converted = HostBridge.mangasPageCompat(from: result) else {
-            throw PinnedInterpretedSourceError.unexpectedResult(operation: "search")
-        }
-        return converted
     }
 
     func mangaUpdate(manga: SMangaCompat) async throws -> SMangaUpdateCompat {
@@ -591,28 +621,33 @@ private actor PinnedInterpretedRuntime {
               manga.title.utf8.count <= 4_096 else {
             throw PinnedInterpretedSourceError.invalidInput(operation: "manga update")
         }
-        try await acquire()
-        defer { release() }
-        try Task.checkCancellation()
-        let result = try await vm.callAsync(
-            // The inherited wrapper owns concurrency protection and initialized
-            // state, then virtually dispatches to the extension implementation.
-            classDescriptor: sourceAPIWrapperDescriptor,
-            method: StableInterpretedSourceAPI.mangaUpdate.name,
-            prototype: StableInterpretedSourceAPI.mangaUpdate.prototype,
-            args: [
-                receiver,
-                HostBridge.mangaValue(from: manga),
-                HostBridge.emptyListValue(),
-                .int(1),
-                .int(1),
-                .null,
-            ]
-        )
-        guard let converted = HostBridge.mangaUpdateCompat(from: result) else {
-            throw PinnedInterpretedSourceError.unexpectedResult(operation: "manga update")
+        do {
+            try await acquire()
+            defer { release() }
+            try Task.checkCancellation()
+            let result = try await vm.callAsync(
+                // The inherited wrapper owns concurrency protection and initialized
+                // state, then virtually dispatches to the extension implementation.
+                classDescriptor: sourceAPIWrapperDescriptor,
+                method: StableInterpretedSourceAPI.mangaUpdate.name,
+                prototype: StableInterpretedSourceAPI.mangaUpdate.prototype,
+                args: [
+                    receiver,
+                    HostBridge.mangaValue(from: manga),
+                    HostBridge.emptyListValue(),
+                    .int(1),
+                    .int(1),
+                    .null,
+                ]
+            )
+            guard let converted = HostBridge.mangaUpdateCompat(from: result) else {
+                throw PinnedInterpretedSourceError.unexpectedResult(operation: "manga update")
+            }
+            return converted
+        } catch {
+            compatibilityRecorder.record(stage: .mangaUpdate, error: error)
+            throw error
         }
-        return converted
     }
 
     func pages(chapter: SChapterCompat) async throws -> [PageCompat] {
@@ -621,19 +656,24 @@ private actor PinnedInterpretedRuntime {
               chapter.name.utf8.count <= 4_096 else {
             throw PinnedInterpretedSourceError.invalidInput(operation: "page list")
         }
-        try await acquire()
-        defer { release() }
-        try Task.checkCancellation()
-        let result = try await vm.callAsync(
-            classDescriptor: entryClassDescriptor,
-            method: StableInterpretedSourceAPI.pages.name,
-            prototype: StableInterpretedSourceAPI.pages.prototype,
-            args: [receiver, HostBridge.chapterValue(from: chapter), .null]
-        )
-        guard let converted = HostBridge.pagesCompat(from: result) else {
-            throw PinnedInterpretedSourceError.unexpectedResult(operation: "page list")
+        do {
+            try await acquire()
+            defer { release() }
+            try Task.checkCancellation()
+            let result = try await vm.callAsync(
+                classDescriptor: entryClassDescriptor,
+                method: StableInterpretedSourceAPI.pages.name,
+                prototype: StableInterpretedSourceAPI.pages.prototype,
+                args: [receiver, HostBridge.chapterValue(from: chapter), .null]
+            )
+            guard let converted = HostBridge.pagesCompat(from: result) else {
+                throw PinnedInterpretedSourceError.unexpectedResult(operation: "page list")
+            }
+            return converted
+        } catch {
+            compatibilityRecorder.record(stage: .pages, error: error)
+            throw error
         }
-        return converted
     }
 
     private func acquire() async throws {

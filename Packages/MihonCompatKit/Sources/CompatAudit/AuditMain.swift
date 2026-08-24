@@ -13,6 +13,7 @@ import MihonCompatKit
 ///   compat-audit methods <path.apk> [q]   Exact first-DEX method references.
 ///   compat-audit opcodes <apk-or-dir>      Exact all-DEX opcode inventory.
 ///   compat-audit plan <apk-or-dir>         Structural execution-plan blockers.
+///   compat-audit gaps <apk-or-dir>         Redacted static gap/corpus report.
 ///
 /// Works on any Swift host (Windows/Linux/macOS); pure Foundation.
 
@@ -30,6 +31,7 @@ struct CompatAudit {
               compat-audit methods <path.apk> [text-or-decimal-index]
               compat-audit opcodes <apk-or-directory>
               compat-audit plan <apk-or-directory>
+              compat-audit gaps <apk-or-directory>
             """)
             exit(64)
         }
@@ -79,6 +81,9 @@ struct CompatAudit {
 
         case "plan":
             executionPlanReport(at: args[2])
+
+        case "gaps":
+            compatibilityGapReport(at: args[2])
 
         default:
             print("unknown subcommand \(args[1])")
@@ -243,6 +248,92 @@ struct CompatAudit {
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
         guard data.count == size else { throw CocoaError(.fileReadUnknown) }
         return [UInt8](data)
+    }
+
+    /// Produces a redirectable privacy-safe report. Artifact ordinals replace
+    /// filenames, and per-file failures are intentionally generic; only
+    /// manifest package/version plus DEX API/opcode identities are exported.
+    static func compatibilityGapReport(at path: String) {
+        do {
+            let urls = try opcodeInputURLs(at: path)
+            let auditor = InterpretedCompatibilityAudit()
+            var reports: [InterpretedCompatibilityStaticReport] = []
+            var encounteredErrors = 0
+
+            print("Kami static compatibility gaps v1")
+            print("artifacts: \(urls.count)")
+            for (index, url) in urls.enumerated() {
+                print("")
+                print("== artifact \(index + 1) ==")
+                do {
+                    let report = try auditor.analyze(apkBytes: boundedAPKBytes(at: url))
+                    reports.append(report)
+                    print("identity:            \(report.identity)")
+                    print("structural plan:     \(report.planStatus.isStructuralCandidate ? "candidate (not admitted or execution-proven)" : "blocked")")
+                    for blocker in report.planStatus.blockers {
+                        print("  blocker: \(blocker.summary)")
+                    }
+                    print("dex/code/instructions: \(report.dexCount)/\(report.codeMethodCount)/\(report.instructionCount)")
+                    print("unregistered invokes: \(report.unregisteredExternalInvocations.count) (prioritization only)")
+                    for finding in report.unregisteredExternalInvocations.prefix(50) {
+                        print("  \(finding.surface.summary) | invokes=\(finding.invocationCount) methods=\(finding.declaringMethodCount)")
+                    }
+                    if report.unregisteredExternalInvocations.count > 50 {
+                        print("  ... \(report.unregisteredExternalInvocations.count - 50) more")
+                    }
+                    if report.omittedExternalInvocationCount > 0 {
+                        print("  omitted invokes after unique-finding cap: \(report.omittedExternalInvocationCount)")
+                    }
+                    print("unsupported opcodes: \(report.unsupportedOpcodes.count)")
+                    for finding in report.unsupportedOpcodes {
+                        print(String(
+                            format: "  0x%02x %@ | instructions=%d methods=%d",
+                            finding.opcode,
+                            finding.name,
+                            finding.instructionCount,
+                            finding.declaringMethodCount
+                        ))
+                    }
+                } catch {
+                    encounteredErrors += 1
+                    print("error: malformed or unreadable artifact")
+                }
+            }
+
+            let aggregate = InterpretedCompatibilityAudit.aggregate(reports)
+            print("")
+            print("== aggregate ==")
+            print("analyzed/errors:     \(aggregate.extensionCount)/\(encounteredErrors)")
+            print("structural candidates: \(aggregate.structuralCandidateCount)")
+            print("plan blockers:       \(aggregate.planBlockers.count)")
+            for finding in aggregate.planBlockers {
+                print("  extensions=\(finding.extensionCount) | \(finding.blocker.summary)")
+            }
+            print("unregistered invokes: \(aggregate.unregisteredExternalInvocations.count) (ranked signal, not runtime proof)")
+            for finding in aggregate.unregisteredExternalInvocations.prefix(100) {
+                print("  extensions=\(finding.extensionCount) invokes=\(finding.invocationCount) | \(finding.surface.summary)")
+            }
+            if aggregate.unregisteredExternalInvocations.count > 100 {
+                print("  ... \(aggregate.unregisteredExternalInvocations.count - 100) more")
+            }
+            if aggregate.omittedExternalInvocationCount > 0 {
+                print("  omitted invokes after unique-finding caps: \(aggregate.omittedExternalInvocationCount)")
+            }
+            print("unsupported opcodes: \(aggregate.unsupportedOpcodes.count)")
+            for finding in aggregate.unsupportedOpcodes {
+                print(String(
+                    format: "  extensions=%d instructions=%d | 0x%02x %@",
+                    finding.extensionCount,
+                    finding.instructionCount,
+                    finding.opcode,
+                    finding.name
+                ))
+            }
+            if encounteredErrors > 0 { exit(70) }
+        } catch {
+            print("error: unable to enumerate bounded APK inputs")
+            exit(70)
+        }
     }
 
     static func opcodeInputURLs(at path: String) throws -> [URL] {

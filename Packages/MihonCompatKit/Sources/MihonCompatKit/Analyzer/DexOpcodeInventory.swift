@@ -173,7 +173,7 @@ public struct DexOpcodeInventory {
         return ordinal
     }
 
-    private static func codeMethods(
+    static func codeMethods(
         in dex: DexFile
     ) -> [(DexFile.ClassDef, DexFile.EncodedMethod, DexFile.MethodRef)] {
         var result: [(DexFile.ClassDef, DexFile.EncodedMethod, DexFile.MethodRef)] = []

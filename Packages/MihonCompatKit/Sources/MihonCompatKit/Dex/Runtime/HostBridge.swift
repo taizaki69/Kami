@@ -498,6 +498,23 @@ public final class HostBridge {
         )
     }
 
+    /// Static audit seam. This reveals only whether an exact method capability
+    /// is registered; it never invokes the capability or exposes its body.
+    func hasRegisteredMethod(
+        class descriptor: String,
+        _ methodName: String,
+        prototype: String,
+        isStatic: Bool
+    ) -> Bool {
+        let key = MethodKey(
+            classDescriptor: descriptor,
+            name: methodName,
+            prototype: prototype
+        )
+        return methods[key]?.isStatic == isStatic ||
+            asyncMethods[key]?.isStatic == isStatic
+    }
+
     private static func register(_ bridge: HostBridge, class descriptor: String,
                                  method name: String, prototypes: [String],
                                  isStatic: Bool = false,

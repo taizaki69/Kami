@@ -1008,7 +1008,7 @@ public final class DexInterpreter {
             return pc + 2
 
         default:
-            throw VMError.verify("unsupported opcode 0x\(String(op, radix: 16)) at pc \(pc) in \(dex.methodIds[method.methodIndex].name)")
+            throw VMError.unsupportedOpcode(op)
         }
     }
 

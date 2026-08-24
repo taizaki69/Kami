@@ -93,6 +93,7 @@ public enum VMError: Error, CustomStringConvertible {
     case ambiguousMethod(class: String, name: String, candidates: [String])
     case unresolvedClass(String)
     case unresolvedField(class: String, name: String)
+    case unsupportedOpcode(UInt8)
     case verify(String)
 
     public var description: String {
@@ -106,6 +107,8 @@ public enum VMError: Error, CustomStringConvertible {
             return "AMBIGUOUS METHOD: \(c).\(name); specify one of \(candidates.joined(separator: ", "))"
         case let .unresolvedClass(c): return "UNRESOLVED CLASS: \(c)"
         case let .unresolvedField(c, n): return "UNRESOLVED FIELD: \(c).\(n)"
+        case let .unsupportedOpcode(opcode):
+            return "UNSUPPORTED OPCODE: 0x\(String(format: "%02x", opcode))"
         case let .verify(msg): return "verification: \(msg)"
         }
     }
