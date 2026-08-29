@@ -7,29 +7,31 @@ computer. The previous GLM 5.3 session stopped because its usage quota was
 exhausted, not because the repository or build failed. Its intended Phase 2
 work was recovered, completed, verified, and pushed.
 
-The pending behavior-stratified measurement-corpus implementation is present
-only in the working tree; it has not been committed or covered by a GitHub
-Actions run.
+The behavior-stratified measurement corpus is implemented at `35e4435`, and
+its exact Apache-2.0 test fixtures are durably vendored at `a376064`. All three
+exact-head GitHub Actions workflows for `a376064` pass.
 
 ## Start here
 
 - Repository: <https://github.com/taizaki69/Kami>
 - Visibility: public (changed 2026-08-23 so standard GitHub-hosted Actions
-  runners are free; publication preflight found no tracked secret patterns,
-  sensitive credential filenames, or binary APK/IPA archives in Git history)
+  runners are free; publication preflight found no tracked secret patterns or
+  sensitive credential filenames. The repository now includes 21 explicitly
+  attributed, hash-locked third-party APK test fixtures, but the iOS target
+  ships none of them.)
 - Rights: Kami's original code is intentionally unlicensed and all rights are
   reserved by creator [taizaki69](https://github.com/taizaki69) while the
   proprietary/source-available/commercial/open-source decision remains open.
   Do not add a project license without the creator's explicit decision; see
   `LICENSES.md` and issue #5.
 - Default branch: `main`
-- Current pushed code/test checkpoint (`HEAD`/`origin/main`):
-  `132ec5b7b681eb7243ee1fdd97f6b1e6b1bd35b1` (docs-only compatibility-
-  diagnostics handoff; the pending corpus work is not included)
+- Current verified code/test checkpoint:
+  `a3760649634865a20336122d0ab65ab8b211d140` (durable exact corpus storage,
+  attribution, and successful exact-head workflows)
+- Corpus-lock implementation baseline:
+  `35e4435fd11c5160b0c78202b720ad70ec899216`
 - Privacy-safe compatibility-diagnostics implementation baseline:
   `e56bd9ac2450eb7b558837e7fbc40633e81f3c98`
-- Pending measurement-corpus milestone: working tree only (not committed; no
-  GitHub Actions result)
 - Shared structural execution-plan baseline: `c1221935f25c7edd01b9efdc5ec794cf22454c8c`
 - Native daily-reader foundation baseline: `6f6387e2707df51969c837a01f97388d07dc7331`
 - User-facing filtered Browse baseline: `ad2b11869b1256ee7f1b7421c1ea66a78d367063`
@@ -63,24 +65,29 @@ Actions run.
 - Original Phase 2 baseline: `6f9de0719f057646e228f14620806326840e5c75`
 - Expected state after cloning: clean `main`, tracking `origin/main`
 
-Always continue from the latest `origin/main`. The current pushed checkpoint
-above is the docs-only `132ec5b`; the last executable implementation baseline
-is `e56bd9a`. The corpus changes below are pending working-tree changes, not a
-commit or CI result.
+Always continue from the latest `origin/main`. The latest verified executable
+and corpus baseline is `a376064`; later documentation-only commits may follow
+it without changing that implementation evidence.
 
 ## Current resume point
 
-Current pending state on 2026-08-29 (America/Lima):
+Current verified state on 2026-08-29 (America/Lima):
 
-- `HEAD` and `origin/main` remain at `132ec5b` (`docs: hand off compatibility
-  diagnostics`). The measurement-corpus implementation below is pending in
-  the working tree and has no commit SHA or GitHub Actions result.
-- The pending corpus lock is behavior-stratified at the 2026-08-23 snapshot:
+- Commit `35e4435` implements the corpus lock and tests. Commit `a376064`
+  vendors the exact 21 Keiyoushi APKs with attribution so all 27 fixtures are
+  present in a clean checkout. Its exact-head workflows pass:
+  [Swift CI 33279595763](https://github.com/taizaki69/Kami/actions/runs/33279595763),
+  [iOS Build 33279595816](https://github.com/taizaki69/Kami/actions/runs/33279595816),
+  and [IPA Package 33279595746](https://github.com/taizaki69/Kami/actions/runs/33279595746).
+- The corpus lock is behavior-stratified at the 2026-08-23 snapshot:
   Keiyoushi catalog revision
   `4704d377ad00e7bc6f944cc7638a18e6e7fd4a23` and extensions-source revision
   `42771052f3e43b09a04d4b3f9073039690607476`. It contains 27 artifacts: the 5
   existing execution fixtures, 16 new measurement-only current lib 1.6
   fixtures, and 6 AOSP conformance fixtures; 19 artifacts are current lib 1.6.
+  Recorded upstream URLs remain provenance and best-effort fallback attempts
+  only while reachable and only when the recovered bytes match the exact lock;
+  `git restore Tests/corpus` is the durable recovery path.
 - Static measurement parsed 16/16 measurement APKs: 12 are structural
   candidates, while Komga, MangaPlus, NHentai.xxx, and XCOMIC are the four
   stable-wrapper blockers. The aggregate report has 626 unique unregistered
@@ -91,7 +98,11 @@ Current pending state on 2026-08-29 (America/Lima):
 - Three new `CorpusLockTests` cover separated roles, manifest/fetch/hash
   round trips, manifest identity, release signature-parser conformance, and
   the deterministic static baseline. The fetch round trip passed, and the
-  latest local Windows MihonCompatKit run passed 192/192 tests.
+  latest local Windows MihonCompatKit run passed 192/192 tests. Exact-head
+  Swift CI also found all 27 fixtures already hash-matched, passed 3/3 corpus
+  tests, 192/192 MihonCompatKit tests, 23/23 KamiCore tests, the optimized
+  `compat-audit` build, and its artifact upload without a corpus fallback
+  download.
 - Two optimized Windows `compat-audit gaps Tests/corpus/measurement` runs
   exited 0 and produced byte-identical 98,876-byte UTF-8 reports with SHA-256
   `37503437e4b0aa67bf17fe13fa0b1d1b1d5ab05d5d2583964b2de0c0fcfd99e3`.
@@ -373,7 +384,8 @@ Historical pushed checkpoints (preserved below; prior stop state was
   fixture as incremental array appends so Swift 6 on macOS can type-check it in
   reasonable time; runtime behavior and fixture bytes are unchanged.
 - All 182 MihonCompatKit tests pass locally on Windows/Swift 6.3.3, including 6
-  signer regressions, 21 pinned real-extension source/execution paths, 7 focused
+  signer regressions, 21 source/execution test paths against the five pinned
+  execution fixtures, 7 focused
   HTML/parser-limit tests, bounded Java URL-encoding and Kotlin
   string/collection/time regressions, and 4 async interpreter/transport tests
   plus 3 BatCave adapter regressions and the complete Kawii and MangaMelon
@@ -441,9 +453,10 @@ fixtures plus the install/restore/factory regressions enforce this order. Stable
 public wrapper discovery and three current lib 1.6 profiles are now complete;
 MangaMelon proves the first exact static filtered-search path. Typed runtime
 gap reporting and the non-executing static corpus ranking seam are now also
-complete. Corpus locking is complete in the pending working tree: the
-behavior-stratified snapshot has 5 execution, 16 measurement-only current lib
-1.6, and 6 AOSP conformance artifacts, with 16/16 measurement APKs parsed.
+complete. Corpus locking is complete at `35e4435`, and durable vendoring is
+complete at `a376064`: the behavior-stratified snapshot has 5 execution, 16
+measurement-only current lib 1.6, and 6 AOSP conformance artifacts, with 16/16
+measurement APKs parsed.
 The active frontier is authenticated Baozi Manhua runtime work as the fourth
 profile: re-check its exact bytes, signer, manifest, and source-ID gates, then
 exercise preferences, custom `imageRequest`, interceptors, and filters through
@@ -472,7 +485,7 @@ The direct `Tests/corpus` command intentionally includes malformed
 `aosp-unsigned.apk`, so that command reports all later artifacts and then exits
 70. That is the expected batch-error contract, not an early audit failure. The
 nested `Tests/corpus/measurement` command should complete successfully after
-the measurement APKs are restored.
+the vendored corpus is verified.
 
 On this Windows checkout, use the checked-in helper for the test command if
 needed. Keep real extension execution offline and limited to the five
@@ -558,7 +571,7 @@ bash scripts/fetch_corpus.sh
 The script verifies five SHA-256-pinned Keiyoushi execution fixtures, 16
 SHA-256-pinned current lib 1.6 measurement fixtures under the nested
 `Tests/corpus/measurement/` directory, and six AOSP conformance fixtures against
-`Tests/corpus/manifest.json`. A recorded upstream URL is only a convenience
+`Tests/corpus/manifest.json`. A recorded upstream URL is only a best-effort
 fallback for a missing or hash-mismatched file; `git restore Tests/corpus` is
 the durable recovery path after upstream release rotation. On Windows, run the
 script from Git Bash or WSL.
@@ -578,24 +591,25 @@ files, passwords, cookies, or signing credentials.
 
 ## Known-good verification checkpoint
 
-Pending measurement-corpus evidence (2026-08-29; working tree only, not
-committed, and not covered by CI): the behavior-stratified lock and fetch
-round trip pass for 27 artifacts (5 execution, 16 measurement-only current
-lib 1.6, and 6 AOSP conformance; 19 current lib 1.6 total). The 3 new
-`CorpusLockTests` pass manifest/fetch/hash, manifest-identity,
-signature-parser-conformance, and deterministic-baseline assertions. The
-latest local Windows MihonCompatKit run is 192/192. Two optimized measurement
-`compat-audit gaps` runs are byte-identical 98,876-byte UTF-8 reports with
-SHA-256 `37503437e4b0aa67bf17fe13fa0b1d1b1d5ab05d5d2583964b2de0c0fcfd99e3`
-and no local-path, corpus-path, `.apk` filename, URL, auth, proxy-auth,
-`Set-Cookie`, `Bearer`, `token=`, or `password=` marker; literal `Cookie`
-appears only in safe DEX API symbols.
+Current measurement-corpus evidence (`35e4435` implementation, `a376064`
+durable storage): the behavior-stratified lock and fetch round trip pass for 27
+artifacts (5 execution, 16 measurement-only current lib 1.6, and 6 AOSP
+conformance; 19 current lib 1.6 total). The 3 new `CorpusLockTests` pass
+manifest/fetch/hash, manifest-identity, signature-parser-conformance, and
+deterministic-baseline assertions. The latest local Windows MihonCompatKit run
+is 192/192. Two optimized measurement `compat-audit gaps` runs are
+byte-identical 98,876-byte UTF-8 reports with SHA-256
+`37503437e4b0aa67bf17fe13fa0b1d1b1d5ab05d5d2583964b2de0c0fcfd99e3` and no
+local-path, corpus-path, `.apk` filename, URL, auth, proxy-auth, `Set-Cookie`,
+`Bearer`, `token=`, or `password=` marker; literal `Cookie` appears only in safe
+DEX API symbols. Exact-head Swift CI verified all 27 committed fixtures without
+a corpus fallback download and passed the complete runtime/core/build pipeline.
 
-At the implementation baseline:
+Verification detail:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 189 Swift tests passed locally on Windows/Swift 6.3.3, including 6 APK-signature regressions, 3 structural-plan regressions, 4 privacy-safe diagnostics regressions, and full Kawii/MangaMelon profiles |
+| MihonCompatKit | 192 Swift tests passed locally on Windows/Swift 6.3.3 and in exact-head CI, including 3 corpus-lock regressions, 6 APK-signature regressions, 3 structural-plan regressions, 4 privacy-safe diagnostics regressions, and full Kawii/MangaMelon profiles |
 | KamiCore | 12 portable tests passed locally on Windows/Swift 6.3.3; all 23 tests passed on macOS, including reader settings/prefetch, exact image headers, in-flight deduplication/cache, error limits, Browse routing, SQLite persistence, install/restore/factory, update policy, and registry lifecycle coverage |
 | Optimized package builds | Windows release builds passed for both MihonCompatKit/`compat-audit.exe` and KamiCore |
 | Real APK constructors | Akuma, MangaDex, BatCave, Kawii Manga, and MangaMelon passed |
@@ -620,29 +634,32 @@ At the implementation baseline:
 | APK signer verification | 6 focused regressions cover real Keiyoushi v2, AOSP v1/v3 and verified rotation, content/signature tampering, unsigned input, fingerprint normalization, and scheme stripping |
 | Persisted extension admission | 3 focused macOS test methods cover repository/user trust, unrelated-signer rejection, declared source-ID capability registration, verified signer rotation, and downgrade/same-version replacement rejection |
 | Install/restore/source factory | 3 macOS install tests plus 5 portable factory tests cover repository-key install, explicit legacy confirmation, cancellation, startup restoration, exact-file replacement rejection, declared source-ID enforcement, real BatCave/MangaMelon construction, and refusal to guess an unmeasured profile |
-| Swift CI | Exact implementation head `e56bd9a` [run 32683073872](https://github.com/taizaki69/Kami/actions/runs/32683073872) passed 189 MihonCompatKit tests, optimized CLI build, 23 KamiCore tests, and artifact upload |
-| iOS Simulator and unsigned device builds | Exact implementation head `e56bd9a` [run 32683073885](https://github.com/taizaki69/Kami/actions/runs/32683073885) passed both targets with zero `warning:` lines |
-| Unsigned IPA packaging | Exact implementation head `e56bd9a` [run 32683073873](https://github.com/taizaki69/Kami/actions/runs/32683073873) passed and uploaded `Kami-unsigned-ipa` |
+| Swift CI | Exact corpus head `a376064` [run 33279595763](https://github.com/taizaki69/Kami/actions/runs/33279595763) verified all 27 fixtures, passed 192 MihonCompatKit and 23 KamiCore tests, built the optimized CLI, and uploaded `compat-audit-macos` |
+| iOS Simulator and unsigned device builds | Exact corpus head `a376064` [run 33279595816](https://github.com/taizaki69/Kami/actions/runs/33279595816) passed both targets |
+| Unsigned IPA packaging | Exact corpus head `a376064` [run 33279595746](https://github.com/taizaki69/Kami/actions/runs/33279595746) passed and uploaded `Kami-unsigned-ipa`; this is unsigned build/package evidence, not a signed release |
 | Repository integrity | implementation worktree was clean after push; staged and working diffs passed `git diff --check`; prior full `git fsck --full` found no corruption |
 
 The exact-head public-repository runs validate every implementation checkpoint
-through `e56bd9a`, including typed runtime/static compatibility diagnostics,
-shared non-executing plan discovery, all three app-facing source profiles,
+through `a376064`, including the durable corpus, typed runtime/static
+compatibility diagnostics, shared non-executing plan discovery, all three
+app-facing source profiles,
 signer-authenticated admission gate, durable install/restore flow, exact-byte
 factory, source selection UI, filtered Browse, source registration, and the
-native reader foundation. They produced both `compat-audit` and
+native reader foundation. They produced both `compat-audit-macos` and
 `Kami-unsigned-ipa` artifacts.
 
 ## What the latest continuation completed
 
-The current continuation's pending working-tree milestone (2026-08-29; not
-committed and not covered by CI) locks the behavior-stratified 27-artifact
-corpus at the 2026-08-23 Keiyoushi catalog/source revisions recorded above.
-It adds 3 `CorpusLockTests`, passes the fetch round trip and local Windows
-192/192 MihonCompatKit run, and records 16/16 static measurement parses with
-12 structural candidates, four stable-wrapper blockers, 626 unique
-unregistered surfaces, and zero unsupported opcodes. It remains measurement
-and parser-conformance evidence only: it does not grant trust, admission,
+Commit `35e4435` locks the behavior-stratified 27-artifact corpus at the
+2026-08-23 Keiyoushi catalog/source revisions, adds 3 `CorpusLockTests`, and
+records 16/16 static measurement parses with 12 structural candidates, four
+stable-wrapper blockers, 626 unique unregistered surfaces, and zero unsupported
+opcodes. Commit `a376064` durably vendors the exact bytes and attribution. The
+combined milestone passes the fetch round trip, local Windows 192/192
+MihonCompatKit run, and exact-head Swift/iOS/IPA workflows. The 21 Keiyoushi
+APKs total 1,560,928 bytes and are tracked only as attributed test fixtures
+because upstream release assets rotate. This remains measurement and
+parser-conformance evidence only: it does not grant trust, admission,
 installation, DEX execution, or compatibility proof.
 
 Commit `e56bd9a` establishes the first privacy-safe compatibility measurement
@@ -1224,13 +1241,14 @@ Proven today:
   specimens, explicit blockers for legacy/unsupported shapes, and directory
   reporting that preserves later results after per-file errors. This is shape
   discovery only, not authentication, admission, or runtime proof.
-- Pending working-tree corpus evidence locks 27 artifacts into 5 execution,
-  16 measurement-only current lib 1.6, and 6 AOSP conformance roles, with
-  16/16 measurement APKs parsed, 12 structural candidates, four stable-wrapper
+- Committed corpus evidence locks and vendors 27 artifacts in 5 execution, 16
+  measurement-only current lib 1.6, and 6 AOSP conformance roles, with 16/16
+  measurement APKs parsed, 12 structural candidates, four stable-wrapper
   blockers, 626 unique unregistered surfaces, and zero unsupported opcodes.
-  Its hashes, manifests, and signature-parser checks are local measurement
-  evidence only and do not grant signer trust, admission, installation, DEX
-  execution, or compatibility proof.
+  Exact-head CI verified the full tracked set, hashes, manifests,
+  signature-parser checks, and deterministic baseline. This remains
+  measurement evidence only and does not grant signer trust, admission,
+  installation, DEX execution, or compatibility proof.
 - Exact execution of the pinned constructors/getters listed above and
   BatCave's interpreted popular, paginated text-search, latest-updates, and core
   details plus combined chapter-update and page-list paths through exact request

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Verifies the vendored execution, static-measurement, and AOSP conformance
-# corpus. A recorded upstream URL is only a recovery fallback for a missing or
-# hash-mismatched fixture; the checked-in bytes plus SHA-256 lock keep CI
-# independent of upstream release retention.
+# corpus. A recorded upstream URL is only a best-effort recovery fallback for a
+# missing or hash-mismatched fixture; the checked-in bytes plus SHA-256 lock
+# keep CI independent of upstream release retention.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -74,9 +74,9 @@ download_gitiles() {
 }
 
 # Real extension bytes are vendored and SHA-256-locked. Recorded release assets
-# are only a fallback for a missing or hash-mismatched local file. The
-# measurement subset is used only for bounded parsing, structural planning, and
-# static gap ranking. Having it locally does not authenticate, admit, install,
+# are only a best-effort fallback for a missing or hash-mismatched local file.
+# The measurement subset is used only for bounded parsing, structural planning,
+# and static gap ranking. Having it locally does not authenticate, admit, install,
 # execute, or contact an extension-declared manga source.
 REAL_APKS=()
 while IFS='|' read -r name url expected; do

@@ -4,7 +4,9 @@
 
 **Corpus:** Keiyoushi release assets vendored from recorded release URLs and
 pinned by SHA-256 via `scripts/fetch_corpus.sh`, then verified against
-`Tests/corpus/manifest.json`. The URLs remain provenance and recovery fallbacks.
+`Tests/corpus/manifest.json`. The URLs remain provenance and best-effort
+fallback attempts only while reachable and only when recovered bytes match the
+exact lock; `git restore Tests/corpus` is the durable recovery path.
 
 This matrix separates structural loading, shallow VM execution, and full source
 operations. A check mark means a concrete assertion passed; a dash means there
@@ -25,7 +27,7 @@ is no compatibility claim.
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
 | Static measurement corpus | Working, non-executing | Sixteen current lib 1.6 measurement-only APKs under `Tests/corpus/measurement/` are SHA/URL locked and analyzed 16/16 with 0 errors; 12 are structural candidates and four have stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, XCOMIC). The report contains 626 unique unregistered external method surfaces and 0 unsupported opcodes. The behavior-stratified 1.24 MB set is prioritization evidence, not a statistical sample or execution/admission proof |
 | Compatibility diagnostics | Partial, privacy-safe local/runtime and static corpus seams working | Pinned sources deduplicate propagated typed VM gaps by operation stage and ignore arbitrary errors; `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths. The current measurement run reports 16/16 analyzed, 0 errors, 626 unique surfaces, and 0 unsupported opcodes. Static invocations are prioritization only, not runtime failure or admission proof. App export UI, below-catch first-gap capture, broader field/bridge instrumentation, and regression promotion remain open |
-| DEX execution | Partial M1/M2 working | The current local 192-test suite includes 21 exact pinned-APK source/execution paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, and serialized adapter ownership are checked |
+| DEX execution | Partial M1/M2 working | The current local 192-test suite includes 21 source/execution test paths against the five exact execution fixtures; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, and serialized adapter ownership are checked |
 | Admission restoration and source factory | Working for exact measured profiles | Startup re-reads the enabled installed APK, rechecks hash/signature/signer history/user trust/manifest, and gives the sole factory a fresh capability; the factory repeats exact-byte authentication, rejects undeclared source IDs, and refuses unmeasured profiles |
 | End-to-end source operations | Working for three exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, and MangaMelon 1.6.1 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon adds exact static `Sort`/`Select` filtered search. BatCave additionally proves default image requests and the installed-source registry path. The 16 measurement APKs remain outside the executable catalog. Automatic catalog expansion, dynamic filters, preferences, custom image requests, and live-site availability remain open |
 
@@ -186,13 +188,14 @@ report above for current prioritization.
   corpus present. Three new `CorpusLockTests` cover separated roles,
   SHA/URL/fetcher and manifest/signature checks, and the deterministic static
   measurement baseline.
-- The exact implementation commit `e56bd9a` is historical CI evidence, not a
-  result for the current corpus expansion; it passed
-  [Swift CI 32683073872](https://github.com/taizaki69/Kami/actions/runs/32683073872),
-  [iOS Build 32683073885](https://github.com/taizaki69/Kami/actions/runs/32683073885),
-  and [IPA Package 32683073873](https://github.com/taizaki69/Kami/actions/runs/32683073873).
-  Those runs predate the current corpus expansion and 192-test checkout; they
-  remain the available CI evidence until a new commit is pushed and rerun.
+- Exact corpus head `a376064` passes
+  [Swift CI 33279595763](https://github.com/taizaki69/Kami/actions/runs/33279595763),
+  [iOS Build 33279595816](https://github.com/taizaki69/Kami/actions/runs/33279595816),
+  and [IPA Package 33279595746](https://github.com/taizaki69/Kami/actions/runs/33279595746).
+  Swift CI found all 27 fixtures already hash-matched, passed 3/3 corpus tests,
+  192/192 MihonCompatKit tests, 23/23 KamiCore tests, the optimized CLI build,
+  and artifact upload. The iOS and IPA runs passed both build destinations and
+  unsigned packaging respectively.
 - Three plan-inspection regressions prove deterministic current-profile plans,
   explicit legacy lib 1.4 blockers, and malformed-APK failure. The optimized
   CLI batch audit continues after malformed entries, reports every subsequent
@@ -210,7 +213,7 @@ report above for current prioritization.
 - Six verifier regressions cover five real Keiyoushi v2 APKs, AOSP v1 and v3,
   verified certificate rotation, signed-content and signer-signature tampering,
   unsigned input, fingerprint normalization, and v3-block stripping. The
-  historical exact-head macOS CI run's 23 KamiCore tests cover persisted
+  current exact-head macOS CI run's 23 KamiCore tests cover persisted
   repository/user trust, unrelated-signer
   rejection, source-ID capability admission, rotation-aware updates,
   downgrade/same-version replacement rejection, repository-key persistence,
@@ -265,8 +268,8 @@ report above for current prioritization.
   bounded encoding/streaming, cancellation, and cookie scope.
 - Parser hardening covers checksum/size/count limits and every truncated prefix
   of generated valid DEX and ZIP fixtures.
-- The historical exact-head Swift CI run built `compat-audit` in release mode
-  and uploaded it; the current checkout also builds it locally in release mode.
+- Exact-head Swift CI built `compat-audit` in release mode and uploaded it; the
+  current checkout also builds it locally in release mode.
 
 ## Honest frontier
 

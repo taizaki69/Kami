@@ -31,7 +31,7 @@ bash scripts/fetch_corpus.sh
 
 The script accepts an already-vendored file only when its SHA-256 matches the
 lock. If a fixture is missing or hash-mismatched, it attempts the recorded
-upstream URL as a convenience fallback; `git restore Tests/corpus` is the
+upstream URL as a best-effort fallback; `git restore Tests/corpus` is the
 durable recovery path when an upstream release has rotated away. Swift tests
 verify the complete lock/fetch mapping, APK manifest identities,
 signature-parser acceptance for measurement releases, and the deterministic

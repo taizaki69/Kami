@@ -4,9 +4,9 @@
 
 | Component | Verified how |
 |---|---|
-| MihonCompatKit (parsers, VM, repo client, backup reader) | Local `swift test` on Windows/Swift 6.3.3 — **192/192 tests pass**, including the three corpus-lock regressions, 6 APK-signature regressions, 21 real-APK source/execution paths, 3 deterministic structural-plan regressions, 4 privacy-safe compatibility-diagnostics regressions, 3 BatCave adapter/tamper/concurrency paths, and end-to-end Kawii/MangaMelon profiles |
-| compat-audit CLI | optimized build plus deterministic directory-level `plan` and `gaps` behavior verified on Windows; the locked corpus reports current candidates, legacy blockers, ranked unregistered external invocations, and unsupported opcodes, continues past malformed files, omits local paths/filenames/request secrets, and returns failure after all artifacts; the optimized CLI was uploaded by the historical exact-head Swift CI run |
-| KamiCore (models, SQLite store, install/admission/factory, source registry, reader image pipeline) | 12 portable Windows tests pass; the historical exact-head macOS Swift CI run passed all 23 tests, including bounded reader settings/prefetch, exact image headers, in-flight deduplication/cache, response rejection, Browse routing, SQLite migration, extension installation/restoration/factory, and registry lifecycle coverage |
+| MihonCompatKit (parsers, VM, repo client, backup reader) | Local `swift test` on Windows/Swift 6.3.3 — **192/192 tests pass**, including the three corpus-lock regressions, 6 APK-signature regressions, 21 source/execution test paths against the five execution fixtures, 3 deterministic structural-plan regressions, 4 privacy-safe compatibility-diagnostics regressions, 3 BatCave adapter/tamper/concurrency paths, and end-to-end Kawii/MangaMelon profiles |
+| compat-audit CLI | optimized build plus deterministic directory-level `plan` and `gaps` behavior verified on Windows; the locked corpus reports current candidates, legacy blockers, ranked unregistered external invocations, and unsupported opcodes, continues past malformed files, omits local paths/filenames/request secrets, and returns failure after all artifacts; exact-head Swift CI uploaded the optimized CLI |
+| KamiCore (models, SQLite store, install/admission/factory, source registry, reader image pipeline) | 12 portable Windows tests pass; exact-head macOS Swift CI passed all 23 tests, including bounded reader settings/prefetch, exact image headers, in-flight deduplication/cache, response rejection, Browse routing, SQLite migration, extension installation/restoration/factory, and registry lifecycle coverage |
 | App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |
 | IPA packaging | the `IPA Package` workflow builds a real Release `Kami.app`, packages `Kami-unsigned.ipa`, and uploads `Kami-unsigned-ipa` |
 
@@ -65,7 +65,7 @@ they are not linked into or shipped by the iOS app. Their attribution is in
 vendored at a pinned source revision with the upstream Apache-2.0 license. This
 keeps CI independent of Keiyoushi release rotation and Gitiles availability.
 The script verifies every SHA-256 in `Tests/corpus/manifest.json` and only uses
-the recorded upstream URL as a convenience fallback for a missing or
+the recorded upstream URL as a best-effort fallback for a missing or
 hash-mismatched file.
 
 ## GitHub Actions
@@ -75,18 +75,15 @@ hash-mismatched file.
 - `IPA Package`: unsigned device build and downloadable IPA artifact.
 
 The repository became public on 2026-08-23, so its standard GitHub-hosted
-runners now dispatch without consuming private-repository minutes. The last
-exact-head CI evidence is historical: compatibility-diagnostics implementation
-commit `e56bd9a` passes [Swift CI 32683073872](https://github.com/taizaki69/Kami/actions/runs/32683073872),
-[iOS Build 32683073885](https://github.com/taizaki69/Kami/actions/runs/32683073885),
-and [IPA Package 32683073873](https://github.com/taizaki69/Kami/actions/runs/32683073873).
-Those runs predate the current corpus expansion and 192-test checkout; they
-remain the available CI evidence until a new commit is pushed and rerun. The
-historical Swift job verified its then-locked corpus, ran 189 MihonCompatKit
-and 23 KamiCore tests, built the optimized `compat-audit` CLI, and uploaded the
-CLI.
-The iOS build log has no warnings, including the prior iPad multitasking
-orientation warning.
+runners now dispatch without consuming private-repository minutes. Exact corpus
+head `a376064` passes
+[Swift CI 33279595763](https://github.com/taizaki69/Kami/actions/runs/33279595763),
+[iOS Build 33279595816](https://github.com/taizaki69/Kami/actions/runs/33279595816),
+and [IPA Package 33279595746](https://github.com/taizaki69/Kami/actions/runs/33279595746).
+The Swift job found all 27 corpus fixtures already hash-matched, ran 192
+MihonCompatKit and 23 KamiCore tests, built the optimized `compat-audit` CLI,
+and uploaded it. The iOS workflow passed simulator and unsigned-device builds;
+the IPA workflow built, packaged, and uploaded the unsigned IPA.
 
 A signed install still requires credentials owned by the user; no certificate,
 profile, password, or Apple account secret belongs in this repository.

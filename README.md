@@ -187,14 +187,13 @@ security boundaries, and the recommended next implementation sequence.
 
 The compatibility kit and all 192 tests run locally on Windows with Swift 6.3,
 including the three corpus-lock regressions, together with 12 portable KamiCore
-tests (`scripts/windows_dev_test.bat`). The last exact-head GitHub Actions runs
-are historical: compatibility-diagnostics implementation commit `e56bd9a`
-passed
-[Swift CI](https://github.com/taizaki69/Kami/actions/runs/32683073872),
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/32683073885), and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/32683073873).
-Those runs predate the current corpus expansion and 192-test checkout; they
-remain the available CI evidence until a new commit is pushed and rerun.
+tests (`scripts/windows_dev_test.bat`). Exact corpus head `a376064` passes
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/33279595763) with all
+27 fixtures, 192 MihonCompatKit tests, 23 KamiCore tests, and the optimized CLI;
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/33279595816) for both
+simulator and unsigned device; and
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/33279595746) with
+the uploaded unsigned IPA.
 The `compat-audit` CLI produces the measured compatibility matrix,
 deterministic per-APK structural-plan blockers, and a redacted static
 gap/corpus report from the locked corpus.
