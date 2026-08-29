@@ -18,6 +18,15 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 - [x] Backup reader for legacy (zlib) `.tachibk` + proto schema decode
 - [x] `compat-audit` CLI (inspect/missing/index/methods/disasm/opcodes/plan/gaps) —
       deterministic file and directory inspection, run on the locked corpus
+- [x] SHA/URL-locked behavior-stratified current lib 1.6 measurement corpus —
+      16 measurement-only Keiyoushi APKs under `Tests/corpus/measurement/`,
+      alongside 5 execution and 6 AOSP conformance fixtures (27 total; 19
+      current lib 1.6 artifacts); 16/16 static analyses complete with 0 errors,
+      12 structural candidates, 4 stable-wrapper blockers, 626 unique
+      unregistered external method surfaces, and 0 unsupported opcodes. The
+      1.24 MB set is prioritization evidence, not a statistical sample or
+      execution/admission proof. Three `CorpusLockTests` bring the local
+      MihonCompatKit verification to 192/192.
 
 ## P0 — App foundation
 
@@ -59,12 +68,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       stable-wrapper execution; MangaMelon additionally proves exact static
       filters, JSON defaults/longs/memo, structured coroutine lambdas,
       comparator sorting, and UTF-8/ByteString/Base64 form data; measured long
-      tail remains
+      tail remains a static prioritization target in the locked measurement set
 - [~] tachiyomix API bridge M3 (`HttpSource` → `KamiSource`) — the exact pinned
       BatCave 1.6.9, Kawii Manga 1.6.1, and MangaMelon 1.6.1 profiles implement
       the app-facing contract through stable public wrappers; static
       `Sort`/`Select` filters are proven while dynamic filters, preferences,
-      custom image requests, and broader runtime coverage remain
+      custom image requests, and broader runtime coverage remain open
 - [x] First pinned real extension executing
       popular→search→details→chapters→pages — BatCave's unmodified locked APK
       now crosses deterministic transport and its real parsing/serialization
@@ -100,10 +109,15 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       discovery checks manifest identity, supported lib version, single-source
       and single-DEX shape, absence of native `.so` entries, entry placement,
       and stable public wrappers without executing or admitting unknown APKs;
-      all three current lib 1.6 specimens produce deterministic plans while
-      legacy lib 1.4 specimens remain explicit blockers
+      the three execution profiles and all 16 measurement APKs produce
+      deterministic results: 12 measurement candidates and four stable-wrapper
+      blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC); legacy lib 1.4
+      specimens remain explicit blockers
 - [ ] Expand beyond the exact three-profile catalog with a fourth current
-      extension that measures preferences or a custom image-request override
+      extension — Baozi Manhua 1.6.29 is selected as the next target because it
+      is current, catalog-labeled `safe`, and a structural-plan candidate that exercises
+      preferences plus a custom `imageRequest`; measurement membership alone
+      does not authorize execution
 - [~] Privacy-safe compatibility telemetry — typed runtime class/method/field/
       opcode failures are stage-deduplicated without arbitrary error strings,
       and `compat-audit gaps` emits a deterministic path-free static/corpus

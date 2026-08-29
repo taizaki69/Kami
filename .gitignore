@@ -1,7 +1,13 @@
 .build/
 dist/
 Tests/corpus/*.apk
-!Tests/corpus/aosp-*.apk
+Tests/corpus/**/*.apk
+!Tests/corpus/aosp-v3-original.apk
+!Tests/corpus/aosp-v3-lineage.apk
+!Tests/corpus/aosp-v1.apk
+!Tests/corpus/aosp-unsigned.apk
+!Tests/corpus/aosp-v2-invalid-signature.apk
+!Tests/corpus/aosp-v3-stripped.apk
 Tests/corpus/index.pb
 *.xcodeproj
 *.ipa

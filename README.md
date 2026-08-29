@@ -9,7 +9,7 @@ measured status.
 
 Created and maintained by [taizaki69](https://github.com/taizaki69).
 
-**Honest status (2026-08-23):** the pure-Swift extension pipeline now covers
+**Honest status (2026-08-29):** the pure-Swift extension pipeline now covers
 store indexes, APK download, bounded ZIP/DEFLATE and binary-manifest parsing,
 validated DEX parsing, compatibility analysis, and an initial interpreter with
 a bounded pre-execution geometry/control-flow, exception-table, register-bounds,
@@ -67,6 +67,23 @@ wrapper. Its full popular/latest/filtered-search/details/chapters/pages path
 proves default-inclusive generated JSON encoding, bounded UTF-8/Okio/Base64
 form bodies, structured coroutine lambdas, long decoding, stable comparator
 sorting, string-valued chapter memo JSON, and deterministic page ordering.
+
+The corpus now also locks 16 current lib 1.6 Keiyoushi APKs under
+`Tests/corpus/measurement/` for measurement only. Together with the five
+existing execution fixtures and six AOSP apksig conformance fixtures, the lock
+contains 27 artifacts; 19 are current lib 1.6 artifacts (three existing
+execution fixtures plus the 16 measurement fixtures). The measurement set is
+behavior-stratified, not a statistical sample, and occupies 1.24 MB
+(1,242,086 bytes). A deterministic static run analyzed all 16 measurement APKs
+with zero errors, found 12 structural candidates and four stable-wrapper
+blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), and reported 626 unique
+unregistered external method surfaces with zero unsupported opcodes. These
+artifacts are parsed, signature-verified for parser conformance, and statically
+audited only: membership never grants signer trust, admission, installation, or
+execution. Baozi Manhua 1.6.29 is the selected next fourth-profile target
+because it is current, catalog-labeled `safe`, and a structural-plan candidate
+that exercises preferences and a custom `imageRequest`; no execution is claimed
+for it yet.
 
 A bounded APK verifier now authenticates v2, v3/v3.1, and a conservative v1
 fallback, including signed content digests, X.509 signer keys, v3 certificate
@@ -129,10 +146,12 @@ profiling remain open; see `docs/READER.md`.
 This is still not a claim of broad extension execution: Kami can identify a
 bounded structural candidate, but the runtime profile catalog currently
 recognizes only the exact measured BatCave 1.6.9, Kawii Manga 1.6.1, and
-MangaMelon 1.6.1 builds. Automatic profile admission beyond that exact catalog,
-dynamic/network-backed filter lists, preferences, a measured extension-defined
-custom image-request override, and much of the Kotlin/Java surface remain open
-(`docs/EXTENSION_RUNTIME.md`). Kami starts
+MangaMelon 1.6.1 builds. The broader 16-APK current-lib-1.6 corpus is a
+non-executing measurement set, not an admitted profile catalog. Automatic
+profile admission beyond that exact catalog, dynamic/network-backed filter
+lists, preferences, a measured extension-defined custom image-request override,
+and much of the Kotlin/Java surface remain open (`docs/EXTENSION_RUNTIME.md`).
+Kami starts
 with native MangaDex and can additionally restore a supported, authenticated
 downloaded source.
 
@@ -166,14 +185,16 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 189 tests run on Windows with Swift 6.3, together
-with 12 portable KamiCore tests (`scripts/windows_dev_test.bat`). GitHub Actions
-runs the pinned real-APK suite plus all 23 macOS KamiCore tests, compiles both
-Simulator and unsigned device targets, and publishes an unsigned IPA artifact.
-Exact compatibility-diagnostics implementation commit `e56bd9a` passed
+The compatibility kit and all 192 tests run locally on Windows with Swift 6.3,
+including the three corpus-lock regressions, together with 12 portable KamiCore
+tests (`scripts/windows_dev_test.bat`). The last exact-head GitHub Actions runs
+are historical: compatibility-diagnostics implementation commit `e56bd9a`
+passed
 [Swift CI](https://github.com/taizaki69/Kami/actions/runs/32683073872),
 [iOS Build](https://github.com/taizaki69/Kami/actions/runs/32683073885), and
 [IPA Package](https://github.com/taizaki69/Kami/actions/runs/32683073873).
+Those runs predate the current corpus expansion and 192-test checkout; they
+remain the available CI evidence until a new commit is pushed and rerun.
 The `compat-audit` CLI produces the measured compatibility matrix,
 deterministic per-APK structural-plan blockers, and a redacted static
 gap/corpus report from the locked corpus.

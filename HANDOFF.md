@@ -1,11 +1,15 @@
 # Kami Continuation Handoff
 
-Last updated: 2026-08-23 (America/Lima)
+Last updated: 2026-08-29 (America/Lima)
 
 This is the durable continuation point for moving Kami development to another
 computer. The previous GLM 5.3 session stopped because its usage quota was
 exhausted, not because the repository or build failed. Its intended Phase 2
 work was recovered, completed, verified, and pushed.
+
+The pending behavior-stratified measurement-corpus implementation is present
+only in the working tree; it has not been committed or covered by a GitHub
+Actions run.
 
 ## Start here
 
@@ -19,8 +23,13 @@ work was recovered, completed, verified, and pushed.
   Do not add a project license without the creator's explicit decision; see
   `LICENSES.md` and issue #5.
 - Default branch: `main`
-- Current code/test checkpoint: `e56bd9ac2450eb7b558837e7fbc40633e81f3c98`
-- Privacy-safe compatibility-diagnostics baseline: `e56bd9ac2450eb7b558837e7fbc40633e81f3c98`
+- Current pushed code/test checkpoint (`HEAD`/`origin/main`):
+  `132ec5b7b681eb7243ee1fdd97f6b1e6b1bd35b1` (docs-only compatibility-
+  diagnostics handoff; the pending corpus work is not included)
+- Privacy-safe compatibility-diagnostics implementation baseline:
+  `e56bd9ac2450eb7b558837e7fbc40633e81f3c98`
+- Pending measurement-corpus milestone: working tree only (not committed; no
+  GitHub Actions result)
 - Shared structural execution-plan baseline: `c1221935f25c7edd01b9efdc5ec794cf22454c8c`
 - Native daily-reader foundation baseline: `6f6387e2707df51969c837a01f97388d07dc7331`
 - User-facing filtered Browse baseline: `ad2b11869b1256ee7f1b7421c1ea66a78d367063`
@@ -54,13 +63,50 @@ work was recovered, completed, verified, and pushed.
 - Original Phase 2 baseline: `6f9de0719f057646e228f14620806326840e5c75`
 - Expected state after cloning: clean `main`, tracking `origin/main`
 
-Always continue from the latest `origin/main`. The current code/test SHA above
-is the known-good executable state; the commit updating this handoff follows it
-and contains documentation only.
+Always continue from the latest `origin/main`. The current pushed checkpoint
+above is the docs-only `132ec5b`; the last executable implementation baseline
+is `e56bd9a`. The corpus changes below are pending working-tree changes, not a
+commit or CI result.
 
 ## Current resume point
 
-Stop state on 2026-08-23 (America/Lima):
+Current pending state on 2026-08-29 (America/Lima):
+
+- `HEAD` and `origin/main` remain at `132ec5b` (`docs: hand off compatibility
+  diagnostics`). The measurement-corpus implementation below is pending in
+  the working tree and has no commit SHA or GitHub Actions result.
+- The pending corpus lock is behavior-stratified at the 2026-08-23 snapshot:
+  Keiyoushi catalog revision
+  `4704d377ad00e7bc6f944cc7638a18e6e7fd4a23` and extensions-source revision
+  `42771052f3e43b09a04d4b3f9073039690607476`. It contains 27 artifacts: the 5
+  existing execution fixtures, 16 new measurement-only current lib 1.6
+  fixtures, and 6 AOSP conformance fixtures; 19 artifacts are current lib 1.6.
+- Static measurement parsed 16/16 measurement APKs: 12 are structural
+  candidates, while Komga, MangaPlus, NHentai.xxx, and XCOMIC are the four
+  stable-wrapper blockers. The aggregate report has 626 unique unregistered
+  external surfaces and zero unsupported opcodes. These are static
+  prioritization results only. Measurement membership grants no signer trust,
+  admission, installation, DEX execution, or compatibility proof; release
+  signature verification is parser conformance only.
+- Three new `CorpusLockTests` cover separated roles, manifest/fetch/hash
+  round trips, manifest identity, release signature-parser conformance, and
+  the deterministic static baseline. The fetch round trip passed, and the
+  latest local Windows MihonCompatKit run passed 192/192 tests.
+- Two optimized Windows `compat-audit gaps Tests/corpus/measurement` runs
+  exited 0 and produced byte-identical 98,876-byte UTF-8 reports with SHA-256
+  `37503437e4b0aa67bf17fe13fa0b1d1b1d5ab05d5d2583964b2de0c0fcfd99e3`.
+  Neither report contained a local-path, corpus-path, `.apk` filename, URL,
+  auth, proxy-auth, `Set-Cookie`, `Bearer`, `token=`, or `password=` marker.
+  Literal `Cookie` appears only in safe DEX API symbols, not as a claim of
+  zero generic `Cookie` text.
+- Baozi Manhua `eu.kanade.tachiyomi.extension.zh.baozimanhua@1.6.29(29)` is
+  the selected next fourth-profile target: its catalog content warning is
+  `safe`, it is the latest pinned release at this snapshot, and it is a structural candidate with preference calls,
+  custom `imageRequest`, interceptors, and filters. It is not yet
+  authenticated, admitted, or executed; do not claim runtime compatibility.
+
+Historical pushed checkpoints (preserved below; prior stop state was
+2026-08-23, America/Lima):
 
 - Commit `e56bd9a` is pushed to `main`. Every exact interpreted source now owns
   a bounded thread-safe `InterpretedCompatibilityRecorder`. Failed app-facing
@@ -395,12 +441,17 @@ fixtures plus the install/restore/factory regressions enforce this order. Stable
 public wrapper discovery and three current lib 1.6 profiles are now complete;
 MangaMelon proves the first exact static filtered-search path. Typed runtime
 gap reporting and the non-executing static corpus ranking seam are now also
-complete. The next high-leverage milestone is to lock a broader representative
-current lib 1.6 corpus, then select a fourth current extension that expands a
-new axis, preferably preferences or a custom image-request override. Add
-below-catch first-gap/field instrumentation and fixed-gap regression promotion
-alongside that corpus work. Dynamic/network-backed filters are also still
-open. Generate more of the exact catalog only
+complete. Corpus locking is complete in the pending working tree: the
+behavior-stratified snapshot has 5 execution, 16 measurement-only current lib
+1.6, and 6 AOSP conformance artifacts, with 16/16 measurement APKs parsed.
+The active frontier is authenticated Baozi Manhua runtime work as the fourth
+profile: re-check its exact bytes, signer, manifest, and source-ID gates, then
+exercise preferences, custom `imageRequest`, interceptors, and filters through
+deterministic fake transport. In parallel, continue issue #4's below-catch
+first-gap/field/bridge instrumentation and fixed-gap regression promotion.
+The Baozi static candidate and parser-conformance signature result do not prove
+runtime compatibility. Dynamic/network-backed filters are also still open.
+Generate more of the exact catalog only
 from authenticated evidence, and do not let discovery create a parallel
 admission bypass. Keep `HostBridge` deny-by-default and never execute extension
 native libraries.
@@ -414,16 +465,21 @@ git status --short --branch
 swift test --package-path Packages/MihonCompatKit
 swift build --package-path Packages/MihonCompatKit -c release --product compat-audit
 swift run --package-path Packages/MihonCompatKit compat-audit gaps Tests/corpus
+swift run --package-path Packages/MihonCompatKit compat-audit gaps Tests/corpus/measurement
 ```
 
-The checked-in corpus intentionally contains a malformed `aosp-unsigned.apk`,
-so the final command reports all later artifacts and then exits 70. That is the
-expected batch-error contract, not an early audit failure.
+The direct `Tests/corpus` command intentionally includes malformed
+`aosp-unsigned.apk`, so that command reports all later artifacts and then exits
+70. That is the expected batch-error contract, not an early audit failure. The
+nested `Tests/corpus/measurement` command should complete successfully after
+the measurement APKs are restored.
 
 On this Windows checkout, use the checked-in helper for the test command if
-needed. Keep execution offline and limited to `Tests/corpus/*.apk`; only
-`ExtensionAdmissionService` may turn downloaded bytes into a persisted
-eligibility capability.
+needed. Keep real extension execution offline and limited to the five
+`Tests/corpus/*.apk` execution fixtures. The nested
+`Tests/corpus/measurement/*.apk` fixtures are for static analysis only and
+must never be executed. Only `ExtensionAdmissionService` may turn downloaded
+bytes into a persisted eligibility capability.
 
 ## Clone and restore the workspace
 
@@ -498,9 +554,11 @@ The APK corpus is intentionally not stored in Git:
 bash scripts/fetch_corpus.sh
 ```
 
-The script downloads five immutable Keiyoushi release assets and verifies
-their SHA-256 values against `Tests/corpus/manifest.json`. On Windows, run it
-from Git Bash or WSL, or let Swift CI fetch the corpus.
+The script restores five SHA-256-pinned Keiyoushi execution release assets, 16
+SHA-256-pinned current lib 1.6 measurement assets under the nested
+`Tests/corpus/measurement/` directory, and six AOSP conformance fixtures. It
+verifies every SHA-256 value against `Tests/corpus/manifest.json`. On Windows,
+run it from Git Bash or WSL, or let Swift CI fetch the corpus.
 
 Do not copy these generated or ignored paths between computers:
 
@@ -508,13 +566,28 @@ Do not copy these generated or ignored paths between computers:
 - `Packages/MihonCompatKit/.build/`
 - generated `.xcodeproj`, `DerivedData/`, `dist/`, or IPA files
 
-`Tests/corpus/*.apk` can be regenerated with the fetch script. The ignored
-`Tests/corpus/index.pb` is not required by the pinned APK execution suite.
+`Tests/corpus/*.apk` and the nested `Tests/corpus/measurement/*.apk` can be
+regenerated with the fetch script. The ignored `Tests/corpus/index.pb` is not
+required by the pinned APK execution suite; measurement APKs are for static
+analysis only.
 
 Never commit `.env` files, Apple certificates, provisioning profiles, P12
 files, passwords, cookies, or signing credentials.
 
 ## Known-good verification checkpoint
+
+Pending measurement-corpus evidence (2026-08-29; working tree only, not
+committed, and not covered by CI): the behavior-stratified lock and fetch
+round trip pass for 27 artifacts (5 execution, 16 measurement-only current
+lib 1.6, and 6 AOSP conformance; 19 current lib 1.6 total). The 3 new
+`CorpusLockTests` pass manifest/fetch/hash, manifest-identity,
+signature-parser-conformance, and deterministic-baseline assertions. The
+latest local Windows MihonCompatKit run is 192/192. Two optimized measurement
+`compat-audit gaps` runs are byte-identical 98,876-byte UTF-8 reports with
+SHA-256 `37503437e4b0aa67bf17fe13fa0b1d1b1d5ab05d5d2583964b2de0c0fcfd99e3`
+and no local-path, corpus-path, `.apk` filename, URL, auth, proxy-auth,
+`Set-Cookie`, `Bearer`, `token=`, or `password=` marker; literal `Cookie`
+appears only in safe DEX API symbols.
 
 At the implementation baseline:
 
@@ -559,6 +632,16 @@ native reader foundation. They produced both `compat-audit` and
 `Kami-unsigned-ipa` artifacts.
 
 ## What the latest continuation completed
+
+The current continuation's pending working-tree milestone (2026-08-29; not
+committed and not covered by CI) locks the behavior-stratified 27-artifact
+corpus at the 2026-08-23 Keiyoushi catalog/source revisions recorded above.
+It adds 3 `CorpusLockTests`, passes the fetch round trip and local Windows
+192/192 MihonCompatKit run, and records 16/16 static measurement parses with
+12 structural candidates, four stable-wrapper blockers, 626 unique
+unregistered surfaces, and zero unsupported opcodes. It remains measurement
+and parser-conformance evidence only: it does not grant trust, admission,
+installation, DEX execution, or compatibility proof.
 
 Commit `e56bd9a` establishes the first privacy-safe compatibility measurement
 seam without expanding execution or admission:
@@ -701,7 +784,8 @@ extension admission:
   `ExtensionAdmission` and one of its declared source IDs.
 - Six tiny AOSP apksig fixtures are tracked with their full Apache-2.0 license;
   their pinned hashes eliminate a flaky Gitiles dependency. Real extension
-  APKs remain ignored and downloaded from immutable releases.
+  APKs remain ignored and downloaded from recorded release URLs with exact
+  SHA-256 verification.
 - Their exact-head workflows proved 171 MihonCompatKit tests, 8 macOS KamiCore tests,
   optimized CLI output, both iOS build destinations, and the unsigned IPA.
   Issue #3 is closed. Those capabilities now feed the install/restore/factory
@@ -1139,6 +1223,13 @@ Proven today:
   specimens, explicit blockers for legacy/unsupported shapes, and directory
   reporting that preserves later results after per-file errors. This is shape
   discovery only, not authentication, admission, or runtime proof.
+- Pending working-tree corpus evidence locks 27 artifacts into 5 execution,
+  16 measurement-only current lib 1.6, and 6 AOSP conformance roles, with
+  16/16 measurement APKs parsed, 12 structural candidates, four stable-wrapper
+  blockers, 626 unique unregistered surfaces, and zero unsupported opcodes.
+  Its hashes, manifests, and signature-parser checks are local measurement
+  evidence only and do not grant signer trust, admission, installation, DEX
+  execution, or compatibility proof.
 - Exact execution of the pinned constructors/getters listed above and
   BatCave's interpreted popular, paginated text-search, latest-updates, and core
   details plus combined chapter-update and page-list paths through exact request
@@ -1173,6 +1264,10 @@ Not proven or implemented:
 - A general downloaded-extension-to-`KamiSource` bridge beyond the exact
   BatCave, Kawii, and MangaMelon profiles, dynamic/network-backed filter lists,
   or a measured custom reader image-request override.
+- Baozi Manhua 1.6.29 has not yet crossed authenticated admission or runtime
+  execution. Its safe snapshot selection, structural-candidate result,
+  preference calls, custom `imageRequest`, interceptors, and filters are not
+  compatibility proof or a fourth executable profile.
 - Broad Jsoup coverage beyond the measured subset, kotlinx serialization beyond
   the bounded generated encoder/decoder slice,
   persistent source preferences and cookies, rate limiting, automatic complete
@@ -1209,7 +1304,9 @@ Preserve these security facts:
   deny-by-default `HostBridge` registrations.
 - Checksums and locked hashes detect corruption or substitution relative to a
   known fixture; publisher identity comes only from the cryptographically
-  verified APK certificate plus persisted repository/user trust.
+  verified APK certificate plus persisted repository/user trust. Measurement
+  release signature checks are parser conformance only; corpus membership never
+  supplies that trust or an admission capability.
 - Never restore a general `SourceRegistry.add`. Pinned compiled adapters use
   `addPinned`; downloaded adapters must use `addDownloaded` with an
   `ExtensionAdmission` issued and persisted by `ExtensionAdmissionService`.
@@ -1257,39 +1354,36 @@ The rest of the product backlog is in `TODO.md`.
 
 ## Recommended next implementation sequence
 
-1. Lock a broader representative current lib 1.6 corpus by exact release URL
-   and SHA-256, run non-executing plan/ABI reports over it, and record candidate
-   versus blocker counts. Do not treat corpus presence or a structural plan as
-   signer trust, admission, or execution proof.
+1. Authenticate and admit the exact pinned Baozi Manhua 1.6.29 bytes as the
+   fourth current profile. Re-check the SHA-256, signer, manifest, declared
+   source ID, and no-native-code gates, then execute its preference calls,
+   custom `imageRequest`, interceptors, and filters through deterministic fake
+   transport with focused real-APK regressions. Its current structural plan
+   and parser-conformance signature result are not runtime proof.
 2. Extend issue #4's typed recorder at the interpreter/bridge throw seam so
    caught-and-transformed linkage gaps still preserve the first unsupported
    surface, add exact external-field/bridge coverage, and add deterministic
    tooling that turns a fixed corpus gap into a focused regression. Keep the
    app's eventual user-selected file export on the same local-only redaction
    contract.
-3. Select a fourth current extension from the broader static rankings and
-   runtime evidence that exercises
-   preferences or a custom image-request override, then use it as evidence for
-   shared runtime APIs and safe runtime-to-reader cookie continuity. Preserve
-   exact-byte admission, declared source-ID gates, and the no-native-code rule.
-4. After the fourth exact end-to-end proof, generate exact catalog records from
+3. After the Baozi exact end-to-end proof, generate exact catalog records from
    authenticated structural plans and measured capability evidence instead of
    hand-copying entry/wrapper structure. Unknown artifacts must still fail
    closed until their signer, declared source IDs, required host surface, and
    core operations have independently passed the admission policy.
-5. Continue issue #1 with broader external hierarchy and super/default
+4. Continue issue #1 with broader external hierarchy and super/default
    resolution, remaining opcodes, and differential AOSP coverage. Code-item
    geometry, strict try/catch decoding and resolved `Throwable` validation,
    branch/move-result/move-exception rules, bounded exact
    primitive/constructor/reference dataflow, runtime casts/catches,
    receiver-directed virtual/interface-default lookup, lexical parsed-DEX
    `invoke-super`, and invoke word-count/kind checks are already in.
-6. Complete reader chapter transitions and source-cookie sharing, then add
+5. Complete reader chapter transitions and source-cookie sharing, then add
    iPad spreads, fit/crop controls, memory-pressure purging, and download-cache
    integration without weakening image limits.
-7. Add aggregate parser/runtime resource accounting and streaming or
+6. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
-8. Profile the reader on a physical iPhone/iPad with large webtoon chapters and
+7. Profile the reader on a physical iPhone/iPad with large webtoon chapters and
    smoke-test a user-signed build; CI intentionally remains unsigned.
 
 Every new runtime capability should arrive with a synthetic malformed fixture,

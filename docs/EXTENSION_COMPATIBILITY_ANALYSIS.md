@@ -1,10 +1,12 @@
 # Extension Compatibility Analysis
 
-**Date:** 2026-08-21
+**Date:** Ecosystem research verified 2026-08-21; local corpus measurement updated 2026-08-29
 **Scope:** Current (2025–2026) Mihon extension ecosystem, verified against primary sources.
 
-All facts below were verified on 2026-08-21 against the repositories listed in
-[Souces](#sources). Where a claim could not be verified, it is marked **unverified**.
+The ecosystem research was verified on 2026-08-21 against the repositories
+listed in [Sources](#sources); the local corpus evidence in section 6.1 was
+remeasured on 2026-08-29. Where a claim could not be verified, it is marked
+**unverified**.
 
 ---
 
@@ -250,6 +252,28 @@ simplest `ParsedHttpSource` shapes; cannot be the general strategy.
 5. **Backup import** (.tachibk protobuf+zstd) independent of the runtime, so users
    can migrate libraries before extension compat reaches their sources.
 
+### 6.1 Current local corpus measurement (2026-08-29)
+
+The local Kami corpus now locks 27 APK artifacts: five real Keiyoushi execution
+fixtures, 16 current lib 1.6 Keiyoushi measurement-only fixtures under
+`Tests/corpus/measurement/`, and six AOSP apksig conformance fixtures. The
+current lib 1.6 total is 19 (three existing execution fixtures plus the 16
+measurement fixtures). The measurement files occupy 1.24 MB (1,242,086 bytes)
+and were selected by behavior family and shape, not as a statistical sample.
+
+The measurement artifacts are parsed, signature-verified for parser
+conformance, and statically audited only. Corpus membership never grants signer
+trust, admission, installation, or execution. The deterministic audit analyzed
+16/16 measurement APKs with zero errors, found 12 structural candidates and
+four stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), and
+reported 626 unique unregistered external method surfaces with zero unsupported
+opcodes. These are prioritization results, not runtime compatibility proof.
+
+Baozi Manhua 1.6.29 is the selected next fourth-profile target because it is a
+current, catalog-labeled `safe` structural-plan candidate that exercises preferences and a custom
+`imageRequest`; its measurement artifact remains outside the executable catalog
+until an explicit profile is implemented and tested.
+
 ## 7. Prior art (iOS)
 
 - **Tachimanga** — native Swift Tachiyomi-style reader with its **own extension
@@ -270,7 +294,7 @@ feasibility problem**. The blockers, honestly categorized:
 | DEX parsing/analysis | **Done** (this repo, pure Swift) |
 | APK/manifest parsing | **Done** (pure Swift, incl. binary AXML) |
 | Repo index compatibility | **Done** (JSON + proto) |
-| Compatibility diagnostics | **Partial**: exact sources expose bounded typed stage-counted VM gap reports, and `compat-audit gaps` emits a deterministic non-executing static/corpus priority report without paths or request data; app export UX, below-catch first-gap/field coverage, and regression promotion remain open |
+| Compatibility diagnostics | **Partial**: exact sources expose bounded typed stage-counted VM gap reports, and `compat-audit gaps` emits a deterministic non-executing static/corpus priority report without paths or request data. The current 16-artifact measurement run analyzed 16/16 with 0 errors, 12 structural candidates, four stable-wrapper blockers, 626 unique unregistered external method surfaces, and 0 unsupported opcodes; app export UX, below-catch first-gap/field coverage, and regression promotion remain open |
 | DEX execution | **Partial M1/M2 plus three pinned app-facing profiles work**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual selection, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, stable public source-wrapper routing across measured R8 layouts, pinned constructors/getters, BatCave, Kawii Manga, and MangaMelon popular/search/latest/details/chapters/pages execute through bounded async response delivery and exact compatibility models; MangaMelon additionally proves exact static filtered search, while general downloaded-extension compatibility remains open |
 | Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI including query trimming/form encoding and bounded string/collection helpers, bounded collections and comparator sorting, structured coroutine lambdas, atomics/reflection, source filters with validated app-state reapplication, source-base constructors, bounded OkHttp requests, source-scoped async transport, response/body/Okio values including UTF-8/ByteString/Base64 request encoding, bounded Jsoup HTML/CSS including direct-child and `:containsData` semantics, generated-serializer JSON encoding/decoding including defaults/longs/string memo objects, a measured Java-time subset, and reached `SManga`/`MangasPage`/`SChapter`/`SMangaUpdate`/`Page` models; preferences, dynamic filters, additional DOM APIs, and the long tail remain open |
 | Cloudflare/WebView | Native WKWebView bridge design (see NETWORKING.md) |

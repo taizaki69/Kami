@@ -1,15 +1,16 @@
 # Extension Runtime — Measured Status and Staged Plan
 
-**Last updated:** 2026-08-23
+**Last updated:** 2026-08-29
 
 ## Where we are
 
 Kami has crossed from DEX analysis into controlled execution. The partial M1
 interpreter runs synthetic conformance fixtures and progressively deeper paths
-from five pinned Mihon extension APKs. Exact BatCave, Kawii Manga, and
+from five pinned execution-fixture APKs. Exact BatCave, Kawii Manga, and
 MangaMelon profiles now cross the app-facing `KamiSource` boundary end to end under
-deterministic offline fixtures. This is not yet a complete verifier, Java or
-Kotlin runtime, general tachiyomix source bridge, or arbitrary-extension
+deterministic offline fixtures. A separate set of 16 current lib 1.6 APKs is
+locked for non-executing measurement only. This is not yet a complete verifier,
+Java or Kotlin runtime, general tachiyomix source bridge, or arbitrary-extension
 implementation.
 
 The signer-authenticated admission and app installation layers are now wired
@@ -31,6 +32,15 @@ current catalog contains exact BatCave 1.6.9, Kawii Manga 1.6.1, and MangaMelon
 1.6.1 profiles; an authenticated but
 unmeasured extension is stored securely and left disabled rather than executed
 heuristically.
+
+The corpus lock additionally contains 16 current lib 1.6 Keiyoushi APKs under
+`Tests/corpus/measurement/`. Alongside the five execution fixtures and six AOSP
+apksig conformance fixtures, this is 27 artifacts total, including 19 current
+lib 1.6 artifacts (three execution plus 16 measurement). The measurement set is
+behavior-stratified, not statistical, and occupies 1.24 MB (1,242,086 bytes).
+Its artifacts are parsed, signature-verified for parser conformance, and
+statically audited only: membership never grants signer trust, admission,
+installation, or execution.
 
 `InterpretedExtensionPlanInspector` is now the reusable, non-executing discovery
 step shared by those exact profiles and `compat-audit plan`. It parses bounded
@@ -104,6 +114,18 @@ Measured real-APK behavior today:
   custom image-request overrides, or live-site
   availability. The pinned suite never performs live network I/O.
 
+The measurement-only static audit analyzed all 16 current lib 1.6 artifacts
+with zero errors. It found 12 structural candidates and four stable-wrapper
+blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), plus 626 unique
+unregistered external method surfaces and zero unsupported opcodes. These are
+prioritization results, not a compatibility rate and not runtime evidence; the
+measurement APKs remain outside the exact profile catalog and are never
+admitted or executed by this path. Baozi Manhua 1.6.29 is the selected next
+fourth-profile target because it is current, catalog-labeled `safe`, a
+structural-plan candidate,
+and exercises preferences plus a custom `imageRequest`; no execution is claimed
+for it yet.
+
 The iOS Browse screen now consumes that filter contract directly. A generic,
 transactional sheet renders every `SourceFilter` case, including nested groups;
 text searches preserve the source's full filter shape, and Apply can
@@ -118,7 +140,7 @@ stale results, and failed next-page requests no longer advance the page counter.
 Extension APK                       (untrusted)
    ↓ install + signature trust      durable, capability-gated
 content-addressed APK               persisted; re-authenticated on restore
-   ↓ exact profile catalog          BatCave + Kawii + MangaMelon; others fail closed
+   ↓ exact profile catalog          BatCave + Kawii + MangaMelon; measurement APKs fail closed
    ↓ bounded ZIP/DEFLATE + CRC      working
 AndroidManifest.xml (AXML)          working
 classes*.dex                        validated structural parse
@@ -213,7 +235,8 @@ Implemented slice:
 
 Still required before M1 is complete:
 
-- Full instruction and payload coverage for the expanding corpus.
+- Full instruction and payload coverage for the current measurement set and
+  future corpus expansion.
 - Complete interface-default and invoke-super resolution when hierarchy data
   leaves the parsed DEX.
 - Broader resolution for external Java/Kotlin/Android class graphs that are not
@@ -295,10 +318,13 @@ VM linkage/opcode failures by app-facing stage and provides a non-executing
 static corpus audit of unregistered external invocations, unsupported opcodes,
 and plan blockers. The static method list is deliberately a priority signal,
 not runtime proof: virtual/interface dispatch may resolve through a different
-receiver class. The next layer is a broader locked current corpus plus
-first-gap capture below extension catch handlers and regression-promotion
-tooling, followed by a fourth measured source that expands preferences or
-custom image requests without weakening exact byte/signer/admission checks.
+receiver class. The broader current corpus is now locked and measured: all 16
+measurement APKs analyzed without errors, with 12 structural candidates, four
+stable-wrapper blockers, 626 unique unregistered external method surfaces, and
+zero unsupported opcodes. The next layer is first-gap capture below extension
+catch handlers and regression-promotion tooling, followed by the selected
+Baozi Manhua 1.6.29 fourth-profile target, which expands preferences and a
+custom image request without weakening exact byte/signer/admission checks.
 Dynamic/network-backed filter lists also remain open. The longer tail remains
 additional Jsoup DOM behavior, string/collection overloads, broader
 serialization, preferences, and Android context/UI shims. A class appearing in
@@ -310,12 +336,15 @@ mean every method on that class is callable.
 
 The target is a signature-aware bridge from `HttpSource`, `SManga`, `SChapter`,
 `MangasPage`, filters, network helpers, and Jsoup helpers onto `KamiSource`.
-The exact BatCave, Kawii Manga, and MangaMelon profiles implement the currently measured
-subset with one actor per source owning its mutable interpreter and
-source-scoped transport. The app can construct any of the three profiles from a restored
-admission. Their shared structural plan is derived from the authenticated APK
-instead of copied into each profile, but automatic profile admission beyond the
-exact catalog and the remaining APIs are still M3 work. Per-source network clients must own
+The exact BatCave, Kawii Manga, and MangaMelon profiles implement their
+respective measured subsets with one actor per source owning its mutable
+interpreter and source-scoped transport. The app can construct any of the three
+profiles from a restored admission. Their shared structural plan is derived
+from the authenticated APK instead of copied into each profile. The 16
+measurement APKs remain non-executing; Baozi Manhua 1.6.29 is the selected next
+profile target, but its measurement artifact remains non-executable until an
+explicit profile is implemented and tested. Automatic profile admission beyond
+the exact catalog and the remaining APIs are still M3 work. Per-source network clients must own
 rate limits, cookies, and redacted tracing. The first pinned end-to-end adapter
 is tracked in
 [GitHub issue #2](https://github.com/taizaki69/Kami/issues/2).
@@ -371,8 +400,10 @@ compatibility.
 
 ## Verification
 
-`MihonCompatKit` currently has 189 passing tests locally on Windows/Swift 6.3.3.
-They include 6 focused signer regressions, 21 pinned real-extension source/
+`MihonCompatKit` currently has 192 passing tests locally on Windows/Swift 6.3.3.
+The three new `CorpusLockTests` regressions cover separated corpus roles,
+SHA/URL/fetcher and manifest/signature checks, and the deterministic static
+measurement baseline. The suite also includes 6 focused signer regressions, 21 pinned real-extension source/
 execution paths, 3 deterministic structural-plan regressions,
 4 privacy-safe runtime/static diagnostics regressions,
 7 focused HTML/parser-limit regressions, Java URL-encoding and bounded Kotlin
@@ -381,22 +412,24 @@ regressions, generated chapter/page JSON success/failure paths, and 4 focused
 async interpreter/transport regressions, plus 3 BatCave adapter/tamper/
 concurrency regressions and complete Kawii/MangaMelon profile regressions,
 alongside the existing parser, bytecode verifier, request-model, repository,
-and compression coverage. KamiCore has 12 portable Windows tests; macOS CI runs
-all 23, including reader settings and image-pipeline boundaries, Browse feed/
+and compression coverage. KamiCore has 12 portable Windows tests; the
+historical macOS CI run covered all 23, including reader settings and image-pipeline boundaries, Browse feed/
 search routing, SQLite signer persistence,
 repository-key pinning, install/update and legacy confirmation, exact-byte
 restore/factory rejection, enabled-state preservation, and downloaded registry
-replacement/removal. Swift CI verifies the SHA-256-locked APK corpus before
-running it.
+replacement/removal. That historical Swift CI job verified its then-locked
+SHA-256 APK corpus before running it.
 
-Exact implementation commit `e56bd9a` passes
+The exact implementation commit `e56bd9a` is historical CI evidence, not a
+result for the current corpus expansion: it passed
 [Swift CI 32683073872](https://github.com/taizaki69/Kami/actions/runs/32683073872),
 [iOS Build 32683073885](https://github.com/taizaki69/Kami/actions/runs/32683073885),
 and [IPA Package 32683073873](https://github.com/taizaki69/Kami/actions/runs/32683073873).
-Those runs cover the 189-test compatibility suite, optimized CLI build, 23
-KamiCore tests, Simulator/device compilation, and unsigned IPA artifact. The
-iOS build log contains no warning lines after adding the complete iPad
-orientation set.
+Those runs predate the current corpus expansion and 192-test checkout; they
+remain the available CI evidence until a new commit is pushed and rerun. They
+covered the then-189-test compatibility suite, optimized CLI build, 23 KamiCore
+tests, Simulator/device compilation, and unsigned IPA artifact. The iOS build
+log contains no warning lines after adding the complete iPad orientation set.
 
 The compatibility matrix records the exact versions, hashes, and methods. New
 runtime behavior is complete only when it has a focused regression test and,

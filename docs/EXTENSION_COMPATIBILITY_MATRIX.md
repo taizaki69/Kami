@@ -1,8 +1,8 @@
 # Extension Compatibility Matrix
 
-**Last updated:** 2026-08-23
+**Last updated:** 2026-08-29
 
-**Corpus:** immutable Keiyoushi release assets fetched by
+**Corpus:** Keiyoushi release assets fetched from recorded URLs and pinned by SHA-256 via
 `scripts/fetch_corpus.sh` and verified against `Tests/corpus/manifest.json`.
 
 This matrix separates structural loading, shallow VM execution, and full source
@@ -16,16 +16,17 @@ is no compatibility claim.
 | Store index (`index.pb` + gzip) | Working | Live 2026-08-21 sample parsed 1,372 extensions, store metadata, external-list indirection, and signing-key metadata |
 | Legacy JSON index | Working | Schema fixture decoded by `RepositoryIndexTests` |
 | APK acquisition and durable install | Working | Repository entries download into content-addressed app storage; first trust uses the pinned repository key or explicit confirmation of an already-verified legacy-store signer; install/update and enable/disable state persist |
-| APK signing identity | Working on locked v1/v2/v3 corpus | RSA PKCS#1/PSS and ECDSA signer signatures, AOSP chunked content digests, certificate/SPKI matching, v3 proof-of-rotation, stripping protection, exact Mihon SHA-256 fingerprints, and unsigned/tamper rejection are asserted before admission |
+| APK signing identity | Working on locked v1/v2/v3 corpus | RSA PKCS#1/PSS and ECDSA signer signatures, AOSP chunked content digests, certificate/SPKI matching, v3 proof-of-rotation, stripping protection, exact Mihon SHA-256 fingerprints, and unsigned/tamper rejection are asserted before admission for executable artifacts; measurement signatures are verified for parser conformance only and never grant trust or admission |
 | ZIP + DEFLATE | Working | STORE/DEFLATE real APK entries parse with size limits, exact decoded size, and CRC-32 verification |
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
-| DEX structural parse | Working on locked corpus | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
-| Structural execution-plan inspection | Working for the bounded single-source lib 1.6 shape | Non-executing inspection deterministically finds the entry and stable public wrapper for BatCave, Kawii Manga, and MangaMelon; legacy lib 1.4, factories, multidex, native `.so`, ambiguous/missing DEX, invalid identity, and missing wrapper shapes are explicit blockers. A plan establishes no signer trust, catalog admission, or execution proof |
+| DEX structural parse | Working on 21 locked real-extension APKs | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
+| Structural execution-plan inspection | Working for the bounded single-source lib 1.6 shape | Non-executing inspection deterministically finds the entry and stable public wrapper for the three execution profiles and 12 of 16 measurement APKs; the four measurement blockers are Komga, MangaPlus, NHentai.xxx, and XCOMIC. Legacy lib 1.4, factories, multidex, native `.so`, ambiguous/missing DEX, invalid identity, and missing wrapper shapes are explicit blockers. A plan establishes no signer trust, catalog admission, or execution proof |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| Compatibility diagnostics | Partial, privacy-safe local/runtime and static corpus seams working | Pinned sources deduplicate propagated typed VM gaps by operation stage and ignore arbitrary errors; `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths. Static invocations are prioritization only, not runtime failure or admission proof. App export UI, below-catch first-gap capture, broader field/bridge instrumentation, and regression promotion remain open |
-| DEX execution | Partial M1/M2 working | The 189-test suite includes 21 exact pinned-APK source/execution paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, and serialized adapter ownership are checked |
+| Static measurement corpus | Working, non-executing | Sixteen current lib 1.6 measurement-only APKs under `Tests/corpus/measurement/` are SHA/URL locked and analyzed 16/16 with 0 errors; 12 are structural candidates and four have stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, XCOMIC). The report contains 626 unique unregistered external method surfaces and 0 unsupported opcodes. The behavior-stratified 1.24 MB set is prioritization evidence, not a statistical sample or execution/admission proof |
+| Compatibility diagnostics | Partial, privacy-safe local/runtime and static corpus seams working | Pinned sources deduplicate propagated typed VM gaps by operation stage and ignore arbitrary errors; `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths. The current measurement run reports 16/16 analyzed, 0 errors, 626 unique surfaces, and 0 unsupported opcodes. Static invocations are prioritization only, not runtime failure or admission proof. App export UI, below-catch first-gap capture, broader field/bridge instrumentation, and regression promotion remain open |
+| DEX execution | Partial M1/M2 working | The current local 192-test suite includes 21 exact pinned-APK source/execution paths; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, and serialized adapter ownership are checked |
 | Admission restoration and source factory | Working for exact measured profiles | Startup re-reads the enabled installed APK, rechecks hash/signature/signer history/user trust/manifest, and gives the sole factory a fresh capability; the factory repeats exact-byte authentication, rejects undeclared source IDs, and refuses unmeasured profiles |
-| End-to-end source operations | Working for three exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, and MangaMelon 1.6.1 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon adds exact static `Sort`/`Select` filtered search. BatCave additionally proves default image requests and the installed-source registry path. Automatic catalog expansion, dynamic filters, preferences, custom image requests, and live-site availability remain open |
+| End-to-end source operations | Working for three exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, and MangaMelon 1.6.1 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon adds exact static `Sort`/`Select` filtered search. BatCave additionally proves default image requests and the installed-source registry path. The 16 measurement APKs remain outside the executable catalog. Automatic catalog expansion, dynamic filters, preferences, custom image requests, and live-site availability remain open |
 
 ## Per-extension execution
 
@@ -42,6 +43,35 @@ It means only that bounded, non-executing inspection found the supported lib 1.6
 single-source structure. The legacy constructors below remain useful shallow VM
 fixtures, but the plan builder does not pretend their lib 1.4 API shape is the
 current stable-wrapper contract.
+
+## Measurement-only current lib 1.6 corpus
+
+The lock adds 16 SHA/URL-locked current lib 1.6 Keiyoushi APKs under
+`Tests/corpus/measurement/`. They are separate from the five execution fixtures
+(three current lib 1.6 and two legacy lib 1.4) and six AOSP apksig conformance
+fixtures: 27 artifacts total, including 19 current lib 1.6 artifacts. The
+measurement files occupy 1.24 MB (1,242,086 bytes). This is a
+behavior-stratified, not statistical, selection covering distinct extension
+families and shapes.
+
+The measurement APKs are parsed, signature-verified for parser conformance, and
+statically audited only. Membership never grants signer trust, admission,
+installation, or execution. The deterministic `compat-audit gaps
+Tests/corpus/measurement` baseline analyzed 16/16 artifacts with 0 errors,
+found 12 structural candidates and four stable-wrapper blockers (Komga,
+MangaPlus, NHentai.xxx, and XCOMIC), and reported 626 unique unregistered
+external method surfaces with 0 unsupported opcodes. These results are
+prioritization signals, not a compatibility percentage or runtime proof.
+
+The 12 structural candidates are Baozi Manhua, Doctruyen3q, EternalMangas,
+FoolSlide Customizable, Hayalistic, Komikcast, MangaPandaOnl, Mangas Origines
+FR, PixivComic, ReadManga, SSSCanlator, and TuttoAnimeManga. Baozi Manhua
+1.6.29 is the selected next fourth-profile target because it is current,
+catalog-labeled `safe`,
+and a plan candidate that exercises preferences plus a custom `imageRequest`;
+it has not been admitted or executed.
+
+## Exact execution-profile evidence
 
 All five constructors execute their real no-argument DEX paths and return
 objects of the declared entry type. BatCave's popular path additionally proves
@@ -115,50 +145,53 @@ filter admission and malformed filter-schema rejection.
 
 ## Current measured API workload
 
-`compat-audit missing <apk> 10000` was run over the original three locked APKs
-after multidex reference reconciliation. Kawii and MangaMelon were separately
-inspected with `methods` and `disasm`; the aggregate counts below have not been
-recomputed with them, so they remain a prioritization snapshot rather than a
-five-APK total:
+The current `compat-audit gaps Tests/corpus/measurement` baseline is the
+authoritative workload snapshot for the 16 current lib 1.6 measurement APKs.
+It analyzes every artifact without executing DEX, reconciles classes defined
+across the APK's DEX entries, compares exact external method
+prototypes/staticness with the current host registry, and ranks each surface by
+extension and invocation count:
 
-| Class | References |
+| Measurement result | Count |
 |---|---:|
-| `kotlin.collections.CollectionsKt` | 44 |
-| `kotlin.text.StringsKt` | 31 |
-| `java.lang.StringBuilder` | 24 |
-| `java.util.ArrayList` | 20 |
-| `java.lang.String` | 20 |
-| `kotlin.time.Duration` | 18 |
-| `kotlinx.serialization.encoding.CompositeDecoder` | 16 |
-| `okhttp3.Response` | 16 |
-| `okhttp3.HttpUrl` | 16 |
-| `okhttp3.OkHttpClient$Builder` | 15 |
-| `kotlinx.serialization.encoding.CompositeEncoder` | 14 |
-| `java.util.List` | 14 |
-| `okhttp3.Request$Builder` | 13 |
-| `org.jsoup.nodes.Element` | 12 |
+| Artifacts analyzed | 16/16 |
+| Artifact analysis errors | 0 |
+| Structural candidates | 12 |
+| Stable-wrapper blockers | 4 |
+| Unique unregistered external method surfaces | 626 |
+| Unsupported opcodes | 0 |
 
-Some classes above have a small M1 host subset already (for example String and
-StringBuilder) but remain in this table because the class-level analyzer does
-not equate a few bridged methods with full class compatibility. Real method
-tests, not the heuristic percentage, are the acceptance signal.
+The four stable-wrapper blockers are Komga, MangaPlus, NHentai.xxx, and XCOMIC.
+The 626-surface list is a prioritization signal, not a compatibility rate:
+virtual/interface dispatch may resolve through a different receiver class, and
+dead code may never execute. The measurement artifacts are not admitted or
+executed, and their membership does not establish signer trust.
 
-The newer `compat-audit gaps <apk-or-directory>` report supersedes that class-
-only snapshot for ongoing prioritization. It scans decoded instruction
-boundaries, reconciles classes defined across all DEX entries, compares exact
-external method prototypes/staticness with the current host registry, and
-ranks each surface by extension and invocation count. It still deliberately
-does not claim that every unregistered virtual/interface reference will fail;
-runtime receiver dispatch and dead code require operation-level evidence.
+Two optimized Windows runs exited 0 and produced byte-identical UTF-8 reports
+(98,876 bytes; SHA-256
+`37503437e4b0aa67bf17fe13fa0b1d1b1d5ab05d5d2583964b2de0c0fcfd99e3`). The
+reports contain no local-path, corpus-path, APK-filename, URL, authorization or
+proxy-authorization header, `Set-Cookie`, `Bearer`, `token=`, or `password=`
+markers. Safe DEX API identities such as `okhttp3/Cookie` and `CookieJar` are
+not redaction failures.
+
+The older class-only workload snapshot from the original execution fixtures is
+no longer the corpus aggregate; use the locked baseline and deterministic gaps
+report above for current prioritization.
 
 ## Test evidence
 
-- 189/189 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
-  corpus present.
-- Exact implementation commit `e56bd9a` passes
+- 192/192 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+  corpus present. Three new `CorpusLockTests` cover separated roles,
+  SHA/URL/fetcher and manifest/signature checks, and the deterministic static
+  measurement baseline.
+- The exact implementation commit `e56bd9a` is historical CI evidence, not a
+  result for the current corpus expansion; it passed
   [Swift CI 32683073872](https://github.com/taizaki69/Kami/actions/runs/32683073872),
   [iOS Build 32683073885](https://github.com/taizaki69/Kami/actions/runs/32683073885),
   and [IPA Package 32683073873](https://github.com/taizaki69/Kami/actions/runs/32683073873).
+  Those runs predate the current corpus expansion and 192-test checkout; they
+  remain the available CI evidence until a new commit is pushed and rerun.
 - Three plan-inspection regressions prove deterministic current-profile plans,
   explicit legacy lib 1.4 blockers, and malformed-APK failure. The optimized
   CLI batch audit continues after malformed entries, reports every subsequent
@@ -166,13 +199,18 @@ runtime receiver dispatch and dead code require operation-level evidence.
 - Four diagnostics regressions prove typed-only runtime recording and
   deduplication, DEX-symbol redaction, an actionable `.popular` report from a
   failed real BatCave source operation, and deterministic order-independent
-  static aggregation across all three current profiles. Two complete release
-  CLI corpus runs were byte-identical and contained none of the checked path,
-  URL, authorization, cookie, bearer, token, or password markers.
+  static aggregation across all three current profiles. Two optimized Windows
+  measurement-corpus runs were byte-identical (98,876 UTF-8 bytes; SHA-256
+  `37503437e4b0aa67bf17fe13fa0b1d1b1d5ab05d5d2583964b2de0c0fcfd99e3`) and
+  contained none of the checked local/corpus path, APK filename, URL,
+  authorization or proxy-authorization header, `Set-Cookie`, `Bearer`,
+  `token=`, or `password=` markers. Safe DEX API identities containing
+  `Cookie` are expected.
 - Six verifier regressions cover five real Keiyoushi v2 APKs, AOSP v1 and v3,
   verified certificate rotation, signed-content and signer-signature tampering,
-  unsigned input, fingerprint normalization, and v3-block stripping. Twenty-three
-  macOS KamiCore tests cover persisted repository/user trust, unrelated-signer
+  unsigned input, fingerprint normalization, and v3-block stripping. The
+  historical exact-head macOS CI run's 23 KamiCore tests cover persisted
+  repository/user trust, unrelated-signer
   rejection, source-ID capability admission, rotation-aware updates,
   downgrade/same-version replacement rejection, repository-key persistence,
   exact-file startup restoration, install confirmation, enabled state, and
@@ -226,7 +264,8 @@ runtime receiver dispatch and dead code require operation-level evidence.
   bounded encoding/streaming, cancellation, and cookie scope.
 - Parser hardening covers checksum/size/count limits and every truncated prefix
   of generated valid DEX and ZIP fixtures.
-- `compat-audit` builds in release mode and is uploaded by Swift CI.
+- The historical exact-head Swift CI run built `compat-audit` in release mode
+  and uploaded it; the current checkout also builds it locally in release mode.
 
 ## Honest frontier
 
@@ -243,9 +282,15 @@ registration are working. Browse renders every app-facing filter case,
 preserves the full source filter shape for text search, and supports
 blank-query static filtered search. Typed runtime compatibility reports and a
 non-executing static gap/corpus audit are working without changing admission;
-app export UX, deeper first-gap/field instrumentation, regression promotion,
-and a broader locked corpus remain open. Automatic catalog expansion, dynamic filter sources,
-preferences, and custom image-request overrides remain open. Remaining
+the broader 16-artifact current-lib-1.6 measurement corpus is now locked and
+fully analyzed, so corpus expansion is no longer open. App export UX, deeper
+first-gap/field instrumentation, and regression promotion remain open. Automatic
+catalog expansion, dynamic filter sources, preferences, and custom image-request
+overrides remain open. Baozi Manhua 1.6.29 is the selected next fourth-profile
+target because it is current, catalog-labeled `safe`, a structural-plan
+candidate, and exercises
+preferences plus a custom `imageRequest`; its measurement artifact has not been
+admitted or executed. Remaining
 DEX work (notably
 broader external hierarchy and super/default resolution beyond parsed class
 graphs, opcode coverage, and differential semantics) is tracked in
