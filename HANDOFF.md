@@ -306,8 +306,8 @@ Historical pushed checkpoints (preserved below; prior stop state was
   AOSP v1, v3, rotated, unsigned, invalid-signature, tampered-content, and
   stripped-scheme fixtures. KamiCore separately checks unrelated repository
   signers and update identities. The tiny AOSP fixtures and full Apache-2.0
-  license are tracked; real extension APKs remain ignored and fetched by hash
-  lock.
+  license are tracked. The exact real-extension fixtures are now vendored under
+  their upstream Apache-2.0 license and checked by hash; they are not app assets.
 - Issue #3 is closed with the final evidence in
   [comment 5388393509](https://github.com/taizaki69/Kami/issues/3#issuecomment-5388393509).
   The exact-head typed-error hardening is recorded in
@@ -546,19 +546,22 @@ it as a source regression.
 
 The iOS app itself still requires macOS and Xcode.
 
-### Restore the real-extension corpus
+### Verify the vendored extension corpus
 
-The APK corpus is intentionally not stored in Git:
+The 27 exact APK fixtures are stored in Git for deterministic clean-clone and
+CI verification. Run:
 
 ```bash
 bash scripts/fetch_corpus.sh
 ```
 
-The script restores five SHA-256-pinned Keiyoushi execution release assets, 16
-SHA-256-pinned current lib 1.6 measurement assets under the nested
-`Tests/corpus/measurement/` directory, and six AOSP conformance fixtures. It
-verifies every SHA-256 value against `Tests/corpus/manifest.json`. On Windows,
-run it from Git Bash or WSL, or let Swift CI fetch the corpus.
+The script verifies five SHA-256-pinned Keiyoushi execution fixtures, 16
+SHA-256-pinned current lib 1.6 measurement fixtures under the nested
+`Tests/corpus/measurement/` directory, and six AOSP conformance fixtures against
+`Tests/corpus/manifest.json`. A recorded upstream URL is only a convenience
+fallback for a missing or hash-mismatched file; `git restore Tests/corpus` is
+the durable recovery path after upstream release rotation. On Windows, run the
+script from Git Bash or WSL.
 
 Do not copy these generated or ignored paths between computers:
 
@@ -566,10 +569,9 @@ Do not copy these generated or ignored paths between computers:
 - `Packages/MihonCompatKit/.build/`
 - generated `.xcodeproj`, `DerivedData/`, `dist/`, or IPA files
 
-`Tests/corpus/*.apk` and the nested `Tests/corpus/measurement/*.apk` can be
-regenerated with the fetch script. The ignored `Tests/corpus/index.pb` is not
-required by the pinned APK execution suite; measurement APKs are for static
-analysis only.
+The ignored `Tests/corpus/index.pb` is not required by the pinned APK execution
+suite. The nested measurement APKs are vendored static-analysis fixtures only;
+they must not be admitted or executed.
 
 Never commit `.env` files, Apple certificates, provisioning profiles, P12
 files, passwords, cookies, or signing credentials.
@@ -782,10 +784,9 @@ extension admission:
 - The general public registry insertion method is gone. Compiled pinned sources
   use `addPinned`; downloaded sources require an internal-init persisted
   `ExtensionAdmission` and one of its declared source IDs.
-- Six tiny AOSP apksig fixtures are tracked with their full Apache-2.0 license;
-  their pinned hashes eliminate a flaky Gitiles dependency. Real extension
-  APKs remain ignored and downloaded from recorded release URLs with exact
-  SHA-256 verification.
+- Six tiny AOSP apksig fixtures and the exact real-extension corpus are tracked
+  with Apache-2.0 attribution and pinned hashes. They eliminate live Gitiles and
+  rotating-release dependencies without becoming app assets or admission proof.
 - Their exact-head workflows proved 171 MihonCompatKit tests, 8 macOS KamiCore tests,
   optimized CLI output, both iOS build destinations, and the unsigned IPA.
   Issue #3 is closed. Those capabilities now feed the install/restore/factory

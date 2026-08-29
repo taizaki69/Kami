@@ -59,12 +59,14 @@ unregistered external method surfaces with zero unsupported opcodes. Membership
 never grants signer trust, admission, installation, or execution. Run the
 non-executing audit with `compat-audit gaps Tests/corpus/measurement`.
 
-All real Keiyoushi APKs are gitignored third-party binaries downloaded from
-recorded release URLs and pinned by SHA-256. The AOSP fixtures are vendored at a pinned source
-revision with the upstream Apache-2.0 license so CI does not depend on Gitiles
-availability. The script verifies every SHA-256 in `Tests/corpus/manifest.json`
-and restores missing fixtures; the current local test run verifies the lock
-before the tests.
+All 21 real Keiyoushi APKs are vendored, SHA-256-pinned Apache-2.0 test inputs;
+they are not linked into or shipped by the iOS app. Their attribution is in
+`Tests/corpus/KEIYOUSHI-EXTENSIONS-NOTICE.md`. The AOSP fixtures are likewise
+vendored at a pinned source revision with the upstream Apache-2.0 license. This
+keeps CI independent of Keiyoushi release rotation and Gitiles availability.
+The script verifies every SHA-256 in `Tests/corpus/manifest.json` and only uses
+the recorded upstream URL as a convenience fallback for a missing or
+hash-mismatched file.
 
 ## GitHub Actions
 

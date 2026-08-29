@@ -2,8 +2,9 @@
 
 **Last updated:** 2026-08-29
 
-**Corpus:** Keiyoushi release assets fetched from recorded URLs and pinned by SHA-256 via
-`scripts/fetch_corpus.sh` and verified against `Tests/corpus/manifest.json`.
+**Corpus:** Keiyoushi release assets vendored from recorded release URLs and
+pinned by SHA-256 via `scripts/fetch_corpus.sh`, then verified against
+`Tests/corpus/manifest.json`. The URLs remain provenance and recovery fallbacks.
 
 This matrix separates structural loading, shallow VM execution, and full source
 operations. A check mark means a concrete assertion passed; a dash means there

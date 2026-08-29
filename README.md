@@ -201,8 +201,11 @@ gap/corpus report from the locked corpus.
 
 ## Non-goals / legality
 
-Kami bundles no content and no sources' code. Extensions are user-installed
-from third-party repositories at the user's direction.
+Kami's iOS app target bundles no manga content or third-party extension code.
+Extensions are user-installed from third-party repositories at the user's
+direction. The repository separately vendors hash-pinned third-party APKs under
+`Tests/corpus/` solely as test fixtures; they are not app resources or shipped
+with the app.
 
 Kami's original code is currently public but unlicensed: copyright is retained
 by its creator and all rights are reserved while the long-term distribution

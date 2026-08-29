@@ -19,15 +19,20 @@ the release signatures as parser conformance, but exact trust and admission
 remain in Kami's separate repository-key and install-admission policy, and
 executable profiles remain an explicit fail-closed catalog.
 
-Real extension APKs remain ignored by Git. Restore every pinned byte sequence
-with:
+All 27 exact APK fixtures are vendored so clean clones and CI remain
+deterministic even when upstream rotates release objects. The 21 Keiyoushi APKs
+are Apache-2.0 test inputs with attribution in
+`KEIYOUSHI-EXTENSIONS-NOTICE.md`; they are not linked into or shipped by the
+iOS app. Verify every pinned byte sequence with:
 
 ```sh
 bash scripts/fetch_corpus.sh
 ```
 
-The fetcher restores each recorded URL and checks the result against the
-SHA-256 in the lock; the hash, not release-tag mutability, pins the exact bytes.
-Swift tests then verify the complete lock/fetch mapping, APK manifest
-identities, signature-parser acceptance for measurement releases, and the
-deterministic static baseline in `measurement-baseline.json`.
+The script accepts an already-vendored file only when its SHA-256 matches the
+lock. If a fixture is missing or hash-mismatched, it attempts the recorded
+upstream URL as a convenience fallback; `git restore Tests/corpus` is the
+durable recovery path when an upstream release has rotated away. Swift tests
+verify the complete lock/fetch mapping, APK manifest identities,
+signature-parser acceptance for measurement releases, and the deterministic
+static baseline in `measurement-baseline.json`.

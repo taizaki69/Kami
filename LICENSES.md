@@ -19,8 +19,15 @@ decision.
 - **Mihon** (Apache-2.0) and **tachiyomix** (MPL-2.0 for spec, Apache-2.0 for
   library) — studied to reproduce extension manifest keys, index formats, and
   API semantics. No source code copied.
-- **Keiyoushi extensions** — third-party content fetched at runtime by user
-  action for analysis/testing; never bundled.
+- **Keiyoushi extension test fixtures** — Apache-2.0. Twenty-one exact upstream
+  APKs are vendored under `Tests/corpus/` solely as deterministic offline parser,
+  signature, execution-fixture, and static-measurement inputs. They are not
+  linked into or shipped by the iOS app. Exact hashes/provenance and the
+  non-execution/admission boundary are recorded in `Tests/corpus/manifest.json`
+  and `Tests/corpus/KEIYOUSHI-EXTENSIONS-NOTICE.md`. The standard Apache-2.0
+  license text is reproduced in `Tests/corpus/KEIYOUSHI-LICENSE.txt`. Source:
+  <https://github.com/keiyoushi/extensions-source>. Release/catalog repository:
+  <https://github.com/keiyoushi/extensions>.
 
 ## Runtime dependencies
 - **SwiftSoup 2.9.6** — MIT license. Used as the bounded HTML parser and CSS
