@@ -6,11 +6,18 @@ final class OkHttpInterceptorChainTests: XCTestCase {
         let descriptor: String
         let label: String?
         let burnInstructions: Int
+        let recordsRequest: Bool
 
-        init(_ descriptor: String, label: String? = nil, burnInstructions: Int = 0) {
+        init(
+            _ descriptor: String,
+            label: String? = nil,
+            burnInstructions: Int = 0,
+            recordsRequest: Bool = false
+        ) {
             self.descriptor = descriptor
             self.label = label
             self.burnInstructions = burnInstructions
+            self.recordsRequest = recordsRequest
         }
     }
 
@@ -89,6 +96,12 @@ final class OkHttpInterceptorChainTests: XCTestCase {
             shorty: "VL",
             parameters: ["Ljava/lang/String;"]
         )
+        let recordRequest = builder.method(
+            classDescriptor: "LTrace;",
+            name: "recordRequest",
+            shorty: "VL",
+            parameters: ["Lokhttp3/Request;"]
+        )
         for spec in specs {
             let down: Int?
             let up: Int?
@@ -106,7 +119,10 @@ final class OkHttpInterceptorChainTests: XCTestCase {
             }
             instructions += Insn.invokeInterface(request, [3])
                 + Insn.moveResultObject(0)
-                + Insn.invokeInterface(proceed, [3, 0])
+            if spec.recordsRequest {
+                instructions += Insn.invokeStatic(recordRequest, [0])
+            }
+            instructions += Insn.invokeInterface(proceed, [3, 0])
                 + Insn.moveResultObject(0)
             if let up {
                 instructions += Insn.constString(1, up)
@@ -299,12 +315,13 @@ final class OkHttpInterceptorChainTests: XCTestCase {
 
     private func requestValue(
         url: String = "https://example.test/start",
+        headers: [CompatHTTPHeader] = [],
         fields: [String: RVal] = [:]
     ) -> RVal {
         .obj(ObjInstance(
             dexType: "Lokhttp3/Request;",
             fields: fields,
-            payload: CompatHTTPRequest(url: url),
+            payload: CompatHTTPRequest(url: url, headers: headers),
             isHost: true
         ))
     }
@@ -742,6 +759,133 @@ final class OkHttpInterceptorChainTests: XCTestCase {
         XCTAssertEqual(requestCount, 1)
     }
 
+    func testReaderImageRunsApplicationOnceAndNetworkInterceptorsForEveryRedirect() async throws {
+        let startURL = "https://one.example/start.jpg"
+        let nextURL = "https://two.example/next.jpg"
+        let transport = SingleExchangeRoutingTransport(routes: [
+            startURL: CompatHTTPResponse(
+                finalURL: startURL,
+                statusCode: 302,
+                headers: [CompatHTTPHeader(name: "Location", value: nextURL)]
+            ),
+            nextURL: CompatHTTPResponse(
+                finalURL: nextURL,
+                statusCode: 200,
+                body: [7, 8, 9]
+            ),
+        ])
+        let dex = try passThroughDEX([
+            PassThroughSpec("LReaderApplication;", label: "application"),
+            PassThroughSpec(
+                "LReaderNetwork;",
+                label: "network",
+                recordsRequest: true
+            ),
+        ])
+        let bridge = HostBridge.minimal(transport: transport)
+        var trace: [String] = []
+        var networkRequests: [RVal] = []
+        bridge.register(
+            class: "LTrace;", "record",
+            prototype: "(Ljava/lang/String;)V", isStatic: true
+        ) { _, args in
+            trace.append(vmStringValue(args[0]))
+            return .null
+        }
+        bridge.register(
+            class: "LTrace;", "recordRequest",
+            prototype: "(Lokhttp3/Request;)V", isStatic: true
+        ) { _, args in
+            networkRequests.append(args[0])
+            return .null
+        }
+        let vm = DexInterpreter(dex: dex, bridge: bridge)
+        let configuredClient = try client(
+            bridge,
+            vm,
+            application: [RVal.obj(ObjInstance(dexType: "LReaderApplication;"))],
+            network: [RVal.obj(ObjInstance(dexType: "LReaderNetwork;"))]
+        )
+        let retainedTag = RVal.obj(ObjInstance(dexType: "LReaderTag;"))
+        let request = requestValue(
+            url: startURL,
+            headers: [
+                CompatHTTPHeader(name: "Authorization", value: "Bearer secret"),
+                CompatHTTPHeader(name: "Referer", value: "https://reader.example/"),
+            ],
+            fields: ["tag:LReaderTag;": retainedTag]
+        )
+
+        let response = try await bridge.executeImageRequest(
+            requestValue: request,
+            clientValue: configuredClient,
+            vm: vm
+        )
+
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(response.finalURL, nextURL)
+        XCTAssertEqual(response.body, [7, 8, 9])
+        XCTAssertEqual(trace, [
+            "application-down",
+            "network-down", "network-up",
+            "network-down", "network-up",
+            "application-up",
+        ])
+        XCTAssertEqual(networkRequests.count, 2)
+        XCTAssertTrue(networkRequests[0] === request)
+        XCTAssertFalse(networkRequests[1] === request)
+        for networkRequest in networkRequests {
+            guard case let .obj(object) = networkRequest else {
+                return XCTFail("network interceptor must receive a Request object")
+            }
+            let tag = try XCTUnwrap(object.fields["tag:LReaderTag;"])
+            XCTAssertTrue(tag === retainedTag)
+        }
+        let requests = await transport.requests()
+        XCTAssertEqual(requests.map(\.url), [startURL, nextURL])
+        XCTAssertEqual(requests[0].headers.count, 2)
+        XCTAssertEqual(requests[1].headers, [
+            CompatHTTPHeader(name: "Referer", value: "https://reader.example/"),
+        ])
+        let automaticExecutions = await transport.automaticExecutionCount()
+        XCTAssertEqual(automaticExecutions, 0)
+    }
+
+    func testReaderRedirectsShareTheSixtyFourStepBudgetAcrossExchanges() async throws {
+        let url = "https://example.test/loop.jpg"
+        let transport = SingleExchangeRoutingTransport(routes: [
+            url: CompatHTTPResponse(
+                finalURL: url,
+                statusCode: 302,
+                headers: [CompatHTTPHeader(name: "Location", value: "/loop.jpg")]
+            ),
+        ])
+        let descriptors = (0..<10).map { "LReaderNetwork\($0);" }
+        let dex = try passThroughDEX(descriptors.map { PassThroughSpec($0) })
+        let bridge = HostBridge.minimal(transport: transport)
+        let vm = DexInterpreter(dex: dex, bridge: bridge)
+        let configuredClient = try client(
+            bridge,
+            vm,
+            network: descriptors.map { RVal.obj(ObjInstance(dexType: $0)) }
+        )
+
+        do {
+            _ = try await bridge.executeImageRequest(
+                requestValue: requestValue(url: url),
+                clientValue: configuredClient,
+                vm: vm
+            )
+            XCTFail("expected the shared reader redirect step budget to reject the chain")
+        } catch {
+            XCTAssertEqual(throwableDescriptor(error), "Ljava/lang/IllegalStateException;")
+        }
+        let requests = await transport.requests()
+        let automaticExecutions = await transport.automaticExecutionCount()
+        XCTAssertEqual(requests.count, 5)
+        XCTAssertEqual(automaticExecutions, 0)
+    }
+
     private actor RecordingTransport: CompatHTTPTransport {
         nonisolated let sourceID = "interceptor-chain-tests"
         private let response: CompatHTTPResponse
@@ -770,5 +914,38 @@ final class OkHttpInterceptorChainTests: XCTestCase {
         func requestCount() -> Int {
             recorded.count
         }
+    }
+
+    private actor SingleExchangeRoutingTransport: CompatHTTPSingleExchangeTransport {
+        enum Failure: Error {
+            case automaticExecution
+            case missingRoute
+        }
+
+        nonisolated let sourceID = "single-exchange-interceptor-tests"
+        private let routes: [String: CompatHTTPResponse]
+        private var recorded: [CompatHTTPRequest] = []
+        private var automaticExecutions = 0
+
+        init(routes: [String: CompatHTTPResponse]) {
+            self.routes = routes
+        }
+
+        func execute(_ request: CompatHTTPRequest) async throws -> CompatHTTPResponse {
+            automaticExecutions += 1
+            throw Failure.automaticExecution
+        }
+
+        func executeSingleExchange(
+            _ request: CompatHTTPRequest
+        ) async throws -> CompatHTTPResponse {
+            recorded.append(request)
+            guard let response = routes[request.url] else { throw Failure.missingRoute }
+            await Task.yield()
+            return response
+        }
+
+        func requests() -> [CompatHTTPRequest] { recorded }
+        func automaticExecutionCount() -> Int { automaticExecutions }
     }
 }

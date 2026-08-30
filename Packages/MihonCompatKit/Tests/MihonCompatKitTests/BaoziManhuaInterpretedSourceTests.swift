@@ -41,6 +41,36 @@ final class BaoziManhuaInterpretedSourceTests: XCTestCase {
         func snapshot() -> [CompatHTTPRequest] { requests }
     }
 
+    private actor SingleExchangeRoutingTransport: CompatHTTPSingleExchangeTransport {
+        nonisolated let sourceID = "baozi-manhua-single-exchange-test"
+
+        private let responses: [String: CompatHTTPResponse]
+        private var requests: [CompatHTTPRequest] = []
+        private var automaticExecutions = 0
+
+        init(responses: [String: CompatHTTPResponse]) {
+            self.responses = responses
+        }
+
+        func execute(_ request: CompatHTTPRequest) async throws -> CompatHTTPResponse {
+            automaticExecutions += 1
+            throw RoutingError.missingResponse("automatic:" + request.url)
+        }
+
+        func executeSingleExchange(
+            _ request: CompatHTTPRequest
+        ) async throws -> CompatHTTPResponse {
+            requests.append(request)
+            guard let response = responses[request.url] else {
+                throw RoutingError.missingResponse(request.url)
+            }
+            return response
+        }
+
+        func snapshot() -> [CompatHTTPRequest] { requests }
+        func automaticExecutionCount() -> Int { automaticExecutions }
+    }
+
     private func corpusAPK() throws -> [UInt8] {
         let path = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -203,6 +233,55 @@ final class BaoziManhuaInterpretedSourceTests: XCTestCase {
         let requests = await transport.snapshot()
         XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(requests.first?.url, imageURL)
+        XCTAssertTrue(source.compatibilityReport().findings.isEmpty)
+    }
+
+    func testBaoziReaderImageRewritesAndFollowsAnObservableRedirect() async throws {
+        let imageURL = "https://static.baozimh.com/chapter/001.jpg"
+        let rewrittenURL = "https://cn.baozimh.com/chapter/002.jpg"
+        let transport = SingleExchangeRoutingTransport(responses: [
+            imageURL: CompatHTTPResponse(
+                finalURL: imageURL,
+                statusCode: 302,
+                headers: [
+                    CompatHTTPHeader(
+                        name: "Location",
+                        value: "https://redirect.example/chapter/002.jpg"
+                    ),
+                    CompatHTTPHeader(name: "X-Kami-Fixture", value: "first-exchange"),
+                ],
+                body: [1]
+            ),
+            rewrittenURL: CompatHTTPResponse(
+                finalURL: rewrittenURL,
+                statusCode: 200,
+                headers: [CompatHTTPHeader(name: "Content-Type", value: "image/jpeg")],
+                body: [0xff, 0xd8, 0xff, 0xd9]
+            ),
+        ])
+        let source = try PinnedInterpretedSource.baoziManhua1629(
+            apkBytes: corpusAPK(),
+            transport: transport,
+            preferences: try InterpretedExtensionPreferences(
+                strings: ["BAOZI_BANNER": "0"]
+            )
+        )
+
+        let generated = await source.getImageRequest(page: PageCompat(
+            index: 0,
+            imageURL: "https://static.baozicdn.com/chapter/001.jpg"
+        ))
+        let imageRequest = try XCTUnwrap(generated)
+        let executed = try await imageRequest.executeSourceRequest()
+        let response = try XCTUnwrap(executed)
+
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(response.finalURL, rewrittenURL)
+        XCTAssertEqual(response.body, [0xff, 0xd8, 0xff, 0xd9])
+        let requests = await transport.snapshot()
+        let automaticExecutions = await transport.automaticExecutionCount()
+        XCTAssertEqual(requests.map(\.url), [imageURL, rewrittenURL])
+        XCTAssertEqual(automaticExecutions, 0)
         XCTAssertTrue(source.compatibilityReport().findings.isEmpty)
     }
 

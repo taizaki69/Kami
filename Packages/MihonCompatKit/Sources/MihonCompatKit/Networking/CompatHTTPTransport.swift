@@ -72,6 +72,17 @@ public protocol CompatHTTPTransport: Sendable {
     func execute(_ request: CompatHTTPRequest) async throws -> CompatHTTPResponse
 }
 
+/// Optional transport capability for callers that need to observe one HTTP
+/// exchange before redirect follow-up. The ordinary `execute` contract keeps
+/// its existing automatic-redirect behavior; this narrower seam is used by
+/// source-scoped reader requests whose network interceptors must see and may
+/// rewrite a 3xx response before the next request is selected.
+public protocol CompatHTTPSingleExchangeTransport: CompatHTTPTransport {
+    func executeSingleExchange(
+        _ request: CompatHTTPRequest
+    ) async throws -> CompatHTTPResponse
+}
+
 /// Errors deliberately omit URLs, query strings, headers, cookies, and bodies.
 public enum CompatHTTPTransportError: Swift.Error, Sendable, Equatable, CustomStringConvertible {
     case invalidURL
@@ -114,7 +125,7 @@ public enum CompatHTTPTransportError: Swift.Error, Sendable, Equatable, CustomSt
 /// Production URLSession adapter. Response data is accumulated through
 /// URLSessionDataDelegate callbacks, so the body limit is enforced while bytes
 /// arrive rather than after URLSession has buffered the entire response.
-public actor URLSessionCompatHTTPTransport: CompatHTTPTransport {
+public actor URLSessionCompatHTTPTransport: CompatHTTPSingleExchangeTransport {
     public nonisolated let sourceID: String
     public let policy: CompatHTTPTransportPolicy
 
@@ -135,11 +146,25 @@ public actor URLSessionCompatHTTPTransport: CompatHTTPTransport {
     }
 
     public func execute(_ request: CompatHTTPRequest) async throws -> CompatHTTPResponse {
+        try await execute(request, followsRedirects: true)
+    }
+
+    public func executeSingleExchange(
+        _ request: CompatHTTPRequest
+    ) async throws -> CompatHTTPResponse {
+        try await execute(request, followsRedirects: false)
+    }
+
+    private func execute(
+        _ request: CompatHTTPRequest,
+        followsRedirects: Bool
+    ) async throws -> CompatHTTPResponse {
         var encoded = try CompatHTTPRequestEncoder.encode(request, policy: policy)
         cookieJar.apply(to: &encoded)
         let response = try await CompatHTTPTaskRunner(
             policy: policy,
-            protocolClasses: protocolClasses
+            protocolClasses: protocolClasses,
+            followsRedirects: followsRedirects
         ).run(encoded)
         cookieJar.store(from: response)
         return response
@@ -396,6 +421,50 @@ enum CompatHTTPRequestEncoder {
 }
 
 enum CompatHTTPRedirectPolicy {
+    private static let redirectStatusCodes: Set<Int> = [300, 301, 302, 303, 307, 308]
+
+    static func followUpGETRequest(
+        from request: CompatHTTPRequest,
+        response: CompatHTTPResponse,
+        redirectCount: Int,
+        policy: CompatHTTPTransportPolicy
+    ) throws -> CompatHTTPRequest? {
+        guard redirectStatusCodes.contains(response.statusCode),
+              let location = response.headers.reversed().first(where: {
+                  $0.name.caseInsensitiveCompare("Location") == .orderedSame
+              })?.value else {
+            return nil
+        }
+        guard request.method == "GET", request.body == nil,
+              let sourceURL = URL(string: response.finalURL),
+              let destination = URL(string: location, relativeTo: sourceURL)?.absoluteURL else {
+            throw CompatHTTPTransportError.invalidResponse
+        }
+        guard redirectCount <= policy.maximumRedirects else {
+            throw CompatHTTPTransportError.tooManyRedirects(limit: policy.maximumRedirects)
+        }
+        let validated = try CompatHTTPRequestEncoder.validatedURL(
+            destination.absoluteString,
+            policy: policy
+        )
+        if sourceURL.scheme?.lowercased() == "https",
+           validated.scheme?.lowercased() == "http",
+           !policy.allowsHTTPSDowngrade {
+            throw CompatHTTPTransportError.insecureRedirect
+        }
+
+        let sensitive = ["authorization", "proxy-authorization", "cookie", "host"]
+        let headers = sameOrigin(sourceURL, validated) ? request.headers : request.headers.filter {
+            !sensitive.contains($0.name.lowercased())
+        }
+        return CompatHTTPRequest(
+            url: validated.absoluteString,
+            method: "GET",
+            headers: headers,
+            cachePolicy: request.cachePolicy
+        )
+    }
+
     static func sanitizedRequest(
         from sourceURL: URL,
         proposed: URLRequest,
@@ -503,6 +572,7 @@ private final class CompatHTTPTaskRunner: NSObject, URLSessionDataDelegate,
     URLSessionTaskDelegate, @unchecked Sendable {
     private let policy: CompatHTTPTransportPolicy
     private let protocolClasses: [AnyClass]?
+    private let followsRedirects: Bool
     private let lock = NSLock()
     private var buffer: CompatHTTPResponseBuffer
     private var continuation: CheckedContinuation<CompatHTTPResponse, Swift.Error>?
@@ -513,9 +583,14 @@ private final class CompatHTTPTaskRunner: NSObject, URLSessionDataDelegate,
     private var cancellationRequested = false
     private var finished = false
 
-    init(policy: CompatHTTPTransportPolicy, protocolClasses: [AnyClass]?) {
+    init(
+        policy: CompatHTTPTransportPolicy,
+        protocolClasses: [AnyClass]?,
+        followsRedirects: Bool
+    ) {
         self.policy = policy
         self.protocolClasses = protocolClasses
+        self.followsRedirects = followsRedirects
         self.buffer = CompatHTTPResponseBuffer(policy: policy)
     }
 
@@ -638,6 +713,10 @@ private final class CompatHTTPTaskRunner: NSObject, URLSessionDataDelegate,
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
+        guard followsRedirects else {
+            completionHandler(nil)
+            return
+        }
         do {
             lock.lock()
             redirectCount += 1

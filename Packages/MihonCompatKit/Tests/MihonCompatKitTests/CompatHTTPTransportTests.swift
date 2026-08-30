@@ -195,6 +195,68 @@ final class CompatHTTPTransportTests: XCTestCase {
         }
     }
 
+    func testGETFollowUpUsesRewrittenLocationAndPreservesOnlySafeCrossOriginHeaders() throws {
+        let request = CompatHTTPRequest(
+            url: "https://one.example/images/start.jpg",
+            headers: [
+                CompatHTTPHeader(name: "Authorization", value: "Bearer secret"),
+                CompatHTTPHeader(name: "Proxy-Authorization", value: "proxy secret"),
+                CompatHTTPHeader(name: "Cookie", value: "session=secret"),
+                CompatHTTPHeader(name: "Host", value: "one.example"),
+                CompatHTTPHeader(name: "Referer", value: "https://reader.example/"),
+            ],
+            cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 30)
+        )
+        let response = CompatHTTPResponse(
+            finalURL: request.url,
+            statusCode: 302,
+            headers: [
+                CompatHTTPHeader(name: "Location", value: "/ignored.jpg"),
+                CompatHTTPHeader(name: "Location", value: "https://two.example/final.jpg"),
+            ]
+        )
+        let followUp = try XCTUnwrap(CompatHTTPRedirectPolicy.followUpGETRequest(
+            from: request,
+            response: response,
+            redirectCount: 1,
+            policy: .init(maximumRedirects: 2)
+        ))
+
+        XCTAssertEqual(followUp.url, "https://two.example/final.jpg")
+        XCTAssertEqual(followUp.method, "GET")
+        XCTAssertNil(followUp.body)
+        XCTAssertEqual(followUp.cachePolicy, request.cachePolicy)
+        XCTAssertEqual(followUp.headers, [
+            CompatHTTPHeader(name: "Referer", value: "https://reader.example/"),
+        ])
+        XCTAssertNil(try CompatHTTPRedirectPolicy.followUpGETRequest(
+            from: request,
+            response: CompatHTTPResponse(finalURL: request.url, statusCode: 404),
+            redirectCount: 1,
+            policy: .init()
+        ))
+        XCTAssertThrowsError(try CompatHTTPRedirectPolicy.followUpGETRequest(
+            from: request,
+            response: response,
+            redirectCount: 3,
+            policy: .init(maximumRedirects: 2)
+        )) {
+            XCTAssertEqual($0 as? CompatHTTPTransportError, .tooManyRedirects(limit: 2))
+        }
+
+        let downgrade = CompatHTTPResponse(
+            finalURL: request.url,
+            statusCode: 302,
+            headers: [CompatHTTPHeader(name: "Location", value: "http://one.example/final.jpg")]
+        )
+        XCTAssertThrowsError(try CompatHTTPRedirectPolicy.followUpGETRequest(
+            from: request,
+            response: downgrade,
+            redirectCount: 1,
+            policy: .init()
+        )) { XCTAssertEqual($0 as? CompatHTTPTransportError, .insecureRedirect) }
+    }
+
     func testResponseBufferEnforcesHeaderDeclaredAndStreamedBodyLimits() throws {
         let url = try XCTUnwrap(URL(string: "https://example.test/final"))
         let response = try XCTUnwrap(HTTPURLResponse(
@@ -377,6 +439,53 @@ final class CompatHTTPTransportTests: XCTestCase {
                 .responseBodyTooLarge(limit: 4)
             )
         }
+    }
+
+    func testURLSessionSingleExchangeExposesRedirectAndStoresItsCookie() async throws {
+        let startURL = try XCTUnwrap(URL(string: "https://example.test/start"))
+        let nextURL = try XCTUnwrap(URL(string: "https://example.test/next"))
+        let redirect = try XCTUnwrap(HTTPURLResponse(
+            url: startURL,
+            statusCode: 302,
+            httpVersion: "HTTP/1.1",
+            headerFields: [
+                "Location": nextURL.absoluteString,
+                "Set-Cookie": "redirect=seen; Path=/; Secure",
+            ]
+        ))
+        let final = try XCTUnwrap(HTTPURLResponse(
+            url: nextURL,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: nil
+        ))
+        StubURLProtocol.configure([
+            .init(response: redirect, chunks: [Data([1])]),
+            .init(response: final, chunks: [Data([2])]),
+        ])
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: "single-exchange-source",
+            protocolClasses: [StubURLProtocol.self]
+        )
+
+        let first = try await transport.executeSingleExchange(
+            CompatHTTPRequest(url: startURL.absoluteString)
+        )
+        let second = try await transport.executeSingleExchange(
+            CompatHTTPRequest(url: nextURL.absoluteString)
+        )
+
+        XCTAssertEqual(first.statusCode, 302)
+        XCTAssertEqual(first.finalURL, startURL.absoluteString)
+        XCTAssertEqual(first.body, [1])
+        XCTAssertEqual(second.statusCode, 200)
+        XCTAssertEqual(second.body, [2])
+        let requests = StubURLProtocol.requests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertNil(requests[0].value(forHTTPHeaderField: "Cookie"))
+        XCTAssertTrue(
+            requests[1].value(forHTTPHeaderField: "Cookie")?.contains("redirect=seen") == true
+        )
     }
 
     private func execute(

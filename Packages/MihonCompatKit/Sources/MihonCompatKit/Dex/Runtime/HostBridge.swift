@@ -243,16 +243,36 @@ public final class HostBridge {
         }
     }
 
+    private enum InterceptorExecutionMode: Equatable {
+        case ordinary
+        case readerApplication
+        case readerNetworkSingleExchange
+        case readerNetworkOrdinary
+    }
+
+    private final class InterceptorBudgetBox {
+        var steps = 0
+    }
+
     private final class InterceptorExecutionBox {
         let interceptors: [RVal]
         let call: CallBox
         let callValue: RVal
-        var steps = 0
+        let mode: InterceptorExecutionMode
+        let budget: InterceptorBudgetBox
 
-        init(interceptors: [RVal], call: CallBox, callValue: RVal) {
+        init(
+            interceptors: [RVal],
+            call: CallBox,
+            callValue: RVal,
+            mode: InterceptorExecutionMode,
+            budget: InterceptorBudgetBox
+        ) {
             self.interceptors = interceptors
             self.call = call
             self.callValue = callValue
+            self.mode = mode
+            self.budget = budget
         }
     }
 
@@ -7889,7 +7909,8 @@ public final class HostBridge {
                 vm: vm,
                 transport: transport,
                 policy: transportPolicy,
-                requiresSuccess: false
+                requiresSuccess: false,
+                mode: .readerApplication
             )
         }
         guard let response = Self.responseProjection(from: responseValue) else {
@@ -8078,21 +8099,34 @@ public final class HostBridge {
         vm: DexInterpreter,
         transport: any CompatHTTPTransport,
         policy: CompatHTTPTransportPolicy,
-        requiresSuccess: Bool
+        requiresSuccess: Bool,
+        mode: InterceptorExecutionMode = .ordinary
     ) async throws -> RVal {
         do {
             try checkInterceptorCancellation(call: call, vm: vm)
-            let interceptors = call.client.interceptors + call.client.networkInterceptors
-            guard interceptors.count <= maximumInterceptorCount else {
+            let interceptorCount = call.client.interceptors.count
+                + call.client.networkInterceptors.count
+            guard interceptorCount <= maximumInterceptorCount else {
                 throw hostThrowable(
                     "Ljava/lang/IllegalStateException;",
                     "OkHttpClient exceeds \(maximumInterceptorCount) interceptors"
                 )
             }
+            let interceptors: [RVal]
+            switch mode {
+            case .ordinary:
+                interceptors = call.client.interceptors + call.client.networkInterceptors
+            case .readerApplication:
+                interceptors = call.client.interceptors
+            case .readerNetworkSingleExchange, .readerNetworkOrdinary:
+                throw VMError.verify("invalid top-level OkHttp execution mode")
+            }
             let execution = InterceptorExecutionBox(
                 interceptors: interceptors,
                 call: call,
-                callValue: callValue
+                callValue: callValue,
+                mode: mode,
+                budget: InterceptorBudgetBox()
             )
             let responseValue = try await executeInterceptorChain(
                 vm: vm,
@@ -8161,31 +8195,52 @@ public final class HostBridge {
                 "OkHttp interceptor chain depth is invalid"
             )
         }
-        guard execution.steps < maximumInterceptorChainSteps else {
+        guard execution.budget.steps < maximumInterceptorChainSteps else {
             throw hostThrowable(
                 "Ljava/lang/IllegalStateException;",
                 "OkHttp interceptor chain exceeds \(maximumInterceptorChainSteps) steps"
             )
         }
-        execution.steps += 1
+        execution.budget.steps += 1
 
         guard index < execution.interceptors.count else {
             guard let request = requestProjection(from: requestValue) else {
                 throw VMError.verify("OkHttp interceptor terminal request")
             }
-            try policy.validate(request: request)
-            let response = try await transport.execute(request)
-            try checkInterceptorCancellation(call: execution.call, vm: vm)
-            try validateTransportResponse(
-                response,
-                request: request,
-                policy: policy
-            )
-            return responseValue(
-                response,
-                request: request,
-                requestValue: requestValue
-            )
+            switch execution.mode {
+            case .readerApplication:
+                return try await executeReaderImageRedirects(
+                    vm: vm,
+                    applicationExecution: execution,
+                    requestValue: requestValue,
+                    applicationDepth: depth,
+                    transport: transport,
+                    policy: policy
+                )
+            case .ordinary, .readerNetworkSingleExchange, .readerNetworkOrdinary:
+                try policy.validate(request: request)
+                let response: CompatHTTPResponse
+                if execution.mode == .readerNetworkSingleExchange {
+                    guard let singleExchange = transport
+                        as? any CompatHTTPSingleExchangeTransport else {
+                        throw VMError.verify("reader image single-exchange transport is unavailable")
+                    }
+                    response = try await singleExchange.executeSingleExchange(request)
+                } else {
+                    response = try await transport.execute(request)
+                }
+                try checkInterceptorCancellation(call: execution.call, vm: vm)
+                try validateTransportResponse(
+                    response,
+                    request: request,
+                    policy: policy
+                )
+                return responseValue(
+                    response,
+                    request: request,
+                    requestValue: requestValue
+                )
+            }
         }
 
         let interceptor = execution.interceptors[index]
@@ -8233,6 +8288,74 @@ public final class HostBridge {
         }
         try validateInterpretedResponse(response, policy: policy)
         return result
+    }
+
+    private static func executeReaderImageRedirects(
+        vm: DexInterpreter,
+        applicationExecution: InterceptorExecutionBox,
+        requestValue: RVal,
+        applicationDepth: Int,
+        transport: any CompatHTTPTransport,
+        policy: CompatHTTPTransportPolicy
+    ) async throws -> RVal {
+        let observesRedirects = transport is any CompatHTTPSingleExchangeTransport
+        var currentRequestValue = requestValue
+        var redirectCount = 0
+
+        while true {
+            try checkInterceptorCancellation(call: applicationExecution.call, vm: vm)
+            let networkExecution = InterceptorExecutionBox(
+                interceptors: applicationExecution.call.client.networkInterceptors,
+                call: applicationExecution.call,
+                callValue: applicationExecution.callValue,
+                mode: observesRedirects ? .readerNetworkSingleExchange : .readerNetworkOrdinary,
+                budget: applicationExecution.budget
+            )
+            let responseValue = try await executeInterceptorChain(
+                vm: vm,
+                execution: networkExecution,
+                requestValue: currentRequestValue,
+                index: 0,
+                depth: applicationDepth,
+                transport: transport,
+                policy: policy
+            )
+            try checkInterceptorCancellation(call: applicationExecution.call, vm: vm)
+            guard observesRedirects else { return responseValue }
+            guard let response = responseProjection(from: responseValue) else {
+                throw VMError.verify("reader image network chain returned a non-Response value")
+            }
+            let nextRedirectCount = redirectCount + 1
+            guard let followUp = try CompatHTTPRedirectPolicy.followUpGETRequest(
+                from: response.request,
+                response: response.value,
+                redirectCount: nextRedirectCount,
+                policy: policy
+            ) else {
+                return responseValue
+            }
+            redirectCount = nextRedirectCount
+            currentRequestValue = try followUpRequestValue(
+                followUp,
+                retainingTagsFrom: response.requestValue
+            )
+        }
+    }
+
+    private static func followUpRequestValue(
+        _ request: CompatHTTPRequest,
+        retainingTagsFrom value: RVal
+    ) throws -> RVal {
+        guard case let .obj(object) = value,
+              object.dexType == "Lokhttp3/Request;" else {
+            throw VMError.verify("reader image redirect response has an invalid Request")
+        }
+        return .obj(ObjInstance(
+            dexType: "Lokhttp3/Request;",
+            fields: object.fields,
+            payload: request,
+            isHost: true
+        ))
     }
 
     private static func checkInterceptorCancellation(
