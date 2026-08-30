@@ -68,7 +68,9 @@ Those core operations traverse the APK's configured interceptor chain and its
 finite one-second rate limiter.
 Its exact DEX `imageRequest(Page)` method is executed before the request reaches
 the app-facing image seam; the regression proves the fixture's CDN-host rewrite
-without network I/O. The image request is projected to URL/headers only.
+without network I/O. With banner mode explicitly disabled, the image request
+also carries an opaque capability backed by the exact actor-owned DEX
+Request/tags and configured client.
 
 Each pinned `KamiSource` owns its transport together with one mutable
 interpreter behind a bounded actor queue, so a suspended request cannot permit
@@ -83,22 +85,23 @@ image response limits remain independent of the source response-body limit.
 
 ## Reader interceptor boundary
 
-Baozi source operations execute its bounded application/network interceptor
-chain, but `ReaderImagePipeline` converts `ImageRequest` to a
-`CompatHTTPRequest` and calls the transport directly. The reader path therefore
-drops DEX request identity/tags and does not run the chain. Banner cropping,
-redirect-domain rewriting, and missing-image handling are not executed or
-proven through reader image loads. `URLSessionCompatHTTPTransport` also follows
-redirects inside its delegate path; that final-response behavior does not prove
-an interceptor can observe or rewrite intermediate redirects.
+`ReaderImagePipeline` validates every public URL/header projection first.
+Ordinary requests then use its direct transport. A request with a source-scoped
+capability instead asks the source actor to run the exact retained DEX Request
+through its configured bounded application/network chain and shared cookie jar;
+KamiCore receives only the bounded response and an opaque UUID used for
+deduplication/cache separation. The real Baozi direct-302 regression proves its
+retained redirect-domain tag rewrites `Location` while preserving unrelated
+response state.
 
-The next networking milestone is a source-scoped reader image execution seam
-that retains the exact DEX Request/tags and deliberately invokes the completed
-bounded chain. Intermediate redirect mutation needs an explicit bounded
-no-follow/response-sequence seam because URLSession currently returns only the
-final response. Baozi banner cropping must remain unsupported until a bounded
-portable pixel/JPEG implementation exists; a metadata-only Bitmap shim would
-not be compatibility.
+`URLSessionCompatHTTPTransport` still follows redirects inside its delegate
+path, so that injected direct-response proof does not establish production
+intermediate redirect, missing-image, or follow-up semantics. The next
+networking milestone is an explicit bounded no-follow/response-sequence and
+follow-up seam. Baozi banner cropping remains unsupported until a bounded
+portable pixel/JPEG implementation exists; the production factory explicitly
+defaults `BAOZI_BANNER=0`, and a metadata-only Bitmap shim would not be
+compatibility.
 Reader retry must also regenerate and revalidate the source `ImageRequest` and
 define expiry/credential-refresh behavior; the current per-page retry reuses the
 request resolved during page loading.

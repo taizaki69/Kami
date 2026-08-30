@@ -340,11 +340,12 @@ the broader 15-artifact current-lib-1.6 measurement corpus is now locked and
 fully analyzed, so corpus expansion is no longer open. App export UX, deeper
 first-gap/field instrumentation, and regression promotion remain open. Automatic
 catalog expansion, dynamic filter sources, production preference UI/persistence,
-and arbitrary custom image-request overrides remain open. Source operations now
-execute the bounded OkHttp interceptor chain, but the reader image seam still
-drops DEX `Request` identity/tags and bypasses it. Baozi banner cropping,
-redirect-domain rewriting, and missing-image behavior are therefore not proven
-through reader image loads. Remaining
+and arbitrary custom image-request overrides remain open. Supported interpreted
+reader requests now retain exact DEX Request/tags/configured-client state behind
+an opaque bounded capability and execute the same OkHttp chain as source
+operations. Baozi's direct-302 fixture proves its redirect-domain tag rewrite;
+banner cropping and production intermediate redirect/missing-image/follow-up
+semantics remain unproven. Remaining
 reader chapter retry uses a structured `.task(id: reloadID)` and dismissal
 invalidates the load generation; per-page retry still reuses its resolved
 `ImageRequest`, so retry-time request regeneration/expiry remains deferred.

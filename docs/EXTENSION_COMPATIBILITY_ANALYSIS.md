@@ -280,19 +280,20 @@ details/chapters, and pages. They also assert one header plus four static
 `Select` filters, bounded scalar preferences, and the DEX `imageRequest(Page)`
 rewrite from `static.baozicdn.com` to `static.baozimh.com` without network I/O.
 
-The current proof stops at the source `ImageRequest` projection. `ReaderView`
-resolves that request asynchronously and the image pipeline honors its URL and
-headers, but the pipeline does not retain DEX `Request` identity or tags.
-Source-operation `await`/`awaitSuccess` now execute a bounded, registration-
-ordered application/network interceptor chain that preserves Request identity,
-tags, cancellation, response bounds, and the parent VM instruction budget;
-Baozi's real core-operation regressions traverse its finite rate limiter. The
-reader image pipeline still bypasses that chain. Baozi banner cropping,
-redirect-domain rewriting, and missing-image handling are consequently not
-executed or proven through reader image loads; URLSession's own redirect
-handling is not a substitute for observable intermediate-response interceptor
-semantics. The production app likewise has no UI/persistence path for the
-injected Baozi preference values.
+`ReaderView` resolves each source `ImageRequest` asynchronously. Supported
+interpreted requests now carry an opaque UUID capability while the source actor
+retains the exact DEX Request/tags and configured client in a bounded table.
+Both source-operation `await`/`awaitSuccess` and those reader requests execute a
+bounded, registration-ordered application/network interceptor chain that
+preserves Request identity, tags, cancellation, response bounds, and one VM
+instruction budget. KamiCore validates the public URL/header projection,
+separates hidden execution identities in its cache, and receives only the
+bounded response. Baozi's direct-302 fixture proves its redirect-domain tag
+rewrite; its optional Bitmap banner crop remains unsupported, so the production
+factory explicitly defaults `BAOZI_BANNER=0`. URLSession's internal redirects
+still prevent proof of production intermediate-response, missing-image, and
+follow-up semantics. The production app has no UI/persistence path for the
+remaining injected Baozi preference values.
 
 ## 7. Prior art (iOS)
 

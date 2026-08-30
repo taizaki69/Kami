@@ -319,6 +319,14 @@ synthetic and pinned-corpus tests:
   Baozi's real core-operation regressions traverse its configured interceptor
   chain and finite one-second rate limiter. Android Bitmap/pixel/JPEG banner
   transformation is not implemented.
+- Reader `ImageRequest` can carry an opaque source-scoped execution capability
+  identified by a UUID. The interpreted runtime retains the exact DEX Request
+  and configured client in an actor-owned table capped at 4,096 entries; no
+  `RVal` crosses into KamiCore. The reader validates the public URL/header
+  projection first, includes the hidden UUID in deduplication/cache identity,
+  invokes the same bounded chain, and then enforces 2xx, non-empty, and
+  compressed-image size checks. Capability deallocation asynchronously releases
+  the retained handle.
 - SwiftSoup 2.9.6 supplies HTML5 parsing and CSS semantics behind an exact
   Jsoup-compatible document/element/elements slice. Kami caps input bytes, DOM
   nodes/depth/attributes, selector length/results/cumulative work, and extracted
@@ -369,8 +377,10 @@ remaining measurement APKs analyzed without errors, with 11 structural
 candidates, four stable-wrapper blockers, 540 unique unregistered external
 method surfaces, and zero unsupported opcodes. The next layer is first-gap
 capture below extension catch handlers and regression-promotion tooling.
-Dynamic/network-backed filter lists, production preference UI/persistence, and
-reader-image interceptor execution remain open. The longer tail remains
+Dynamic/network-backed filter lists and production preference UI/persistence
+remain open. Reader-image execution now reaches the bounded source chain; exact
+intermediate redirect/follow-up behavior and Android bitmap transforms remain
+open. The longer tail remains
 additional Jsoup DOM behavior, string/collection overloads, broader
 serialization, and Android context/UI shims. A class appearing in the
 analyzer's `implementedClasses` set is only a coarse prioritization signal; it
@@ -394,18 +404,27 @@ end-to-end adapter is tracked in
 ### Current profile-specific boundary
 
 Baozi's scalar preferences and DEX `imageRequest(Page)` rewrite are measured
-capabilities of that exact APK profile. The production app currently passes
-default preferences because preference UI and persistence are not wired.
-Source-operation `await`/`awaitSuccess` execute the configured bounded
-application/network interceptor chain while preserving exact Request tags and
-the parent VM budget; Baozi's real core operations therefore exercise its
-finite rate limiter. The reader image pipeline still receives only the
-URL/headers projection, drops DEX `Request` identity/tags, and bypasses that
-chain. Baozi banner cropping, redirect-domain rewriting, and missing-image
-behavior are therefore not executed or proven through reader image loads.
+capabilities of that exact APK profile. Production preference UI/persistence is
+not wired. Its optional banner remover defaults to mode `1` in the APK and
+requires Android Bitmap pixel scanning/cropping/JPEG APIs that the portable
+runtime does not implement. The downloaded-source factory therefore supplies
+the explicit compatibility default `BAOZI_BANNER=0`; a caller-provided
+preference set still overrides it. If banner mode `1` or `2` is explicitly
+selected, Kami keeps the safe URL/header reader path instead of invoking a
+known-incomplete transform.
+
+Source-operation `await`/`awaitSuccess` and supported reader images execute the
+configured bounded application/network interceptor chain while preserving the
+exact Request/tags and a single VM instruction budget. Reader capabilities
+retain the Request and configured client only inside the source actor, share
+the source transport/cookie jar, and expose only a bounded response. The real
+Baozi fixture proves its `RedirectDomainInterceptor` tag rewrites a direct
+injected 302 `Location` to the source host while preserving status, body,
+Request, and unrelated headers. Android banner cropping is still unsupported.
 URLSession follows redirects inside the terminal transport and exposes only the
-final response, so its redirect behavior does not substitute for a bounded
-intermediate-response seam.
+final response, so the direct-response regression does not prove production
+intermediate redirect, missing-image, or follow-up behavior; those require a
+bounded no-follow/response-sequence seam.
 
 Reader chapter retry is driven by a structured `.task(id: reloadID)`; changing
 the reload identity restarts the cancellable chapter load. Reader dismissal

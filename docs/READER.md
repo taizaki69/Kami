@@ -27,17 +27,23 @@
 
 - After page-list resolution, `ReaderView` asynchronously asks the source for
   one exact `ImageRequest` per page. Visible loads and prefetches consume that
-  request's URL and headers. This replaces `AsyncImage`, which could not honor
-  source-provided Referer, User-Agent, or authentication headers.
+  request's URL and headers plus any opaque source-scoped execution capability.
+  This replaces `AsyncImage`, which could not honor source-provided Referer,
+  User-Agent, authentication headers, or extension client behavior.
 - Baozi Manhua 1.6.29 is the current custom-request regression: its real DEX
   `imageRequest(Page)` rewrites the fixture URL from
   `static.baozicdn.com` to `static.baozimh.com` without network I/O, and the
-  reader receives the resulting URL/headers projection.
+  reader receives the resulting URL/headers projection. With banner processing
+  explicitly disabled, it also receives an opaque capability backed by the
+  exact actor-owned DEX Request/tags and configured client. A direct-302 fixture
+  proves the redirect-domain tag rewrites `Location` through that client.
 - `ReaderImagePipeline` is source-scoped and actor-isolated. Production loads
   reuse the compatibility transport's deterministic header validation,
   five-redirect limit, HTTPS-downgrade rejection, streamed 32 MiB response
   limit, and isolated in-memory cookie jar.
 - Concurrent requests for the same URL/header identity share one network task.
+  Source-scoped execution adds its UUID to that identity, preventing different
+  hidden tags/runtime state from colliding at the same public URL.
   Compressed bytes use a 64 MiB LRU cache, and prefetch is capped at eight
   requests. Reset/cancellation cannot let an old request clear or populate a
   newer load generation.
@@ -49,10 +55,12 @@
   neighbors. Webtoon pages release their decoded image when they leave the lazy
   viewport; compressed prefetch bytes remain available within the LRU budget.
 
-The image pipeline has its own source-scoped cookie jar. It does **not yet**
-inherit cookies established by the extension runtime while resolving the page
-list. Extensions that need that continuity remain a measured compatibility gap,
-even though explicit image-request headers are now honored correctly.
+Plain native requests use the image pipeline's own source-scoped cookie jar.
+An interpreted request with a supported execution capability instead reuses the
+extension runtime's configured transport and cookie jar, preserving cookies
+established while resolving the page list. The DEX Request/client graph never
+leaves the source actor; KamiCore sees only URL/headers, an opaque UUID, and the
+bounded response.
 
 Reader image fetching inherits the source's admitted transport policy. It is
 HTTPS-only by default, validates each initial URL and its headers before even an
@@ -60,12 +68,14 @@ injected transport sees them, and accepts `http://` only when that source was
 explicitly configured for insecure HTTP. Redirect handling uses the same
 source-scoped policy, while reader-specific response-size limits stay separate.
 
-The reader image seam currently receives only URL/headers. It does not retain
-DEX `Request` identity or tags, and the await path does not execute source
-OkHttp interceptors. Baozi banner cropping, redirect-domain rewriting, and
-missing-image handling are therefore not executed or proven through reader
-image loads; URLSession's own redirect handling does not establish those
-interceptor semantics.
+Supported reader image capabilities execute the same bounded source OkHttp
+application/network chain as source operations, preserving exact DEX Request
+identity/tags and one VM instruction budget. Baozi's optional banner transform
+still requires unavailable Android Bitmap/pixel/JPEG behavior, so the
+downloaded-source factory explicitly defaults `BAOZI_BANNER=0`; explicit modes
+1/2 keep the safe URL/header path. URLSession still consumes intermediate
+redirect responses internally, so exact redirect follow-up and missing-image
+semantics remain open despite the direct injected-302 regression.
 
 Per-page image retry currently restarts the image task with the same resolved
 `ImageRequest`; it does not regenerate the request from the source or define
@@ -81,9 +91,9 @@ semantics are explicitly deferred.
    tap-centered zoom with stricter pan bounds.
 4. Memory-pressure-driven cache purging, long-image tiling, and integration
    with the future persistent download/disk cache.
-5. Share source cookies safely between interpreted requests and reader images;
-   then run a bounded source interceptor/tag chain through the reader seam.
-   Add image-transform regressions only after the chain preserves request
-   identity and response semantics.
+5. Add a bounded no-follow/intermediate-response and redirect-follow-up seam so
+   source interceptors can observe each production 3xx exchange. Add Baozi
+   image-transform regressions only after a portable bounded pixel/JPEG codec
+   exists; a metadata-only Bitmap shim is not compatibility.
 6. Physical-device profiling and accessibility testing, including 500-page
    webtoon chapters, rotation, VoiceOver labels, and interrupted/retried loads.
