@@ -232,6 +232,22 @@ public final class DexInterpreter {
         }
     }
 
+    /// Starts one bounded async budget session for a host-owned protocol that
+    /// begins outside an interpreted frame, such as a retained reader-image
+    /// OkHttp request. Interceptors re-enter through `callNestedAsync`, sharing
+    /// this exact instruction budget for the complete chain.
+    func withFreshAsyncSession<T>(
+        _ operation: () async throws -> T
+    ) async throws -> T {
+        guard activeAsyncEntryDepth == 0, entryDepth == 0, depth == 0 else {
+            throw VMError.verify("fresh async DEX session overlaps active execution")
+        }
+        remainingInstructions = maxInstructions
+        activeAsyncEntryDepth += 1
+        defer { activeAsyncEntryDepth -= 1 }
+        return try await operation()
+    }
+
     /// Allocates a DEX class instance and runs `<init>` (constructor).
     @discardableResult
     public func instantiate(classDescriptor: String) throws -> RVal {

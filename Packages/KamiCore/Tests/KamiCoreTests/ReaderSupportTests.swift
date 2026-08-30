@@ -77,6 +77,63 @@ final class ReaderSupportTests: XCTestCase {
         XCTAssertEqual(statistics.bytes, 4)
     }
 
+    func testImagePipelineUsesSourceScopedExecutionAndSeparatesHiddenCacheIdentity() async throws {
+        let directTransport = RecordingImageTransport(responses: [])
+        let firstProbe = SourceImageExecutionProbe(body: [7, 7, 7])
+        let pipeline = ReaderImagePipeline(
+            sourceID: "interpreted-42",
+            maximumImageBytes: 16,
+            maximumCacheBytes: 32,
+            transport: directTransport
+        )
+        let firstRequest = ImageRequest(
+            url: "https://cdn.example/tagged.jpg",
+            headers: ["Referer": "https://reader.example"],
+            sourceExecutionID: UUID(),
+            sourceExecutor: { await firstProbe.execute() }
+        )
+
+        async let first = pipeline.data(for: firstRequest)
+        async let second = pipeline.data(for: firstRequest)
+        let (firstData, secondData) = try await (first, second)
+        let cached = try await pipeline.data(for: firstRequest)
+        XCTAssertEqual(firstData, Data([7, 7, 7]))
+        XCTAssertEqual(secondData, Data([7, 7, 7]))
+        XCTAssertEqual(cached, Data([7, 7, 7]))
+        let firstExecutionCount = await firstProbe.executionCount()
+        let directRequests = await directTransport.recordedRequests()
+        XCTAssertEqual(firstExecutionCount, 1)
+        XCTAssertTrue(directRequests.isEmpty)
+
+        let secondProbe = SourceImageExecutionProbe(body: [9, 9])
+        let distinctHiddenRequest = ImageRequest(
+            url: firstRequest.url,
+            headers: firstRequest.headers,
+            sourceExecutionID: UUID(),
+            sourceExecutor: { await secondProbe.execute() }
+        )
+        let distinctData = try await pipeline.data(for: distinctHiddenRequest)
+        XCTAssertEqual(distinctData, Data([9, 9]))
+        let secondExecutionCount = await secondProbe.executionCount()
+        XCTAssertEqual(secondExecutionCount, 1)
+        let statistics = await pipeline.cacheStatistics()
+        XCTAssertEqual(statistics.entries, 2)
+        XCTAssertEqual(statistics.bytes, 5)
+
+        let blockedProbe = SourceImageExecutionProbe(body: [4])
+        let blockedRequest = ImageRequest(
+            url: "http://cdn.example/tagged.jpg",
+            sourceExecutionID: UUID(),
+            sourceExecutor: { await blockedProbe.execute() }
+        )
+        await XCTAssertThrowsErrorAsync(
+            try await pipeline.data(for: blockedRequest),
+            equals: CompatHTTPTransportError.disallowedScheme
+        )
+        let blockedExecutionCount = await blockedProbe.executionCount()
+        XCTAssertEqual(blockedExecutionCount, 0)
+    }
+
     func testImagePipelineRejectsHTTPEmptyAndOversizedResponses() async throws {
         let transport = RecordingImageTransport(responses: [
             CompatHTTPResponse(finalURL: "https://cdn.example/403", statusCode: 403),
@@ -150,6 +207,26 @@ final class ReaderSupportTests: XCTestCase {
             CompatHTTPHeader(name: "Referer", value: "http://reader.example"),
         ])
     }
+}
+
+private actor SourceImageExecutionProbe {
+    private let response: CompatHTTPResponse
+    private var count = 0
+
+    init(body: [UInt8]) {
+        response = CompatHTTPResponse(
+            finalURL: "https://cdn.example/tagged.jpg",
+            statusCode: 200,
+            body: body
+        )
+    }
+
+    func execute() -> CompatHTTPResponse {
+        count += 1
+        return response
+    }
+
+    func executionCount() -> Int { count }
 }
 
 private actor RecordingImageTransport: CompatHTTPTransport {

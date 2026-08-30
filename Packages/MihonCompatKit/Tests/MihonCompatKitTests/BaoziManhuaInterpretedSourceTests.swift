@@ -150,8 +150,60 @@ final class BaoziManhuaInterpretedSourceTests: XCTestCase {
             "https://static.baozimh.com/chapter/001.jpg",
             source.compatibilityReport().renderedText()
         )
+        XCTAssertNil(imageRequest?.sourceExecutionID)
         let requests = await transport.snapshot()
         XCTAssertTrue(requests.isEmpty)
+    }
+
+    func testBaoziReaderImageRetainsTagsAndRunsConfiguredClientWhenBannerDisabled() async throws {
+        let imageURL = "https://static.baozimh.com/chapter/001.jpg"
+        let transport = RoutingTransport(responses: [
+            imageURL: CompatHTTPResponse(
+                finalURL: imageURL,
+                statusCode: 302,
+                headers: [
+                    CompatHTTPHeader(
+                        name: "Location",
+                        value: "https://redirect.example/chapter/002.jpg"
+                    ),
+                    CompatHTTPHeader(name: "X-Kami-Fixture", value: "preserved"),
+                ],
+                body: [1, 2, 3]
+            ),
+        ])
+        let source = try PinnedInterpretedSource.baoziManhua1629(
+            apkBytes: corpusAPK(),
+            transport: transport,
+            preferences: try InterpretedExtensionPreferences(
+                strings: ["BAOZI_BANNER": "0"]
+            )
+        )
+
+        let generated = await source.getImageRequest(page: PageCompat(
+            index: 0,
+            imageURL: "https://static.baozicdn.com/chapter/001.jpg"
+        ))
+        let imageRequest = try XCTUnwrap(generated)
+        XCTAssertNotNil(imageRequest.sourceExecutionID)
+        let executed = try await imageRequest.executeSourceRequest()
+        let response = try XCTUnwrap(executed)
+
+        XCTAssertEqual(response.statusCode, 302)
+        XCTAssertEqual(response.body, [1, 2, 3])
+        XCTAssertEqual(
+            response.headers.first {
+                $0.name.caseInsensitiveCompare("Location") == .orderedSame
+            }?.value,
+            "https://cn.baozimh.com/chapter/002.jpg"
+        )
+        XCTAssertEqual(
+            response.headers.first { $0.name == "X-Kami-Fixture" }?.value,
+            "preserved"
+        )
+        let requests = await transport.snapshot()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.url, imageURL)
+        XCTAssertTrue(source.compatibilityReport().findings.isEmpty)
     }
 
     func testBaoziRejectsInvalidPreferencesBeforeAnyTransport() async throws {

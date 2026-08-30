@@ -215,15 +215,87 @@ public protocol KamiSource: Sendable {
     func getFilterList() -> [SourceFilter]
 }
 
-/// OkHttp-style image request (URL + headers, e.g. Referer) that the app's
-/// HTTP layer must honor when fetching reader pages.
+/// An opaque source-owned execution capability for reader image requests.
+/// The closures are immutable and `@Sendable`; interpreted sources use the
+/// release hook to discard their actor-isolated DEX request handle when every
+/// copy of the public `ImageRequest` has gone away.
+final class SourceImageExecution: @unchecked Sendable {
+    let id: UUID
+    private let operation: @Sendable () async throws -> CompatHTTPResponse
+    private let release: @Sendable () -> Void
+
+    init(
+        id: UUID,
+        operation: @escaping @Sendable () async throws -> CompatHTTPResponse,
+        release: @escaping @Sendable () -> Void = {}
+    ) {
+        self.id = id
+        self.operation = operation
+        self.release = release
+    }
+
+    func execute() async throws -> CompatHTTPResponse {
+        try await operation()
+    }
+
+    deinit {
+        release()
+    }
+}
+
+/// OkHttp-style image request that the reader must honor. Native sources use
+/// URL + headers directly. Interpreted sources may additionally attach an
+/// opaque source-scoped executor so the exact OkHttp Request, tags, client,
+/// cookies, and supported interceptors survive the app-facing boundary.
 public struct ImageRequest: Sendable {
-    public var url: String
-    public var headers: [String: String]
+    public let url: String
+    public let headers: [String: String]
+    private let sourceExecution: SourceImageExecution?
 
     public init(url: String, headers: [String: String] = [:]) {
         self.url = url
         self.headers = headers
+        sourceExecution = nil
+    }
+
+    /// Trusted Swift sources can provide their own source-scoped execution
+    /// path. The UUID is part of reader cache identity, so callers must reuse
+    /// it only when two requests have identical hidden execution semantics.
+    public init(
+        url: String,
+        headers: [String: String] = [:],
+        sourceExecutionID: UUID,
+        sourceExecutor: @escaping @Sendable () async throws -> CompatHTTPResponse
+    ) {
+        self.url = url
+        self.headers = headers
+        sourceExecution = SourceImageExecution(
+            id: sourceExecutionID,
+            operation: sourceExecutor
+        )
+    }
+
+    init(
+        url: String,
+        headers: [String: String],
+        sourceExecution: SourceImageExecution
+    ) {
+        self.url = url
+        self.headers = headers
+        self.sourceExecution = sourceExecution
+    }
+
+    /// Non-nil only when this request must not be coalesced with a plain
+    /// URL/header load or another source runtime's hidden request state.
+    public var sourceExecutionID: UUID? {
+        sourceExecution?.id
+    }
+
+    /// Returns nil for ordinary native requests. ReaderImagePipeline validates
+    /// the public URL/header projection before invoking this capability.
+    public func executeSourceRequest() async throws -> CompatHTTPResponse? {
+        guard let sourceExecution else { return nil }
+        return try await sourceExecution.execute()
     }
 }
 

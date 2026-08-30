@@ -20,9 +20,11 @@ public enum ReaderImagePipelineError: Error, LocalizedError, Sendable, Equatable
 
 /// Source-scoped, bounded compressed-image loading for the reader. Production
 /// requests reuse MihonCompatKit's streaming transport, redirect policy,
-/// header validation, body limit, and isolated cookie jar. The in-memory cache
-/// is an explicit LRU and concurrent requests for the same URL/header identity
-/// share one transport task.
+/// header validation, body limit, and isolated cookie jar. Interpreted sources
+/// can attach an opaque source-scoped executor that preserves their configured
+/// OkHttp client, tags, and cookies. The in-memory cache is an explicit LRU and
+/// concurrent requests for the same public and hidden execution identity share
+/// one task.
 public actor ReaderImagePipeline {
     private struct CacheEntry {
         let data: Data
@@ -97,7 +99,12 @@ public actor ReaderImagePipeline {
         let maximumImageBytes = self.maximumImageBytes
         let requestID = UUID()
         let task = Task<Data, Error> {
-            let response = try await transport.execute(request)
+            let response: CompatHTTPResponse
+            if let sourceResponse = try await imageRequest.executeSourceRequest() {
+                response = sourceResponse
+            } else {
+                response = try await transport.execute(request)
+            }
             try Task.checkCancellation()
             guard (200...299).contains(response.statusCode) else {
                 throw ReaderImagePipelineError.httpStatus(response.statusCode)
@@ -177,6 +184,9 @@ public actor ReaderImagePipeline {
             return $0.value < $1.value
         }) {
             key += "\u{0}\(header.key)\u{0}\(header.value)"
+        }
+        if let sourceExecutionID = request.sourceExecutionID {
+            key += "\u{0}source-execution\u{0}\(sourceExecutionID.uuidString)"
         }
         return key
     }

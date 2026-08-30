@@ -46,10 +46,14 @@ public struct ExtensionSourceFactory: Sendable {
     public func makeSources(
         admission: ExtensionAdmission,
         transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
-        preferences: InterpretedExtensionPreferences = .init()
+        preferences: InterpretedExtensionPreferences? = nil
     ) throws -> [any KamiSource] {
         let apkBytes = try authenticatedBytes(admission: admission)
         try validateExpectedSourceIDs(admission: admission)
+        let preferences = try resolvedPreferences(
+            admission: admission,
+            requested: preferences
+        )
         let sources = try InterpretedExtensionProfileCatalog.makeSources(
             packageName: admission.packageName,
             versionName: admission.versionName,
@@ -66,10 +70,14 @@ public struct ExtensionSourceFactory: Sendable {
         admission: ExtensionAdmission,
         transport: any CompatHTTPTransport,
         transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
-        preferences: InterpretedExtensionPreferences = .init()
+        preferences: InterpretedExtensionPreferences? = nil
     ) throws -> [any KamiSource] {
         let apkBytes = try authenticatedBytes(admission: admission)
         try validateExpectedSourceIDs(admission: admission)
+        let preferences = try resolvedPreferences(
+            admission: admission,
+            requested: preferences
+        )
         let sources = try InterpretedExtensionProfileCatalog.makeSources(
             packageName: admission.packageName,
             versionName: admission.versionName,
@@ -80,6 +88,25 @@ public struct ExtensionSourceFactory: Sendable {
             preferences: preferences
         )
         return try validate(sources: sources, admission: admission)
+    }
+
+    private func resolvedPreferences(
+        admission: ExtensionAdmission,
+        requested: InterpretedExtensionPreferences?
+    ) throws -> InterpretedExtensionPreferences {
+        if let requested { return requested }
+        guard admission.packageName == "eu.kanade.tachiyomi.extension.zh.baozimanhua",
+              admission.versionName == "1.6.29",
+              admission.versionCode == 29 else {
+            return .init()
+        }
+        // Baozi enables an Android Bitmap banner transform by default. Kami's
+        // portable runtime cannot execute that optional pixel operation yet;
+        // disable it explicitly so the remaining tagged reader interceptors
+        // and the source-scoped cookie jar can execute instead of failing.
+        return try InterpretedExtensionPreferences(
+            strings: ["BAOZI_BANNER": "0"]
+        )
     }
 
     private func authenticatedBytes(admission: ExtensionAdmission) throws -> [UInt8] {

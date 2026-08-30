@@ -114,7 +114,7 @@ final class ExtensionSourceFactoryTests: XCTestCase {
         XCTAssertEqual(source.getFilterList().count, 2)
     }
 
-    func testFactoryAdmitsExactBaoziProfileThroughRepositoryAdmission() throws {
+    func testFactoryAdmitsExactBaoziProfileThroughRepositoryAdmission() async throws {
         let bytes = try corpus("baozimanhua")
         let temporary = try temporaryAPK(bytes)
         defer { try? FileManager.default.removeItem(at: temporary.directory) }
@@ -131,11 +131,7 @@ final class ExtensionSourceFactoryTests: XCTestCase {
 
         let sources = try ExtensionSourceFactory().makeSources(
             admission: admission,
-            transport: NoNetworkTransport(),
-            preferences: try InterpretedExtensionPreferences(
-                strings: ["BAOZI_BANNER": "0", "CHAPTER_ORDER": "1"],
-                booleans: ["QUICK_PAGES": true, "REMOVE_DUPLICATE_IMAGES": false]
-            )
+            transport: NoNetworkTransport()
         )
         let source = try XCTUnwrap(sources.first)
         XCTAssertEqual(sources.count, 1)
@@ -146,6 +142,11 @@ final class ExtensionSourceFactoryTests: XCTestCase {
         XCTAssertTrue(source.supportsLatest)
         XCTAssertFalse(source.getFilterList().isEmpty)
         XCTAssertFalse(source.transportPolicy.allowsInsecureHTTP)
+        let imageRequest = await source.getImageRequest(page: PageCompat(
+            index: 0,
+            imageURL: "https://static.baozicdn.com/chapter/factory.jpg"
+        ))
+        XCTAssertNotNil(imageRequest?.sourceExecutionID)
     }
 
     func testFactoryRejectsFileReplacementBeforeSignatureOrDEXConstruction() throws {

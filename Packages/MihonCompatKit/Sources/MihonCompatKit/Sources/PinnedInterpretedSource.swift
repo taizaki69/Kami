@@ -510,6 +510,8 @@ private struct PinnedInterpretedProfile: Sendable {
 }
 
 private actor PinnedInterpretedRuntime {
+    private static let maximumRetainedImageRequests = 4_096
+
     nonisolated let metadata: PinnedInterpretedMetadata
     nonisolated let filters: [SourceFilter]
 
@@ -518,14 +520,22 @@ private actor PinnedInterpretedRuntime {
         let continuation: CheckedContinuation<Void, any Error>
     }
 
+    private struct RetainedImageRequest {
+        let request: RVal
+        let client: RVal
+    }
+
     private let profile: PinnedInterpretedProfile
     private let transportPolicy: CompatHTTPTransportPolicy
+    private let bridge: HostBridge
     private let vm: DexInterpreter
     private let receiver: RVal
     private let entryClassDescriptor: String
     private let sourceAPIWrapperDescriptor: String
     private let filterListValue: RVal?
+    private let imageClientValue: RVal?
     private let compatibilityRecorder: InterpretedCompatibilityRecorder
+    private var retainedImageRequests: [UUID: RetainedImageRequest] = [:]
     private var executing = false
     private var waiters: [Waiter] = []
     private var nextWaiterID: UInt64 = 0
@@ -597,14 +607,15 @@ private actor PinnedInterpretedRuntime {
         case .baoziManhua:
             extensionPackageName = profile.packageName
         }
+        let bridge = HostBridge.minimal(
+            transport: transport,
+            transportPolicy: transportPolicy,
+            extensionPackageName: extensionPackageName,
+            preferences: preferences
+        )
         let vm = DexInterpreter(
             dex: dex,
-            bridge: HostBridge.minimal(
-                transport: transport,
-                transportPolicy: transportPolicy,
-                extensionPackageName: extensionPackageName,
-                preferences: preferences
-            ),
+            bridge: bridge,
             cancelled: { Task.isCancelled }
         )
         let receiver = try vm.instantiate(classDescriptor: entryClassDescriptor)
@@ -668,13 +679,37 @@ private actor PinnedInterpretedRuntime {
             throw PinnedInterpretedSourceError.invalidMetadata(profile: profile.identifier)
         }
 
+        // Baozi's optional banner interceptor requires Android Bitmap pixel
+        // operations that the portable bridge does not yet implement. Retain
+        // its exact configured client only when that preference is explicitly
+        // disabled; otherwise the reader keeps the existing URL/header path
+        // instead of turning an optional transform into a page-load failure.
+        let imageClientValue: RVal?
+        if case .interpreted = profile.imageRequestSupport,
+           preferences.strings["BAOZI_BANNER"] == "0" {
+            let client = try vm.call(
+                classDescriptor: sourceAPIWrapperDescriptor,
+                method: "getClient",
+                prototype: "()Lokhttp3/OkHttpClient;",
+                args: [receiver]
+            )
+            guard HostBridge.isOkHttpClient(client) else {
+                throw PinnedInterpretedSourceError.invalidMetadata(profile: profile.identifier)
+            }
+            imageClientValue = client
+        } else {
+            imageClientValue = nil
+        }
+
         self.profile = profile
         self.transportPolicy = transportPolicy
+        self.bridge = bridge
         self.vm = vm
         self.receiver = receiver
         self.entryClassDescriptor = entryClassDescriptor
         self.sourceAPIWrapperDescriptor = sourceAPIWrapperDescriptor
         self.filterListValue = filterListValue
+        self.imageClientValue = imageClientValue
         self.compatibilityRecorder = compatibilityRecorder
         self.filters = filters
         self.metadata = PinnedInterpretedMetadata(
@@ -854,7 +889,45 @@ private actor PinnedInterpretedRuntime {
                         operation: "image request"
                     )
                 }
-                return Self.validatedImageRequest(request, policy: transportPolicy)
+                guard let validated = Self.validatedImageRequest(
+                    request,
+                    policy: transportPolicy
+                ) else {
+                    throw PinnedInterpretedSourceError.unexpectedResult(
+                        operation: "image request"
+                    )
+                }
+                guard let imageClientValue else { return validated }
+                guard retainedImageRequests.count < Self.maximumRetainedImageRequests else {
+                    compatibilityRecorder.record(
+                        stage: .imageRequest,
+                        error: PinnedInterpretedSourceError.runtimeBusy
+                    )
+                    return validated
+                }
+
+                let id = UUID()
+                retainedImageRequests[id] = RetainedImageRequest(
+                    request: result,
+                    client: imageClientValue
+                )
+                let runtime = self
+                let execution = SourceImageExecution(
+                    id: id,
+                    operation: {
+                        try await runtime.executeRetainedImageRequest(id: id)
+                    },
+                    release: {
+                        _ = Task {
+                            await runtime.releaseRetainedImageRequest(id: id)
+                        }
+                    }
+                )
+                return ImageRequest(
+                    url: validated.url,
+                    headers: validated.headers,
+                    sourceExecution: execution
+                )
             } catch is CancellationError {
                 return nil
             } catch let error as VMError {
@@ -868,6 +941,37 @@ private actor PinnedInterpretedRuntime {
                 return nil
             }
         }
+    }
+
+    private func executeRetainedImageRequest(id: UUID) async throws -> CompatHTTPResponse {
+        do {
+            try await acquire()
+            defer { release() }
+            try Task.checkCancellation()
+            guard let retained = retainedImageRequests[id] else {
+                throw PinnedInterpretedSourceError.unexpectedResult(
+                    operation: "reader image request"
+                )
+            }
+            return try await bridge.executeImageRequest(
+                requestValue: retained.request,
+                clientValue: retained.client,
+                vm: vm
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as VMError {
+            if case .cancelled = error { throw CancellationError() }
+            compatibilityRecorder.record(stage: .imageRequest, error: error)
+            throw error
+        } catch {
+            compatibilityRecorder.record(stage: .imageRequest, error: error)
+            throw error
+        }
+    }
+
+    private func releaseRetainedImageRequest(id: UUID) {
+        retainedImageRequests.removeValue(forKey: id)
     }
 
     private func acquire() async throws {

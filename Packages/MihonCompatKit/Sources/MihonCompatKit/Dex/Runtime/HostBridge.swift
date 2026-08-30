@@ -7844,6 +7844,60 @@ public final class HostBridge {
         return ImageRequest(url: request.url, headers: headers)
     }
 
+    static func isOkHttpClient(_ value: RVal) -> Bool {
+        guard case let .obj(object) = value,
+              object.dexType == "Lokhttp3/OkHttpClient;" else { return false }
+        return object.payload is OkHttpClientBox
+    }
+
+    /// Executes one retained reader-image Request through the exact configured
+    /// source client. The caller owns actor serialization of `vm` and the RVal
+    /// graph; only the bounded transport response crosses back to app code.
+    func executeImageRequest(
+        requestValue: RVal,
+        clientValue: RVal,
+        vm: DexInterpreter
+    ) async throws -> CompatHTTPResponse {
+        guard let transport else {
+            throw VMError.verify("reader image transport is unavailable")
+        }
+        guard case let .obj(requestObject) = requestValue,
+              requestObject.dexType == "Lokhttp3/Request;",
+              let request = requestObject.payload as? CompatHTTPRequest,
+              request.method == "GET",
+              request.body == nil,
+              case let .obj(clientObject) = clientValue,
+              clientObject.dexType == "Lokhttp3/OkHttpClient;",
+              let client = clientObject.payload as? OkHttpClientBox else {
+            throw VMError.verify("invalid retained reader image request")
+        }
+        let call = CallBox(
+            request: request,
+            requestValue: requestValue,
+            client: client
+        )
+        let callValue = RVal.obj(ObjInstance(
+            dexType: "Lokhttp3/Call;",
+            payload: call,
+            isHost: true
+        ))
+        lastPreparedRequest = request
+        let responseValue = try await vm.withFreshAsyncSession {
+            try await Self.execute(
+                callValue: callValue,
+                call,
+                vm: vm,
+                transport: transport,
+                policy: transportPolicy,
+                requiresSuccess: false
+            )
+        }
+        guard let response = Self.responseProjection(from: responseValue) else {
+            throw VMError.verify("reader image chain returned a non-Response value")
+        }
+        return response.value
+    }
+
     public static func pagesCompat(from value: RVal) -> [PageCompat]? {
         guard case let .obj(object) = value,
               let list = object.payload as? HostListBox,
