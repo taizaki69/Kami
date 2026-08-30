@@ -256,12 +256,12 @@ The compatibility kit runs locally on Windows with Swift 6.3 through
 `scripts/windows_dev_test.bat`, including the Baozi real-APK regressions and
 portable KamiCore coverage; the current local `MihonCompatKit` suite passes
 214/214 with the corpus present, and the current portable KamiCore suite passes
-14/14. The preceding exact corpus head `a376064` passes
-[Swift CI](https://github.com/taizaki69/Kami/actions/runs/33279595763) with all
-27 fixtures, the prior 192 MihonCompatKit tests, 23 KamiCore tests, and the optimized CLI;
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/33279595816) for both
+14/14. Exact interceptor implementation head `0ccb518` passes
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/33286986621) with all
+27 fixtures, 214 MihonCompatKit tests, 25 KamiCore tests, and the optimized CLI;
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/33286986601) for both
 simulator and unsigned device; and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/33279595746) with
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/33286986710) with
 the uploaded unsigned IPA.
 The `compat-audit` CLI produces the measured compatibility matrix,
 deterministic per-APK structural-plan blockers, and a redacted static

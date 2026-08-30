@@ -10,8 +10,9 @@ work was recovered, completed, verified, and pushed.
 The behavior-stratified measurement corpus is implemented at `35e4435`, and
 its exact Apache-2.0 test fixtures are durably vendored at `a376064`. The
 pre-Baozi continuation checkpoint is `e11931f`. The exact Baozi execution
-profile is implemented at `9a1f647`; all three exact-head GitHub Actions
-workflows for that implementation commit pass.
+profile is implemented at `9a1f647`. Bounded source-operation OkHttp
+interceptor execution is implemented at `0ccb518`; all three exact-head GitHub
+Actions workflows for that implementation commit pass.
 
 ## Start here
 
@@ -28,8 +29,11 @@ workflows for that implementation commit pass.
   `LICENSES.md` and issue #5.
 - Default branch: `main`
 - Current verified pushed implementation checkpoint:
-  `9a1f64721d555ccac78e4506fbc0652e1da6e3bd` (the exact Baozi execution profile,
+  `0ccb518c63a657d6793d82ce888dd1f605d67b16` (bounded source-operation
+  interceptor execution and the exact Baozi profile,
   with successful exact-head Swift CI, iOS Build, and IPA Package workflows).
+- Previous exact Baozi profile checkpoint:
+  `9a1f64721d555ccac78e4506fbc0652e1da6e3bd`.
 - Previous pre-Baozi continuation checkpoint:
   `e11931f86c630039098f6b9d3a45b0293bee5548` (the durable corpus milestone and
   its handoff documentation, also with successful exact-head workflows).
@@ -70,10 +74,11 @@ workflows for that implementation commit pass.
 - Original Phase 2 baseline: `6f9de0719f057646e228f14620806326840e5c75`
 - Expected state after cloning: clean `main`, tracking `origin/main`
 
-Always continue from the latest `origin/main`. The latest verified Baozi
-implementation head is `9a1f647`; its durable corpus implementation baseline is
-`a376064`. A documentation-only continuation commit may be newer than the
-implementation head.
+Always continue from the latest `origin/main`. The latest verified interceptor
+implementation head is `0ccb518`; the exact Baozi profile baseline is
+`9a1f647`, and its durable corpus implementation baseline is `a376064`. A
+documentation-only continuation commit may be newer than the implementation
+head.
 
 ## Current resume point
 
@@ -82,10 +87,11 @@ Current verified state on 2026-08-29 (America/Lima):
 - Commit `35e4435` implements the corpus lock and tests. Commit `a376064`
   vendors the exact 21 Keiyoushi APKs with attribution so all 27 fixtures are
   present in a clean checkout. Commit `9a1f647` promotes exact Baozi Manhua
-  1.6.29 to an admitted/executable profile and passes exact-head
-  [Swift CI 33284765767](https://github.com/taizaki69/Kami/actions/runs/33284765767),
-  [iOS Build 33284765744](https://github.com/taizaki69/Kami/actions/runs/33284765744),
-  and [IPA Package 33284765745](https://github.com/taizaki69/Kami/actions/runs/33284765745).
+  1.6.29 to an admitted/executable profile. Commit `0ccb518` adds bounded
+  source-operation interceptor execution and passes exact-head
+  [Swift CI 33286986621](https://github.com/taizaki69/Kami/actions/runs/33286986621),
+  [iOS Build 33286986601](https://github.com/taizaki69/Kami/actions/runs/33286986601),
+  and [IPA Package 33286986710](https://github.com/taizaki69/Kami/actions/runs/33286986710).
 - The corpus lock is behavior-stratified at the 2026-08-23 snapshot:
   Keiyoushi catalog revision
   `4704d377ad00e7bc6f944cc7638a18e6e7fd4a23` and extensions-source revision
@@ -112,9 +118,8 @@ Current verified state on 2026-08-29 (America/Lima):
   suite passed its construction, preference, filter, core-operation, and
   interpreted-image-request checks against fake transport. Exact-head Swift CI
   verified all 27 committed fixtures without a fallback download, the complete
-  previous 207-test MihonCompatKit suite, KamiCore, the optimized `compat-audit`
-  build, and its artifact upload. The new 214-test interceptor checkpoint is
-  awaiting its exact-head run below.
+  214-test MihonCompatKit suite, 25-test macOS KamiCore suite, the optimized
+  `compat-audit` build, and its artifact upload at the exact interceptor head.
 - Count continuity: this bounded-interceptor milestone is 214/214
   MihonCompatKit and 14/14 portable KamiCore tests. The immediately preceding
   Baozi promotion was 207/207 and 14/14; pre-final-hardening reported 202/202
@@ -692,13 +697,13 @@ Verification detail:
 | APK signer verification | 6 focused regressions cover the six real Keiyoushi v2 APKs (Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, and Baozi Manhua), AOSP v1/v3 and verified rotation, content/signature tampering, unsigned input, fingerprint normalization, and scheme stripping |
 | Persisted extension admission | 3 focused macOS test methods cover repository/user trust, unrelated-signer rejection, declared source-ID capability registration, verified signer rotation, and downgrade/same-version replacement rejection |
 | Install/restore/source factory | 3 historical macOS install tests plus 6 current portable factory tests cover repository-key install, explicit legacy confirmation, cancellation, startup restoration, exact-file replacement rejection, declared source-ID enforcement, real BatCave/MangaMelon/Baozi construction, and refusal to guess an unmeasured profile |
-| Swift CI | Exact Baozi implementation head `9a1f647` [run 33284765767](https://github.com/taizaki69/Kami/actions/runs/33284765767) verified all 27 fixtures without fallback download, passed 207 MihonCompatKit tests and the complete KamiCore suite, built the optimized CLI, and uploaded `compat-audit-macos` |
-| iOS Simulator and unsigned device builds | Exact Baozi implementation head `9a1f647` [run 33284765744](https://github.com/taizaki69/Kami/actions/runs/33284765744) passed both targets |
-| Unsigned IPA packaging | Exact Baozi implementation head `9a1f647` [run 33284765745](https://github.com/taizaki69/Kami/actions/runs/33284765745) passed and uploaded `Kami-unsigned-ipa`; this is unsigned build/package evidence, not a signed release |
+| Swift CI | Exact interceptor implementation head `0ccb518` [run 33286986621](https://github.com/taizaki69/Kami/actions/runs/33286986621) verified all 27 fixtures without fallback download, passed 214 MihonCompatKit tests and 25 KamiCore tests, built the optimized CLI, and uploaded `compat-audit-macos` |
+| iOS Simulator and unsigned device builds | Exact interceptor implementation head `0ccb518` [run 33286986601](https://github.com/taizaki69/Kami/actions/runs/33286986601) passed both targets |
+| Unsigned IPA packaging | Exact interceptor implementation head `0ccb518` [run 33286986710](https://github.com/taizaki69/Kami/actions/runs/33286986710) passed and uploaded `Kami-unsigned-ipa`; this is unsigned build/package evidence, not a signed release |
 | Repository integrity | implementation worktree was clean after push; staged and working diffs passed `git diff --check`; prior full `git fsck --full` found no corruption |
 
 The exact-head public-repository runs validate every implementation checkpoint
-through `9a1f647`, including the durable corpus, typed runtime/static
+through `0ccb518`, including the durable corpus, typed runtime/static
 compatibility diagnostics, shared non-executing plan discovery, all four
 app-facing interpreted source profiles,
 signer-authenticated admission gate, durable install/restore flow, exact-byte
@@ -730,9 +735,10 @@ declared-source-ID checks:
   structural candidates, 540 unique unregistered external method surfaces, and
   zero unsupported opcodes.
 - Local Windows verification passes 214/214 MihonCompatKit tests and 14/14
-  KamiCore tests. The previous Baozi implementation head `9a1f647` remains the
-  latest exact-head CI evidence until this interceptor checkpoint is pushed and
-  rerun.
+  KamiCore tests. Exact interceptor head `0ccb518` passes
+  [Swift CI 33286986621](https://github.com/taizaki69/Kami/actions/runs/33286986621),
+  [iOS Build 33286986601](https://github.com/taizaki69/Kami/actions/runs/33286986601),
+  and [IPA Package 33286986710](https://github.com/taizaki69/Kami/actions/runs/33286986710).
 - Reader-facing `ImageRequest` still retains only URL/headers, not the DEX
   Request identity/tags, so it bypasses the completed source-operation chain.
   Baozi banner cropping, redirect-domain rewriting, and missing-image behavior

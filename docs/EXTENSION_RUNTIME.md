@@ -495,16 +495,14 @@ restore/factory rejection, enabled-state preservation, and downloaded registry
 replacement/removal. That historical Swift CI job verified its then-locked
 SHA-256 APK corpus before running it.
 
-The exact implementation commit `e56bd9a` is historical CI evidence, not a
-result for the current corpus expansion: it passed
-[Swift CI 32683073872](https://github.com/taizaki69/Kami/actions/runs/32683073872),
-[iOS Build 32683073885](https://github.com/taizaki69/Kami/actions/runs/32683073885),
-and [IPA Package 32683073873](https://github.com/taizaki69/Kami/actions/runs/32683073873).
-Those runs predate the current corpus expansion and 192-test checkout; they
-remain the available CI evidence until a new commit is pushed and rerun. They
-covered the then-189-test compatibility suite, optimized CLI build, 23 KamiCore
-tests, Simulator/device compilation, and unsigned IPA artifact. The iOS build
-log contains no warning lines after adding the complete iPad orientation set.
+Exact interceptor implementation commit `0ccb518` passes
+[Swift CI 33286986621](https://github.com/taizaki69/Kami/actions/runs/33286986621),
+[iOS Build 33286986601](https://github.com/taizaki69/Kami/actions/runs/33286986601),
+and [IPA Package 33286986710](https://github.com/taizaki69/Kami/actions/runs/33286986710).
+Swift CI verified all 27 locked fixtures without fallback download, passed 214
+MihonCompatKit and 25 KamiCore tests, built the optimized CLI, and uploaded it.
+The iOS and IPA workflows passed simulator/device compilation and unsigned IPA
+packaging respectively. Older implementation evidence remains in the handoff.
 
 The compatibility matrix records the exact versions, hashes, and methods. New
 runtime behavior is complete only when it has a focused regression test and,

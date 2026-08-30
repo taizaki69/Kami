@@ -217,13 +217,21 @@ report above for current prioritization.
   SHA/URL/fetcher and manifest/signature checks, and the deterministic static
   measurement baseline.
 - The current portable Windows KamiCore suite passes 14/14 tests, including
-  exact Baozi factory admission. The preceding exact-head macOS result is
-  historical and remains 23/23 below.
-- Previous exact corpus head `a376064` passes
+  exact Baozi factory admission. Exact interceptor head `0ccb518` passes all
+  25 KamiCore tests on macOS.
+- Exact interceptor implementation head `0ccb518` passes
+  [Swift CI 33286986621](https://github.com/taizaki69/Kami/actions/runs/33286986621),
+  [iOS Build 33286986601](https://github.com/taizaki69/Kami/actions/runs/33286986601),
+  and [IPA Package 33286986710](https://github.com/taizaki69/Kami/actions/runs/33286986710).
+  Swift CI found all 27 fixtures already hash-matched, passed 214/214
+  MihonCompatKit tests and 25/25 KamiCore tests, built the optimized CLI, and
+  uploaded it. The iOS and IPA runs passed both build destinations and unsigned
+  packaging respectively.
+- Historical exact corpus head `a376064` passes
   [Swift CI 33279595763](https://github.com/taizaki69/Kami/actions/runs/33279595763),
   [iOS Build 33279595816](https://github.com/taizaki69/Kami/actions/runs/33279595816),
   and [IPA Package 33279595746](https://github.com/taizaki69/Kami/actions/runs/33279595746).
-  Swift CI found all 27 fixtures already hash-matched, passed 3/3 corpus tests,
+  Its Swift CI found all 27 fixtures already hash-matched, passed 3/3 corpus tests,
   192/192 MihonCompatKit tests, 23/23 KamiCore tests, the optimized CLI build,
   and artifact upload. The iOS and IPA runs passed both build destinations and
   unsigned packaging respectively.

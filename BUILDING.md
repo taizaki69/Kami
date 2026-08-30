@@ -69,9 +69,10 @@ compatibility percentage or runtime proof.
 
 With the corpus present, the current local Windows/Swift 6.3.3
 `MihonCompatKit` suite passes 214/214 tests, including the Baozi real-APK
-regressions. The exact-head GitHub workflows listed below still refer to the
-previous pre-promotion checkpoint; new workflow results belong to the integrated
-Baozi milestone.
+regressions. Exact interceptor implementation head `0ccb518` passes
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/33286986621),
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/33286986601), and
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/33286986710).
 
 All 21 real Keiyoushi APKs are vendored, SHA-256-pinned Apache-2.0 test inputs;
 they are not linked into or shipped by the iOS app. Their attribution is in
