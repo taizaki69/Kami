@@ -283,17 +283,20 @@ rewrite from `static.baozicdn.com` to `static.baozimh.com` without network I/O.
 `ReaderView` resolves each source `ImageRequest` asynchronously. Supported
 interpreted requests now carry an opaque UUID capability while the source actor
 retains the exact DEX Request/tags and configured client in a bounded table.
-Both source-operation `await`/`awaitSuccess` and those reader requests execute a
-bounded, registration-ordered application/network interceptor chain that
-preserves Request identity, tags, cancellation, response bounds, and one VM
+Both source-operation `await`/`awaitSuccess` and those reader requests execute
+bounded, registration-ordered application/network interceptor surfaces that
+preserve Request identity, tags, cancellation, response bounds, and one VM
 instruction budget. KamiCore validates the public URL/header projection,
 separates hidden execution identities in its cache, and receives only the
-bounded response. Baozi's direct-302 fixture proves its redirect-domain tag
-rewrite; its optional Bitmap banner crop remains unsupported, so the production
-factory explicitly defaults `BAOZI_BANNER=0`. URLSession's internal redirects
-still prevent proof of production intermediate-response, missing-image, and
-follow-up semantics. The production app has no UI/persistence path for the
-remaining injected Baozi preference values.
+bounded response. The GET-only reader path can now observe one URLSession
+exchange at a time: application interceptors run once, network interceptors run
+per response, and sanitized follow-ups share the five-redirect and 64-step
+budgets. Baozi's direct-302 fixture proves its redirect-domain tag rewrite, and
+the exact APK follows that rewritten source-host URL to final image bytes. Its
+optional Bitmap banner crop remains unsupported, so the production factory
+explicitly defaults `BAOZI_BANNER=0`. General source-operation response
+sequences and non-GET redirect semantics remain unproven. The production app
+has no UI/persistence path for the remaining injected Baozi preference values.
 
 ## 7. Prior art (iOS)
 

@@ -86,9 +86,10 @@ rewrite is proven to change the fixture's `static.baozicdn.com` host to
 `static.baozimh.com` without network I/O. Reader requests can now retain the
 exact DEX `Request`, tags, configured OkHttp client, and source cookie jar
 behind an opaque bounded execution capability. The real Baozi fixture proves
-its redirect-domain tag reaches the configured interceptor and rewrites a
-direct 302 `Location` while preserving the response body and unrelated
-headers.
+its redirect-domain tag reaches the configured network interceptor, rewrites a
+raw 302 `Location`, and drives the next bounded exchange to final image bytes.
+The direct-response regression still checks preservation of response body and
+unrelated headers.
 
 The corpus now also locks 15 current lib 1.6 Keiyoushi APKs under
 `Tests/corpus/measurement/` for measurement only. Together with the six
@@ -197,15 +198,17 @@ in-flight identity, so requests with the same public URL/headers but different
 hidden tags cannot collide. The pipeline validates the public projection before
 invocation and still applies its 2xx, non-empty, and compressed-size checks.
 
-Source operations and supported reader images execute each configured OkHttp
-application interceptor followed by each network interceptor before reaching
-transport, then unwind in reverse response order. The bounded chain preserves
-exact DEX `Request` identity/tags and one shared VM instruction budget, permits
-at most 32 interceptors, 64 interceptor/terminal steps, depth 32, and one
-`proceed` per chain object, and revalidates replacement bodies/headers against
-the transport policy. Baozi's real core-operation regressions traverse that
-chain and its finite rate limiter; its reader regression proves the tagged
-redirect-domain rewrite against a direct injected 302.
+Source operations execute each configured OkHttp application interceptor
+followed by each network interceptor before reaching transport, then unwind in
+reverse response order. Supported GET-only reader images additionally run
+application interceptors once around a bounded follow-up loop and network
+interceptors once per observable exchange. The chain preserves exact DEX
+`Request` identity/tags and one shared VM instruction budget, permits at most 32
+interceptors, 64 interceptor/terminal steps, depth 32, and one `proceed` per
+chain object, and revalidates replacement bodies/headers against the transport
+policy. Baozi's real core-operation regressions traverse that chain and its
+finite rate limiter; its reader regressions prove both the tagged direct-302
+rewrite and the production-shaped rewrite/follow-up path to final bytes.
 
 Reader image fetching now inherits the source's admitted transport policy. It
 is HTTPS-only by default, validates the initial URL and headers before even an
@@ -222,10 +225,11 @@ filter lists, and much of the Kotlin/Java surface remain open
 profile, but production preference UI/persistence is not wired. Because its
 default banner remover requires unavailable Android Bitmap/pixel/JPEG APIs,
 the downloaded-source factory explicitly defaults `BAOZI_BANNER` to disabled;
-explicit preferences still win. Banner cropping remains unsupported, and
-URLSession still hides intermediate redirect responses, so the direct-302
-fixture is not a claim of exact production redirect/follow-up behavior. Kami starts
-with native MangaDex and can additionally restore a supported, authenticated
+explicit preferences still win. Banner cropping remains unsupported, and the
+new observable-redirect path is deliberately limited to supported
+source-scoped GET reader images. It is not a claim of general OkHttp retry,
+POST-redirect, or source-operation response-sequence parity. Kami starts with
+native MangaDex and can additionally restore a supported, authenticated
 downloaded source.
 
 ## Layout
@@ -261,13 +265,14 @@ security boundaries, and the recommended next implementation sequence.
 The compatibility kit runs locally on Windows with Swift 6.3 through
 `scripts/windows_dev_test.bat`, including the Baozi real-APK regressions and
 portable KamiCore coverage; the current local `MihonCompatKit` suite passes
-215/215 with the corpus present, and the current portable KamiCore suite passes
-15/15. Exact reader-image implementation head `5535435` passes
-[Swift CI](https://github.com/taizaki69/Kami/actions/runs/33287959619) with all
-27 fixtures, 215 MihonCompatKit tests, 26 KamiCore tests, and the optimized CLI;
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/33287959646) for both
+220/220 with the corpus present, and the current portable KamiCore suite passes
+15/15. The exact observable-reader-redirect implementation head `c9d62f1`
+passes [Swift CI](https://github.com/taizaki69/Kami/actions/runs/33288777039)
+with all 27 fixtures, 220 MihonCompatKit tests, 26 KamiCore tests, and the
+optimized CLI;
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/33288777021) for both
 simulator and unsigned device; and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/33287959622) with
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/33288777024) with
 the uploaded unsigned IPA.
 The `compat-audit` CLI produces the measured compatibility matrix,
 deterministic per-APK structural-plan blockers, and a redacted static

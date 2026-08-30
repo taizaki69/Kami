@@ -212,19 +212,19 @@ report above for current prioritization.
 
 ## Test evidence
 
-- 214/214 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+- 220/220 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present. Three new `CorpusLockTests` cover separated roles,
   SHA/URL/fetcher and manifest/signature checks, and the deterministic static
   measurement baseline.
-- The current portable Windows KamiCore suite passes 14/14 tests, including
-  exact Baozi factory admission. Exact interceptor head `0ccb518` passes all
-  25 KamiCore tests on macOS.
-- Exact interceptor implementation head `0ccb518` passes
-  [Swift CI 33286986621](https://github.com/taizaki69/Kami/actions/runs/33286986621),
-  [iOS Build 33286986601](https://github.com/taizaki69/Kami/actions/runs/33286986601),
-  and [IPA Package 33286986710](https://github.com/taizaki69/Kami/actions/runs/33286986710).
-  Swift CI found all 27 fixtures already hash-matched, passed 214/214
-  MihonCompatKit tests and 25/25 KamiCore tests, built the optimized CLI, and
+- The current portable Windows KamiCore suite passes 15/15 tests, including
+  exact Baozi factory admission. The exact current head `c9d62f1` passes all 26
+  KamiCore tests on macOS.
+- Exact observable-reader-redirect implementation head `c9d62f1` passes
+  [Swift CI 33288777039](https://github.com/taizaki69/Kami/actions/runs/33288777039),
+  [iOS Build 33288777021](https://github.com/taizaki69/Kami/actions/runs/33288777021),
+  and [IPA Package 33288777024](https://github.com/taizaki69/Kami/actions/runs/33288777024).
+  Swift CI found all 27 fixtures already hash-matched, passed 220/220
+  MihonCompatKit tests and 26/26 KamiCore tests, built the optimized CLI, and
   uploaded it. The iOS and IPA runs passed both build destinations and unsigned
   packaging respectively.
 - Historical exact corpus head `a376064` passes
@@ -312,8 +312,9 @@ source results, and interpreted image-request rewrite.
   Kotlin duration/string/collection/time behavior, URL-builder encoding and
   work bounds, nullable equality, output/input bounds, scheme rejection, and
   CRLF-header rejection.
-- Eight focused transport tests cover source isolation, redirect policy,
-  bounded encoding/streaming, cancellation, and cookie scope.
+- Ten focused transport tests cover source isolation, redirect policy,
+  bounded encoding/streaming, cancellation, cookie scope, one-exchange 3xx
+  visibility, and safe GET follow-ups.
 - Parser hardening covers checksum/size/count limits and every truncated prefix
   of generated valid DEX and ZIP fixtures.
 - Exact-head Swift CI built `compat-audit` in release mode and uploaded it; the
@@ -342,10 +343,12 @@ first-gap/field instrumentation, and regression promotion remain open. Automatic
 catalog expansion, dynamic filter sources, production preference UI/persistence,
 and arbitrary custom image-request overrides remain open. Supported interpreted
 reader requests now retain exact DEX Request/tags/configured-client state behind
-an opaque bounded capability and execute the same OkHttp chain as source
-operations. Baozi's direct-302 fixture proves its redirect-domain tag rewrite;
-banner cropping and production intermediate redirect/missing-image/follow-up
-semantics remain unproven. Remaining
+an opaque bounded capability. Their GET-only response-sequence seam runs
+application interceptors once and network interceptors for every bounded
+exchange. Baozi's direct-302 fixture proves its redirect-domain tag rewrite, and
+the exact APK now follows that rewritten source-host URL to final image bytes.
+Banner cropping, general source-operation response sequences, and non-GET
+follow-up semantics remain unproven. Remaining
 reader chapter retry uses a structured `.task(id: reloadID)` and dismissal
 invalidates the load generation; per-page retry still reuses its resolved
 `ImageRequest`, so retry-time request regeneration/expiry remains deferred.

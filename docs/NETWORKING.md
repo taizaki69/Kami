@@ -23,9 +23,11 @@ policy.
 `URLSessionCompatHTTPTransport` is an actor owned by one source identity. It
 applies request, redirect, timeout, header, and body limits; rejects insecure
 HTTPS downgrades; enforces the response-body limit while delegate bytes arrive;
-and keeps an in-memory cookie jar isolated to that source. Tests inject a fake
-transport, so the pinned APK suite remains deterministic and makes no live
-requests.
+and keeps an in-memory cookie jar isolated to that source. Its optional
+single-exchange capability returns one response without following a redirect,
+while preserving the same validation, streaming limits, cancellation, and
+cookie storage. Tests inject a fake transport, so the pinned APK suite remains
+deterministic and makes no live requests.
 
 Async DEX frames resume after transport completion. Swift Task or OkHttp-call
 cancellation maps to a typed VM cancellation, transport failures become
@@ -90,18 +92,22 @@ Ordinary requests then use its direct transport. A request with a source-scoped
 capability instead asks the source actor to run the exact retained DEX Request
 through its configured bounded application/network chain and shared cookie jar;
 KamiCore receives only the bounded response and an opaque UUID used for
-deduplication/cache separation. The real Baozi direct-302 regression proves its
-retained redirect-domain tag rewrites `Location` while preserving unrelated
-response state.
+deduplication/cache separation. For a transport that exposes single exchanges,
+application interceptors run once, network interceptors run for each response,
+and a rewritten `Location` selects the next bounded GET. Every hop shares the
+source redirect limit, HTTPS-downgrade policy, cancellation checks, retained
+Request tags, and the call's 64-step/one-VM-session budget. Cross-origin
+follow-ups strip `Authorization`, `Proxy-Authorization`, explicit `Cookie`, and
+`Host`; the source cookie jar then applies only cookies valid for the new URL.
+The real Baozi regression proves its retained redirect-domain tag rewrites a raw
+302 and the rewritten source-host URL is fetched to final image bytes.
 
-`URLSessionCompatHTTPTransport` still follows redirects inside its delegate
-path, so that injected direct-response proof does not establish production
-intermediate redirect, missing-image, or follow-up semantics. The next
-networking milestone is an explicit bounded no-follow/response-sequence and
-follow-up seam. Baozi banner cropping remains unsupported until a bounded
-portable pixel/JPEG implementation exists; the production factory explicitly
-defaults `BAOZI_BANNER=0`, and a metadata-only Bitmap shim would not be
-compatibility.
+This seam is intentionally reader-image/GET scoped. Ordinary source operations
+still use the existing terminal transport contract, so this is not evidence of
+general OkHttp retry, POST-redirect, or intermediate-response parity. Baozi
+banner cropping remains unsupported until a bounded portable pixel/JPEG
+implementation exists; the production factory explicitly defaults
+`BAOZI_BANNER=0`, and a metadata-only Bitmap shim would not be compatibility.
 Reader retry must also regenerate and revalidate the source `ImageRequest` and
 define expiry/credential-refresh behavior; the current per-page retry reuses the
 request resolved during page loading.
@@ -125,8 +131,8 @@ compatibility:
 - Cloudflare: challenge detection → WKWebView solve → cookie/UA sync → retry
   (see EXTENSION_RUNTIME.md M4). No bypass pretense.
 - Additional retry/interceptor semantics as real corpus paths require them,
-  plus deliberate integration of the completed source-operation chain into the
-  reader image path as described above.
+  including general source-operation response sequences and non-GET follow-up
+  rules where a measured extension actually requires them.
 
 ## Diagnostics
 

@@ -311,7 +311,9 @@ synthetic and pinned-corpus tests:
   executes a source's exact `headersBuilder` override.
 - A per-source URLSession transport enforces request/response limits, redirect
   policy, timeouts, cancellation, streaming response-body limits, and an
-  isolated in-memory cookie jar. Tests use an actor-backed fake transport.
+  isolated in-memory cookie jar. Its optional single-exchange method lets the
+  reader runtime return one raw 3xx to network interceptors before selecting a
+  follow-up. Tests use actor-backed fake transports.
 - Bounded `Response`, `Response.Builder`, `ResponseBody`, `Headers`, and
   `okio.BufferedSource` models cover exact Request retention, redirect
   classification, status/header/body replacement, common charsets, one-shot
@@ -326,7 +328,9 @@ synthetic and pinned-corpus tests:
   projection first, includes the hidden UUID in deduplication/cache identity,
   invokes the same bounded chain, and then enforces 2xx, non-empty, and
   compressed-image size checks. Capability deallocation asynchronously releases
-  the retained handle.
+  the retained handle. Supported GET reader requests execute application
+  interceptors once and network interceptors per observable exchange, retain
+  tags across sanitized follow-ups, and share the redirect and chain budgets.
 - SwiftSoup 2.9.6 supplies HTML5 parsing and CSS semantics behind an exact
   Jsoup-compatible document/element/elements slice. Kami caps input bytes, DOM
   nodes/depth/attributes, selector length/results/cumulative work, and extracted
@@ -378,10 +382,10 @@ candidates, four stable-wrapper blockers, 540 unique unregistered external
 method surfaces, and zero unsupported opcodes. The next layer is first-gap
 capture below extension catch handlers and regression-promotion tooling.
 Dynamic/network-backed filter lists and production preference UI/persistence
-remain open. Reader-image execution now reaches the bounded source chain; exact
-intermediate redirect/follow-up behavior and Android bitmap transforms remain
-open. The longer tail remains
-additional Jsoup DOM behavior, string/collection overloads, broader
+remain open. Reader-image execution now reaches the bounded source chain and
+observes/follows bounded GET redirects; Android bitmap transforms and general
+source-operation/non-GET follow-up semantics remain open. The longer tail
+remains additional Jsoup DOM behavior, string/collection overloads, broader
 serialization, and Android context/UI shims. A class appearing in the
 analyzer's `implementedClasses` set is only a coarse prioritization signal; it
 does not mean every method on that class is callable.
@@ -414,17 +418,18 @@ selected, Kami keeps the safe URL/header reader path instead of invoking a
 known-incomplete transform.
 
 Source-operation `await`/`awaitSuccess` and supported reader images execute the
-configured bounded application/network interceptor chain while preserving the
-exact Request/tags and a single VM instruction budget. Reader capabilities
+configured bounded application/network interceptor surfaces while preserving
+the exact Request/tags and a single VM instruction budget. Reader capabilities
 retain the Request and configured client only inside the source actor, share
-the source transport/cookie jar, and expose only a bounded response. The real
-Baozi fixture proves its `RedirectDomainInterceptor` tag rewrites a direct
-injected 302 `Location` to the source host while preserving status, body,
-Request, and unrelated headers. Android banner cropping is still unsupported.
-URLSession follows redirects inside the terminal transport and exposes only the
-final response, so the direct-response regression does not prove production
-intermediate redirect, missing-image, or follow-up behavior; those require a
-bounded no-follow/response-sequence seam.
+the source transport/cookie jar, and expose only a bounded response. On the
+supported GET reader path, application interceptors run once around the call,
+network interceptors run per single exchange, and the rewritten response
+`Location` drives a sanitized follow-up under the same five-redirect and
+64-step budgets. The real Baozi fixtures prove its
+`RedirectDomainInterceptor` tag both rewrites a direct injected 302 while
+preserving response state and drives a second request to final image bytes.
+Android banner cropping is still unsupported. Ordinary source operations and
+non-GET retries do not yet use this response-sequence seam.
 
 Reader chapter retry is driven by a structured `.task(id: reloadID)`; changing
 the reload identity restarts the cancellable chapter load. Reader dismissal
@@ -488,7 +493,7 @@ compatibility.
 
 ## Verification
 
-`MihonCompatKit` currently has 214 passing tests locally on Windows/Swift 6.3.3.
+`MihonCompatKit` currently has 220 passing tests locally on Windows/Swift 6.3.3.
 The three new `CorpusLockTests` regressions cover separated corpus roles,
 SHA/URL/fetcher and manifest/signature checks, and the deterministic static
 measurement baseline. The suite also includes 6 focused signer regressions
@@ -500,11 +505,12 @@ including Baozi), along with 3 deterministic structural-plan regressions,
 4 privacy-safe runtime/static diagnostics regressions, 7 focused
 HTML/parser-limit regressions, Java URL-encoding and bounded Kotlin
 string/collection-helper regressions, generated chapter/page JSON success/
-failure paths, 4 focused async interpreter/transport regressions, 7 bounded
-OkHttp interceptor-chain regressions, 4 BatCave
-adapter/tamper/concurrency/policy regressions, 8 Baozi profile regressions, and complete Kawii/MangaMelon profile
-regressions, alongside the existing parser, bytecode verifier, request-model,
-repository, and compression coverage. KamiCore currently passes 14/14 portable
+failure paths, 4 focused async interpreter/transport regressions, 10 HTTP
+transport regressions, 9 bounded OkHttp interceptor-chain regressions, 4 BatCave
+adapter/tamper/concurrency/policy regressions, 10 Baozi profile regressions, and
+complete Kawii/MangaMelon profile regressions, alongside the existing parser,
+bytecode verifier, request-model, repository, and compression coverage.
+KamiCore currently passes 15/15 portable
 Windows tests, including
 exact Baozi factory admission; the historical pre-Baozi macOS CI run covered
 all 23, including reader settings and image-pipeline boundaries, Browse feed/
@@ -514,12 +520,12 @@ restore/factory rejection, enabled-state preservation, and downloaded registry
 replacement/removal. That historical Swift CI job verified its then-locked
 SHA-256 APK corpus before running it.
 
-Exact interceptor implementation commit `0ccb518` passes
-[Swift CI 33286986621](https://github.com/taizaki69/Kami/actions/runs/33286986621),
-[iOS Build 33286986601](https://github.com/taizaki69/Kami/actions/runs/33286986601),
-and [IPA Package 33286986710](https://github.com/taizaki69/Kami/actions/runs/33286986710).
-Swift CI verified all 27 locked fixtures without fallback download, passed 214
-MihonCompatKit and 25 KamiCore tests, built the optimized CLI, and uploaded it.
+Exact observable-reader-redirect implementation commit `c9d62f1` passes
+[Swift CI 33288777039](https://github.com/taizaki69/Kami/actions/runs/33288777039),
+[iOS Build 33288777021](https://github.com/taizaki69/Kami/actions/runs/33288777021),
+and [IPA Package 33288777024](https://github.com/taizaki69/Kami/actions/runs/33288777024).
+Swift CI verified all 27 locked fixtures without fallback download, passed 220
+MihonCompatKit and 26 KamiCore tests, built the optimized CLI, and uploaded it.
 The iOS and IPA workflows passed simulator/device compilation and unsigned IPA
 packaging respectively. Older implementation evidence remains in the handoff.
 

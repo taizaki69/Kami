@@ -35,8 +35,10 @@
   `static.baozicdn.com` to `static.baozimh.com` without network I/O, and the
   reader receives the resulting URL/headers projection. With banner processing
   explicitly disabled, it also receives an opaque capability backed by the
-  exact actor-owned DEX Request/tags and configured client. A direct-302 fixture
-  proves the redirect-domain tag rewrites `Location` through that client.
+  exact actor-owned DEX Request/tags and configured client. One fixture proves
+  the redirect-domain tag rewrites a direct 302; a second runs the same real APK
+  interceptor against an observable exchange and follows its rewritten
+  source-host `Location` to final image bytes.
 - `ReaderImagePipeline` is source-scoped and actor-isolated. Production loads
   reuse the compatibility transport's deterministic header validation,
   five-redirect limit, HTTPS-downgrade rejection, streamed 32 MiB response
@@ -69,13 +71,16 @@ explicitly configured for insecure HTTP. Redirect handling uses the same
 source-scoped policy, while reader-specific response-size limits stay separate.
 
 Supported reader image capabilities execute the same bounded source OkHttp
-application/network chain as source operations, preserving exact DEX Request
-identity/tags and one VM instruction budget. Baozi's optional banner transform
+surfaces as source operations, preserving exact DEX Request identity/tags and
+one VM instruction budget. For the supported GET-only reader path, application
+interceptors wrap the complete call once while network interceptors see each
+single exchange. Rewritten redirect locations are resolved and followed under
+the source's five-hop, downgrade, secret-stripping, response-size, cancellation,
+32-interceptor, 64-step, and depth-32 bounds. Baozi's optional banner transform
 still requires unavailable Android Bitmap/pixel/JPEG behavior, so the
 downloaded-source factory explicitly defaults `BAOZI_BANNER=0`; explicit modes
-1/2 keep the safe URL/header path. URLSession still consumes intermediate
-redirect responses internally, so exact redirect follow-up and missing-image
-semantics remain open despite the direct injected-302 regression.
+1/2 keep the safe URL/header path. General source-operation and non-GET OkHttp
+follow-up semantics remain outside this measured reader seam.
 
 Per-page image retry currently restarts the image task with the same resolved
 `ImageRequest`; it does not regenerate the request from the source or define
@@ -91,9 +96,7 @@ semantics are explicitly deferred.
    tap-centered zoom with stricter pan bounds.
 4. Memory-pressure-driven cache purging, long-image tiling, and integration
    with the future persistent download/disk cache.
-5. Add a bounded no-follow/intermediate-response and redirect-follow-up seam so
-   source interceptors can observe each production 3xx exchange. Add Baozi
-   image-transform regressions only after a portable bounded pixel/JPEG codec
-   exists; a metadata-only Bitmap shim is not compatibility.
+5. Add Baozi image-transform regressions only after a portable bounded
+   pixel/JPEG codec exists; a metadata-only Bitmap shim is not compatibility.
 6. Physical-device profiling and accessibility testing, including 500-page
    webtoon chapters, rotation, VoiceOver labels, and interrupted/retried loads.

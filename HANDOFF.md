@@ -12,7 +12,8 @@ its exact Apache-2.0 test fixtures are durably vendored at `a376064`. The
 pre-Baozi continuation checkpoint is `e11931f`. The exact Baozi execution
 profile is implemented at `9a1f647`. Bounded source-operation OkHttp
 interceptor execution is implemented at `0ccb518`. Source-scoped reader-image
-execution is implemented at `5535435`; all three exact-head GitHub Actions
+execution is implemented at `5535435`. Bounded observable reader-image redirect
+follow-up is implemented at `c9d62f1`; all three exact-head GitHub Actions
 workflows for that implementation commit pass.
 
 ## Start here
@@ -30,10 +31,12 @@ workflows for that implementation commit pass.
   `LICENSES.md` and issue #5.
 - Default branch: `main`
 - Current verified pushed implementation checkpoint:
-  `553543597f13d5239e8ab3cf182bbadadbd486b4` (source-scoped reader-image
-  execution retaining the exact DEX Request/tags/configured client, on top of
-  bounded source-operation interceptor execution and the exact Baozi profile,
-  with successful exact-head Swift CI, iOS Build, and IPA Package workflows).
+  `c9d62f1a188b7fd9f1026fd5cc85155e269830c9` (GET-only reader-image
+  single-exchange redirect visibility and bounded follow-up, retaining exact DEX
+  Request/tags/configured client state and correct application-once/network-per-
+  exchange ordering on top of the previous reader-image checkpoint).
+- Previous source-scoped reader-image execution checkpoint:
+  `553543597f13d5239e8ab3cf182bbadadbd486b4`.
 - Previous bounded source-operation interceptor checkpoint:
   `0ccb518c63a657d6793d82ce888dd1f605d67b16`.
 - Previous exact Baozi profile checkpoint:
@@ -79,7 +82,8 @@ workflows for that implementation commit pass.
 - Expected state after cloning: clean `main`, tracking `origin/main`
 
 Always continue from the latest `origin/main`. The latest reader-image
-implementation head is `5535435`; the bounded source-operation interceptor
+implementation head is `c9d62f1`; the retained source-execution baseline is
+`5535435`, the bounded source-operation interceptor
 baseline is `0ccb518`, the exact Baozi profile baseline is `9a1f647`, and its
 durable corpus implementation baseline is `a376064`. A documentation-only
 continuation commit may be newer than the implementation head.
@@ -101,6 +105,12 @@ Current verified state on 2026-08-29 (America/Lima):
   [Swift CI 33287959619](https://github.com/taizaki69/Kami/actions/runs/33287959619),
   [iOS Build 33287959646](https://github.com/taizaki69/Kami/actions/runs/33287959646),
   and [IPA Package 33287959622](https://github.com/taizaki69/Kami/actions/runs/33287959622).
+  Commit `c9d62f1` adds reader-image single-exchange visibility, correct
+  application/network redirect ordering, and sanitized bounded GET follow-up;
+  it passes exact-head
+  [Swift CI 33288777039](https://github.com/taizaki69/Kami/actions/runs/33288777039),
+  [iOS Build 33288777021](https://github.com/taizaki69/Kami/actions/runs/33288777021),
+  and [IPA Package 33288777024](https://github.com/taizaki69/Kami/actions/runs/33288777024).
 - The corpus lock is behavior-stratified at the 2026-08-23 snapshot:
   Keiyoushi catalog revision
   `4704d377ad00e7bc6f944cc7638a18e6e7fd4a23` and extensions-source revision
@@ -123,14 +133,16 @@ Current verified state on 2026-08-29 (America/Lima):
 - Three `CorpusLockTests` cover separated roles, manifest/fetch/hash round
   trips, manifest identity, release signature-parser conformance, and the
   deterministic static baseline. The fetch round trip passed, and the latest
-  local Windows MihonCompatKit run passed 215/215 tests. The Baozi regression
+  local Windows MihonCompatKit run passed 220/220 tests. The Baozi regression
   suite passed its construction, preference, filter, core-operation, and
-  interpreted-image-request checks against fake transport. Exact-head Swift CI
-  verified all 27 committed fixtures without a fallback download, the complete
-  215-test MihonCompatKit suite, 26-test macOS KamiCore suite, the optimized
-  `compat-audit` build, and its artifact upload at the reader-image head.
-- Count continuity: this reader-image milestone is 215/215 MihonCompatKit and
-  15/15 portable KamiCore tests. The bounded-interceptor milestone was 214/214
+  interpreted-image-request and observable redirect/follow-up checks against
+  fake transport. Exact-head Swift CI verified all 27 committed fixtures
+  without a fallback download, the complete 220-test MihonCompatKit suite,
+  26-test macOS KamiCore suite, the optimized `compat-audit` build, and its
+  artifact upload at the current observable-redirect head.
+- Count continuity: the observable-redirect milestone is 220/220 MihonCompatKit
+  and 15/15 portable KamiCore tests. The retained reader-image milestone was
+  215/215 and 15/15. The bounded-interceptor milestone was 214/214
   and 14/14. The immediately preceding Baozi promotion was 207/207 and 14/14;
   pre-final-hardening reported 202/202
   and 13/13, and the earlier pre-Baozi source path reported 199/199. Those are
@@ -162,13 +174,19 @@ Current verified state on 2026-08-29 (America/Lima):
   includes the UUID in in-flight/cache identity, invokes the source chain, and
   then enforces its existing 2xx/non-empty/image-size checks. The real Baozi
   direct-302 fixture proves its redirect-domain tag rewrites `Location` while
-  preserving body and unrelated headers. Production preference UI/persistence
+  preserving body and unrelated headers. A second exact-APK fixture uses the
+  production-shaped single-exchange seam, observes the raw 302, follows the
+  rewritten source-host URL, and returns final image bytes. Application
+  interceptors wrap the reader call once and network interceptors run on every
+  exchange; all hops share the redirect, cancellation, VM, and 64-step budgets,
+  retain tags, and strip explicit cross-origin secrets before follow-up.
+  Production preference UI/persistence
   is not wired. Because the APK defaults its optional Android Bitmap banner
   transform to mode 1, the downloaded-source factory explicitly supplies
   `BAOZI_BANNER=0`; explicit preferences override it. Bitmap/pixel/JPEG crop
-  behavior remains unsupported. URLSession still follows redirects internally,
-  so the injected direct-302 proof is not production intermediate-redirect or
-  follow-up parity.
+  behavior remains unsupported. The response-sequence seam is intentionally
+  limited to supported GET-only reader images; general source-operation,
+  non-GET, and broader OkHttp retry parity remain unproven.
 - The downloaded-source factory preflights each exact profile source-ID set
   before DEX construction and postvalidates every constructed ID against that
   set and the persisted admission. `SourceRegistry` removal is package-owner
@@ -538,14 +556,14 @@ single VM instruction budget. Reader execution retains DEX values only inside
 the source actor, bounds live handles at 4,096, keeps hidden execution identity
 out of KamiCore except for an opaque UUID, and reuses the source cookie jar.
 
-The active reader-compatibility frontier is an explicit bounded
-intermediate-redirect/follow-up seam because production URLSession currently
-returns only the final response. Keep Baozi banner transformation unsupported
-until a bounded portable pixel/JPEG implementation exists; a metadata-only
-Bitmap shim is not compatibility. In parallel, continue issue #4's below-catch
-first-gap/field/bridge instrumentation and fixed-gap regression promotion.
-Dynamic/network-backed filters and production preference UI/persistence also
-remain open.
+The bounded intermediate-response/follow-up seam is now complete for supported
+GET-only reader images. The active compatibility frontier returns to issue #4's
+below-catch first-gap/field/bridge instrumentation and fixed-gap regression
+promotion, followed by evidence-driven promotion of the next locked structural
+candidate. Keep Baozi banner transformation unsupported until a bounded
+portable pixel/JPEG implementation exists; a metadata-only Bitmap shim is not
+compatibility. Dynamic/network-backed filters and production preference
+UI/persistence also remain open.
 Generate more of the exact catalog only
 from authenticated evidence, and do not let discovery create a parallel
 admission bypass. Keep `HostBridge` deny-by-default and never execute extension
@@ -673,13 +691,13 @@ files, passwords, cookies, or signing credentials.
 
 ## Known-good verification checkpoint
 
-Current local bounded-interceptor evidence, based on the durable corpus established
+Current local observable-reader-redirect evidence, based on the durable corpus established
 by `35e4435`/`a376064`: the behavior-stratified lock and fetch round trip cover
 27 artifacts (6 execution, 15 measurement-only current lib 1.6, and 6 AOSP
 conformance; 19 current lib 1.6 total). The 3 `CorpusLockTests` pass
 manifest/fetch/hash, manifest-identity, signature-parser-conformance, and
 deterministic-baseline assertions. The latest local Windows MihonCompatKit run
-is 214/214. The previous pre-promotion optimized measurement
+is 220/220. The previous pre-promotion optimized measurement
 `compat-audit gaps` runs were
 byte-identical 98,876-byte UTF-8 reports with SHA-256
 `37503437e4b0aa67bf17fe13fa0b1d1b1d5ab05d5d2583964b2de0c0fcfd99e3` and no
@@ -692,8 +710,8 @@ Verification detail:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 214 Swift tests passed locally on Windows/Swift 6.3.3, including 3 corpus-lock regressions, 6 APK-signature regressions covering Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, and Baozi Manhua, 3 structural-plan regressions, 4 privacy-safe diagnostics regressions, 7 interceptor-chain regressions, and the Baozi real-APK profile; the prior 192-test exact corpus checkpoint remains linked below |
-| KamiCore | 14/14 portable tests passed locally on Windows/Swift 6.3.3, including exact Baozi factory admission; the pre-Baozi exact-head run passed all 23 macOS tests covering reader settings/prefetch, exact image headers, in-flight deduplication/cache, error limits, Browse routing, SQLite persistence, install/restore/factory, update policy, and registry lifecycle coverage |
+| MihonCompatKit | 220 Swift tests passed locally on Windows/Swift 6.3.3, including 3 corpus-lock regressions, 6 APK-signature regressions covering Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, and Baozi Manhua, 3 structural-plan regressions, 4 privacy-safe diagnostics regressions, 10 transport regressions, 9 interceptor-chain regressions, and 10 Baozi real-APK regressions; the prior 192-test exact corpus checkpoint remains linked below |
+| KamiCore | 15/15 portable tests passed locally on Windows/Swift 6.3.3, including exact Baozi factory admission and source-scoped image execution; the current observable-redirect exact-head run passed all 26 macOS tests covering reader settings/prefetch, exact image headers, in-flight deduplication/cache, error limits, Browse routing, SQLite persistence, install/restore/factory, update policy, and registry lifecycle coverage |
 | Optimized package builds | Windows release builds passed for both MihonCompatKit/`compat-audit.exe` and KamiCore |
 | Real APK constructors | Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, and Baozi Manhua passed |
 | Structural execution plans | BatCave, Kawii Manga, MangaMelon, and Baozi Manhua produce deterministic single-DEX lib 1.6 plans; Akuma/MangaDex report lib 1.4 blockers; malformed input throws; full CLI batches continue after per-file errors and fail at the end |
@@ -705,38 +723,54 @@ Verification detail:
 | Binary opcode semantics | 1 focused regression covers AOSP operation/type-major ordering across int, long, float, double, and `/2addr` forms |
 | Method resolution and receiver dispatch | 15 focused regressions cover virtual/class override selection, lexical normal/range class-super dispatch, inherited/maximally-specific interface defaults, abstract masking, default conflicts, DEX 037 interface-super gating, strict interface receivers, typed linkage failures, and conservative unresolved boundaries |
 | Request/model/collection host regressions | 19 focused tests cover request construction, bounded `HttpUrl.Builder`, duration/cache/time conversion, URL scheme rejection, CRLF-header rejection, body/work bounds, Java URL encoding, nullable equality, bounded Kotlin split/regex/affix/string/collection helpers, and fail-closed typed `ArrayList.toArray` stores |
-| HTTP transport regressions | 8 focused tests cover source isolation, bounded deterministic encoding, redirect secret stripping/downgrade rejection, streamed response limits, cancellation, and cookie scope |
+| HTTP transport regressions | 10 focused tests cover source isolation, bounded deterministic encoding, redirect secret stripping/downgrade rejection, streamed response limits, cancellation, cookie scope, one-exchange 3xx visibility, and safe GET follow-up construction |
 | Async interpreter/response regressions | 4 focused tests cover nested frame resumption, sync-entry diagnostics, typed DEX handler re-entry, cancellation, injected transport, charset decoding, one-shot reads, and close state |
-| OkHttp interceptor execution | 7 focused tests cover application/network descent and reverse unwind, exact Request/two-tag identity, response builder/header/body/redirect semantics, one-shot `proceed`, the 32-interceptor limit, shared outer VM budget, final-chain `await` versus `awaitSuccess`, and cancellation; Baozi core operations traverse the real finite rate limiter |
+| OkHttp interceptor execution | 9 focused tests cover application/network descent and reverse unwind, exact Request/two-tag identity, response builder/header/body/redirect semantics, one-shot `proceed`, the 32-interceptor limit, shared outer VM budget, final-chain `await` versus `awaitSuccess`, cancellation, application-once/network-per-exchange reader redirects, retained follow-up tags, and a 64-step budget shared across hops; Baozi core operations traverse the real finite rate limiter |
 | HTML/selector hardening | 7 focused tests cover BatCave CSS/URL semantics, modern direct-child and `:containsData` selectors, input, base-URL, node, depth, attribute, selector length/result/work, and extracted-string limits |
 | BatCave execution | Exact metadata getters pass; popular, paginated text search, and latest updates return exact `MangasPage`; core details return exact `SManga`; combined updates return exact chapters; page list returns exact image URLs; malformed chapter/page payloads are typed failures; a 503 maps to `HttpException(code: 503)` |
 | Kawii Manga execution | Exact metadata, popular/latest/search, combined details/chapters, and pages pass from the locked APK; all five exact GETs carry the custom `x-app-key` header |
 | MangaMelon execution | Exact metadata, static `Sort`/`Select` filters, popular/latest/filtered search, combined details/chapters, memo, and ordered pages pass from the locked APK; exact default-inclusive Base64 form JSON is asserted and a mutated schema fails before transport |
 | Filtered Browse UI | All eight app-facing filter cases render transactionally; text search preserves the full source shape, blank-query Apply routes to filtered search, Clear exits filter-only mode, and reset generations reject stale result appends |
 | Native reader | LTR/RTL paged and continuous webtoon targets compile; persistent settings, tap/chrome/zoom/retry/progress/history/read-state behavior and bounded decoded-page retention are wired; portable tests prove settings/prefetch bounds and the source-header-aware image pipeline |
-| Pinned source adapters | 4 BatCave regressions cover every claimed `KamiSource` method/default image request, pre-parse SHA tamper rejection, serialized concurrent VM/transport entry, and explicit insecure-image policy; 1 Kawii, 3 MangaMelon, and 8 Baozi regressions cover their measured contracts; KamiCore covers registry insertion/deduplication, reader-policy enforcement, and exact Baozi factory admission |
+| Pinned source adapters | 4 BatCave regressions cover every claimed `KamiSource` method/default image request, pre-parse SHA tamper rejection, serialized concurrent VM/transport entry, and explicit insecure-image policy; 1 Kawii, 3 MangaMelon, and 10 Baozi regressions cover their measured contracts, including rewrite-to-final-bytes redirect follow-up; KamiCore covers registry insertion/deduplication, reader-policy enforcement, and exact Baozi factory admission |
 | APK signer verification | 6 focused regressions cover the six real Keiyoushi v2 APKs (Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, and Baozi Manhua), AOSP v1/v3 and verified rotation, content/signature tampering, unsigned input, fingerprint normalization, and scheme stripping |
 | Persisted extension admission | 3 focused macOS test methods cover repository/user trust, unrelated-signer rejection, declared source-ID capability registration, verified signer rotation, and downgrade/same-version replacement rejection |
 | Install/restore/source factory | 3 historical macOS install tests plus 6 current portable factory tests cover repository-key install, explicit legacy confirmation, cancellation, startup restoration, exact-file replacement rejection, declared source-ID enforcement, real BatCave/MangaMelon/Baozi construction, and refusal to guess an unmeasured profile |
-| Swift CI | Exact interceptor implementation head `0ccb518` [run 33286986621](https://github.com/taizaki69/Kami/actions/runs/33286986621) verified all 27 fixtures without fallback download, passed 214 MihonCompatKit tests and 25 KamiCore tests, built the optimized CLI, and uploaded `compat-audit-macos` |
-| iOS Simulator and unsigned device builds | Exact interceptor implementation head `0ccb518` [run 33286986601](https://github.com/taizaki69/Kami/actions/runs/33286986601) passed both targets |
-| Unsigned IPA packaging | Exact interceptor implementation head `0ccb518` [run 33286986710](https://github.com/taizaki69/Kami/actions/runs/33286986710) passed and uploaded `Kami-unsigned-ipa`; this is unsigned build/package evidence, not a signed release |
+| Swift CI | Exact observable-redirect implementation head `c9d62f1` [run 33288777039](https://github.com/taizaki69/Kami/actions/runs/33288777039) verified all 27 fixtures without fallback download, passed 220 MihonCompatKit tests and 26 KamiCore tests, built the optimized CLI, and uploaded `compat-audit-macos` |
+| iOS Simulator and unsigned device builds | Exact observable-redirect implementation head `c9d62f1` [run 33288777021](https://github.com/taizaki69/Kami/actions/runs/33288777021) passed both targets |
+| Unsigned IPA packaging | Exact observable-redirect implementation head `c9d62f1` [run 33288777024](https://github.com/taizaki69/Kami/actions/runs/33288777024) passed and uploaded `Kami-unsigned-ipa`; this is unsigned build/package evidence, not a signed release |
 | Repository integrity | implementation worktree was clean after push; staged and working diffs passed `git diff --check`; prior full `git fsck --full` found no corruption |
 
 The exact-head public-repository runs validate every implementation checkpoint
-through `0ccb518`, including the durable corpus, typed runtime/static
+through `c9d62f1`, including the durable corpus, typed runtime/static
 compatibility diagnostics, shared non-executing plan discovery, all four
 app-facing interpreted source profiles,
 signer-authenticated admission gate, durable install/restore flow, exact-byte
 factory, source selection UI, filtered Browse, source registration, and the
-native reader foundation. They produced both `compat-audit-macos` and
+native reader foundation, source-scoped reader-image execution, and observable
+GET redirect handling. They produced both `compat-audit-macos` and
 `Kami-unsigned-ipa` artifacts.
 
 ## What the latest continuation completed
 
-This milestone adds bounded source-operation interceptor execution without
-weakening the exact Baozi profile's hash, signer, manifest, admission, or
-declared-source-ID checks:
+This milestone adds bounded observable redirects for supported source-scoped
+GET reader images without weakening the exact Baozi profile's hash, signer,
+manifest, admission, or declared-source-ID checks:
+
+- `URLSessionCompatHTTPTransport` now optionally returns one response without
+  following a redirect, while retaining its source cookie jar, streamed limits,
+  cancellation, and policy validation.
+- Reader application interceptors wrap the whole call once; network
+  interceptors run for every raw response. Rewritten `Location` values drive
+  sanitized follow-ups that retain exact tags, strip explicit cross-origin
+  credentials, enforce five redirects, and share the existing 64-step/depth/VM
+  budgets.
+- Generic regressions prove per-hop ordering, retained tag identity,
+  cross-origin secret stripping, cookie handling, downgrade/redirect limits,
+  and one shared chain budget. The real Baozi APK rewrites a raw 302 to its
+  source host and the next exchange returns final image bytes.
+
+The underlying source-operation interceptor foundation remains:
 
 - `await`/`awaitSuccess` snapshot application then network interceptors in
   registration order, preserve the exact DEX Request/tags through each
@@ -747,26 +781,30 @@ declared-source-ID checks:
   steps and depth 32, and replacement bodies/headers at the transport policy.
   Response rebuilding preserves request identity and supports the exact
   redirect/header/code/body operations reached by Baozi.
-- Seven focused regressions prove order, two-tag identity, response rebuilding,
-  one-shot proceed, client caps, the shared VM budget, final-chain
-  `await`/`awaitSuccess` behavior, and cancellation. Baozi's eight real-profile
-  regressions still pass, and its core operations now traverse its real finite
+- The original seven focused regressions prove order, two-tag identity,
+  response rebuilding, one-shot proceed, client caps, the shared VM budget,
+  final-chain
+  `await`/`awaitSuccess` behavior, and cancellation. Baozi's ten real-profile
+  regressions pass, and its core operations traverse its real finite
   rate limiter.
 - The refreshed non-executing measurement baseline is 15/15 parsed, 11
   structural candidates, 540 unique unregistered external method surfaces, and
   zero unsupported opcodes.
-- Local Windows verification for the current reader-image milestone passes
-  215/215 MihonCompatKit tests and 15/15 KamiCore tests. Exact interceptor head
-  `0ccb518` passes the historical workflow set linked above. Exact reader-image
-  head `5535435` passes
-  [Swift CI 33287959619](https://github.com/taizaki69/Kami/actions/runs/33287959619),
-  [iOS Build 33287959646](https://github.com/taizaki69/Kami/actions/runs/33287959646),
-  and [IPA Package 33287959622](https://github.com/taizaki69/Kami/actions/runs/33287959622).
+- Local Windows verification for the current observable-redirect milestone
+  passes 220/220 MihonCompatKit tests and 15/15 KamiCore tests. Exact current
+  head `c9d62f1` passes
+  [Swift CI 33288777039](https://github.com/taizaki69/Kami/actions/runs/33288777039),
+  [iOS Build 33288777021](https://github.com/taizaki69/Kami/actions/runs/33288777021),
+  and [IPA Package 33288777024](https://github.com/taizaki69/Kami/actions/runs/33288777024).
 - Reader-facing `ImageRequest` can now carry an opaque UUID capability while
   the source actor retains the exact DEX Request/tags/configured client and
   executes the completed bounded chain. Baozi's direct-302 fixture proves its
-  redirect-domain rewrite. Banner cropping and production intermediate redirect
-  follow-up remain explicitly unsupported/unproven.
+  redirect-domain rewrite. Commit `c9d62f1` adds an optional no-follow transport
+  exchange, application-once/network-per-exchange reader ordering, retained-tag
+  follow-ups, cross-origin secret stripping, source-policy redirect bounds, and
+  exact Baozi rewrite-to-final-bytes proof. Banner cropping and general
+  source-operation/non-GET response-sequence parity remain explicitly
+  unsupported/unproven.
 
 The following corpus and diagnostics entries are preserved as the immediately
 preceding milestones and their historical evidence.
@@ -1416,11 +1454,11 @@ Not proven or implemented:
   `BAOZI_BANNER=0` because modes 1/2 require unavailable Bitmap operations;
   callers can still provide an explicit preference set.
 - Baozi's source operations and supported reader requests execute its
-  configured bounded OkHttp chain. The direct-302 reader fixture proves the
-  retained redirect-domain tag, but banner cropping remains unsupported.
-  URLSession follows redirects internally and returns only the final response,
-  so the fixture is not evidence for production intermediate redirect,
-  missing-image, or follow-up semantics.
+  configured bounded OkHttp surfaces. The direct-302 reader fixture proves the
+  retained redirect-domain tag, and the GET-only single-exchange fixture proves
+  that the rewritten location drives a bounded follow-up to final bytes with
+  network interceptors on each exchange. Banner cropping, ordinary
+  source-operation response sequences, and non-GET follow-up remain unsupported.
 - Broad Jsoup coverage beyond the measured subset, kotlinx serialization beyond
   the bounded generated encoder/decoder slice,
   persistent source preferences and cookies, rate limiting, automatic complete
@@ -1507,38 +1545,37 @@ The rest of the product backlog is in `TODO.md`.
 
 ## Recommended next implementation sequence
 
-1. Add a source-scoped reader image execution path that retains DEX Request
-   tags/runtime identity and deliberately opts into the interceptor seam.
-   Account for URLSession following redirects before the current transport
-   returns, so intermediate redirect mutation needs an explicit bounded seam.
-   Keep Baozi banner cropping unsupported until there is a bounded portable
-   pixel/JPEG implementation; a metadata-only bitmap shim is not compatibility.
-2. Add production preference UI and persistence for the exact bounded scalar
-   preference model; keep app-global state out of interpreted code.
-3. Extend issue #4's typed recorder at the interpreter/bridge throw seam so
+1. Extend issue #4's typed recorder at the interpreter/bridge throw seam so
    caught-and-transformed linkage gaps still preserve the first unsupported
    surface, add exact external-field/bridge coverage, and add deterministic
    tooling that turns a fixed corpus gap into a focused regression. Keep the
    app's eventual user-selected file export on the same local-only redaction
    contract.
-4. Generate future catalog records from authenticated structural plans and
+2. Use that evidence to promote the next authenticated locked structural
+   candidate through exact construction, operations, app admission, and
+   regression coverage; never infer execution from the static gap count.
+3. Add production preference UI and persistence for the exact bounded scalar
+   preference model; keep app-global state out of interpreted code.
+4. Keep Baozi banner cropping unsupported until there is a bounded portable
+   pixel/JPEG implementation; a metadata-only bitmap shim is not compatibility.
+5. Generate future catalog records from authenticated structural plans and
    measured capability evidence instead of hand-copying entry/wrapper
    structure. Unknown artifacts must still fail closed until their signer,
    declared source IDs, required host surface, and core operations have
    independently passed the admission policy.
-5. Continue issue #1 with broader external hierarchy and super/default
+6. Continue issue #1 with broader external hierarchy and super/default
    resolution, remaining opcodes, and differential AOSP coverage. Code-item
    geometry, strict try/catch decoding and resolved `Throwable` validation,
    branch/move-result/move-exception rules, bounded exact
    primitive/constructor/reference dataflow, runtime casts/catches,
    receiver-directed virtual/interface-default lookup, lexical parsed-DEX
    `invoke-super`, and invoke word-count/kind checks are already in.
-6. Complete reader chapter transitions and source-cookie sharing, then add
-   iPad spreads, fit/crop controls, memory-pressure purging, and download-cache
-   integration without weakening image limits.
-7. Add aggregate parser/runtime resource accounting and streaming or
+7. Complete reader chapter transitions, then add iPad spreads, fit/crop
+   controls, memory-pressure purging, and download-cache integration without
+   weakening image limits.
+8. Add aggregate parser/runtime resource accounting and streaming or
    delegate-limited repository downloads.
-8. Profile the reader on a physical iPhone/iPad with large webtoon chapters and
+9. Profile the reader on a physical iPhone/iPad with large webtoon chapters and
    smoke-test a user-signed build; CI intentionally remains unsigned.
 
 Every new runtime capability should arrive with a synthetic malformed fixture,
