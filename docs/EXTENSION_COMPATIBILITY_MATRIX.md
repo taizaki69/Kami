@@ -26,10 +26,10 @@ is no compatibility claim.
 | Structural execution-plan inspection | Working for the bounded single-source lib 1.6 shape | Non-executing inspection deterministically finds the entry and stable public wrapper for the four execution profiles and 11 of 15 remaining measurement APKs; the four measurement blockers are Komga, MangaPlus, NHentai.xxx, and XCOMIC. Legacy lib 1.4, factories, multidex, native `.so`, ambiguous/missing DEX, invalid identity, and missing wrapper shapes are explicit blockers. A plan establishes no signer trust, catalog admission, or execution proof |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
 | Static measurement corpus | Working, non-executing | Fifteen current lib 1.6 measurement-only APKs under `Tests/corpus/measurement/` are SHA/URL locked and analyzed 15/15 with 0 errors; 11 are structural candidates and four have stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, XCOMIC). The report contains 540 unique unregistered external method surfaces and 0 unsupported opcodes. The behavior-stratified set is prioritization evidence, not a statistical sample or execution/admission proof |
-| Compatibility diagnostics | Partial, privacy-safe local/runtime and static corpus seams working | Pinned sources deduplicate propagated typed VM gaps by operation stage and ignore arbitrary errors; `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths. The current measurement run reports 15/15 analyzed, 0 errors, 540 unique surfaces, and 0 unsupported opcodes. Static invocations are prioritization only, not runtime failure or admission proof. App export UI, below-catch first-gap capture, broader field/bridge instrumentation, and regression promotion remain open |
-| DEX execution | Partial M1/M2 working | The current local 214-test suite includes exact source/execution paths against six execution fixtures; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded source-operation interceptor execution, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, scalar preferences, interpreted image requests, and serialized adapter ownership are checked |
+| Compatibility diagnostics | Partial product surface; privacy-safe runtime/static/promotion seams working | Pinned sources retain the first typed VM gap by operation stage at the public VM boundary even when a nested host bridge catches or transforms it; unknown external fields fail closed unless explicitly modeled, and arbitrary errors remain ignored. `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths; `compat-audit promote-gap` strictly turns the first canonical redacted runtime finding into a deterministic XCTest assertion seed. The current measurement run reports 15/15 analyzed, 0 errors, 540 unique surfaces, and 0 unsupported opcodes. Static invocations are prioritization only, not runtime failure or admission proof. App-facing export/share UI remains open |
+| DEX execution | Partial M1/M2 working | The current local 223-test suite includes exact source/execution paths against six execution fixtures; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded source-operation interceptor execution, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, scalar preferences, interpreted image requests, and serialized adapter ownership are checked |
 | Admission restoration and source factory | Working for exact measured profiles | Startup re-reads the enabled installed APK, rechecks hash/signature/signer history/user trust/manifest, and gives the sole factory a fresh capability; before DEX construction the factory preflights the exact profile source-ID set, then postvalidates every constructed ID against that set and the admission, rejects undeclared IDs, and refuses unmeasured profiles; registry removal is scoped to the recorded package owner |
-| End-to-end source operations | Working for four exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, and Baozi Manhua 1.6.29 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon and Baozi add exact static `Select` filter paths. Source-operation `await`/`awaitSuccess` execute a bounded application/network interceptor chain, and Baozi's core regressions traverse its finite rate limiter. Baozi additionally proves bounded scalar preferences and an interpreted `imageRequest` rewrite. BatCave additionally proves the installed-source registry path. The 15 measurement APKs remain outside the executable catalog. Automatic catalog expansion, dynamic filters, production preference UI/persistence, reader-image interceptor execution, and live-site availability remain open |
+| End-to-end source operations | Working for four exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, and Baozi Manhua 1.6.29 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon and Baozi add exact static `Select` filter paths. Source-operation `await`/`awaitSuccess` execute a bounded application/network interceptor chain, and Baozi's core regressions traverse its finite rate limiter. Baozi additionally proves bounded scalar preferences, an interpreted `imageRequest` rewrite, and source-scoped reader-image interceptor execution with bounded observable GET redirects. BatCave additionally proves the installed-source registry path and exact inherited `headersBuilder` behavior (`Referer`/`Origin` on every request). The 15 measurement APKs remain outside the executable catalog. Automatic catalog expansion, dynamic filters, production preference UI/persistence, Android bitmap banner transforms, and live-site availability remain open |
 
 ## Per-extension execution
 
@@ -212,18 +212,18 @@ report above for current prioritization.
 
 ## Test evidence
 
-- 220/220 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+- 223/223 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present. Three new `CorpusLockTests` cover separated roles,
   SHA/URL/fetcher and manifest/signature checks, and the deterministic static
   measurement baseline.
 - The current portable Windows KamiCore suite passes 15/15 tests, including
-  exact Baozi factory admission. The exact current head `c9d62f1` passes all 26
+  exact Baozi factory admission. The exact current head `b1cd246` passes all 26
   KamiCore tests on macOS.
-- Exact observable-reader-redirect implementation head `c9d62f1` passes
-  [Swift CI 33288777039](https://github.com/taizaki69/Kami/actions/runs/33288777039),
-  [iOS Build 33288777021](https://github.com/taizaki69/Kami/actions/runs/33288777021),
-  and [IPA Package 33288777024](https://github.com/taizaki69/Kami/actions/runs/33288777024).
-  Swift CI found all 27 fixtures already hash-matched, passed 220/220
+- Exact first-gap diagnostics implementation head `b1cd246` passes
+  [Swift CI 33289953550](https://github.com/taizaki69/Kami/actions/runs/33289953550),
+  [iOS Build 33289953526](https://github.com/taizaki69/Kami/actions/runs/33289953526),
+  and [IPA Package 33289953529](https://github.com/taizaki69/Kami/actions/runs/33289953529).
+  Swift CI found all 27 fixtures already hash-matched, passed 223/223
   MihonCompatKit tests and 26/26 KamiCore tests, built the optimized CLI, and
   uploaded it. The iOS and IPA runs passed both build destinations and unsigned
   packaging respectively.
@@ -239,9 +239,11 @@ report above for current prioritization.
   explicit legacy lib 1.4 blockers, and malformed-APK failure. The optimized
   CLI batch audit continues after malformed entries, reports every subsequent
   artifact, and returns a nonzero final status.
-- Four diagnostics regressions prove typed-only runtime recording and
-  deduplication, DEX-symbol redaction, an actionable `.popular` report from a
-  failed real BatCave source operation, and deterministic order-independent
+- Seven diagnostics regressions prove typed-only runtime recording and
+  deduplication, DEX-symbol redaction, first-gap capture below a caught host-
+  bridge fallback, fail-closed exact external instance/static fields, an
+  actionable `.popular` report from a failed real BatCave source operation,
+  deterministic privacy-safe regression promotion, and order-independent
   static aggregation across all four current profiles. Two optimized Windows
   measurement-corpus runs are byte-identical and contain none of the checked
   local/corpus path, APK filename, URL, authorization or proxy-authorization
@@ -338,8 +340,8 @@ preserves the full source filter shape for text search, and supports
 blank-query static filtered search. Typed runtime compatibility reports and a
 non-executing static gap/corpus audit are working without changing admission;
 the broader 15-artifact current-lib-1.6 measurement corpus is now locked and
-fully analyzed, so corpus expansion is no longer open. App export UX, deeper
-first-gap/field instrumentation, and regression promotion remain open. Automatic
+fully analyzed, so corpus expansion is no longer open. App export/share UX
+remains open; first-gap/field capture and deterministic promotion are working. Automatic
 catalog expansion, dynamic filter sources, production preference UI/persistence,
 and arbitrary custom image-request overrides remain open. Supported interpreted
 reader requests now retain exact DEX Request/tags/configured-client state behind

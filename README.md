@@ -153,16 +153,21 @@ only a description: it is not signer authentication, catalog admission, or
 proof that an extension's operations will execute.
 
 Compatibility failures now have a privacy-safe measurement seam. Exact pinned
-sources record only typed unresolved class/method/field and unsupported-opcode
-errors, deduplicated by app-facing operation stage; arbitrary error strings,
-HTTP failures, request values, and parser data never enter the report.
+sources retain the first typed unresolved class/method/field or unsupported-
+opcode error at the VM throw boundary, even when a nested host bridge
+catches or replaces it, and deduplicate it by app-facing operation stage.
+Unknown external fields fail closed unless the host models the exact field;
+arbitrary error strings, HTTP failures, request values, and parser data never
+enter the report.
 `compat-audit gaps` separately performs a bounded, non-executing scan of one APK
 or a directory, ranks external method invocations that are not exactly
 registered on the current host bridge, aggregates unsupported opcodes and plan
 blockers, and emits deterministic artifact ordinals instead of local paths or
 filenames. Those static method findings are prioritization signals—not proof
 that a virtual/interface call will fail, signer trust, admission, or execution
-compatibility.
+compatibility. After a runtime gap is fixed, `compat-audit promote-gap` turns a
+canonical redacted report into a deterministic, paste-ready XCTest assertion
+seed without admitting request or response data.
 
 Browse now renders the complete app-facing Mihon filter hierarchy: headers,
 separators, selects, text fields, checkboxes, tri-state controls, nested groups,
@@ -265,18 +270,19 @@ security boundaries, and the recommended next implementation sequence.
 The compatibility kit runs locally on Windows with Swift 6.3 through
 `scripts/windows_dev_test.bat`, including the Baozi real-APK regressions and
 portable KamiCore coverage; the current local `MihonCompatKit` suite passes
-220/220 with the corpus present, and the current portable KamiCore suite passes
-15/15. The exact observable-reader-redirect implementation head `c9d62f1`
-passes [Swift CI](https://github.com/taizaki69/Kami/actions/runs/33288777039)
-with all 27 fixtures, 220 MihonCompatKit tests, 26 KamiCore tests, and the
+223/223 with the corpus present, and the current portable KamiCore suite passes
+15/15. The exact first-gap diagnostics implementation head `b1cd246`
+passes [Swift CI](https://github.com/taizaki69/Kami/actions/runs/33289953550)
+with all 27 fixtures, 223 MihonCompatKit tests, 26 KamiCore tests, and the
 optimized CLI;
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/33288777021) for both
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/33289953526) for both
 simulator and unsigned device; and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/33288777024) with
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/33289953529) with
 the uploaded unsigned IPA.
 The `compat-audit` CLI produces the measured compatibility matrix,
 deterministic per-APK structural-plan blockers, and a redacted static
-gap/corpus report from the locked corpus.
+gap/corpus report from the locked corpus; it can also promote the first exact
+runtime finding into a focused regression assertion seed.
 
 ## Non-goals / legality
 

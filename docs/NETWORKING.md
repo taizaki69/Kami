@@ -137,9 +137,13 @@ compatibility:
 ## Diagnostics
 
 Pinned interpreted sources now expose a bounded local report containing only
-typed unresolved VM surfaces, counted by source-operation stage. Arbitrary
-transport/parser errors are ignored, so URL queries, authorization, cookies,
-bodies, and response values never enter it. `compat-audit gaps` provides a
-separate non-executing static/corpus priority report with no filenames or
-request data. The app Diagnostics screen and user-selected file export remain
+the first typed unresolved VM surface observed at the public VM boundary for
+each source operation, even when a nested host bridge catches or replaces
+that error. Unknown external fields fail closed unless the exact host field is
+modeled. Arbitrary transport/parser errors are ignored, so URL queries,
+authorization, cookies, bodies, and response values never enter the report.
+`compat-audit gaps` provides a separate non-executing static/corpus priority
+report with no filenames or request data, while `compat-audit promote-gap`
+strictly converts a canonical redacted runtime report into a focused XCTest
+assertion seed. The app Diagnostics screen and user-selected file export remain
 open; they must preserve the same local-only redaction boundary.

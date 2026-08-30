@@ -161,11 +161,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       `InterpretedExtensionPreferences` model; current app construction uses
       profile defaults.
 - [~] Privacy-safe compatibility telemetry — typed runtime class/method/field/
-      opcode failures are stage-deduplicated without arbitrary error strings,
-      and `compat-audit gaps` emits a deterministic path-free static/corpus
-      priority report. App-facing file export, first-gap capture below caught
-      DEX errors, field/bridge coverage, and fixed-gap-to-regression promotion
-      tooling remain — [#4](https://github.com/taizaki69/Kami/issues/4)
+      opcode failures are stage-deduplicated without arbitrary error strings;
+      the first typed gap is retained below caught host-bridge fallbacks,
+      external fields fail closed unless explicitly modeled, `compat-audit
+      gaps` emits a deterministic path-free static/corpus priority report, and
+      `compat-audit promote-gap` emits a deterministic focused XCTest seed.
+      App-facing user-selected export/share remains —
+      [#4](https://github.com/taizaki69/Kami/issues/4)
 - [ ] zstd decompression for current-Mihon backups (schema work done)
 
 ## P1 — Daily driver

@@ -14,7 +14,10 @@ profile is implemented at `9a1f647`. Bounded source-operation OkHttp
 interceptor execution is implemented at `0ccb518`. Source-scoped reader-image
 execution is implemented at `5535435`. Bounded observable reader-image redirect
 follow-up is implemented at `c9d62f1`; all three exact-head GitHub Actions
-workflows for that implementation commit pass.
+workflows for that implementation commit pass. Operation-scoped first-gap
+diagnostics, fail-closed external fields, inherited DEX header overrides, and
+deterministic runtime-gap promotion are implemented at `b1cd246`; all three
+exact-head workflows for that implementation commit pass too.
 
 ## Start here
 
@@ -31,6 +34,11 @@ workflows for that implementation commit pass.
   `LICENSES.md` and issue #5.
 - Default branch: `main`
 - Current verified pushed implementation checkpoint:
+  `b1cd246d57d13884e83e77f03302c17c6e141d4d` (first typed compatibility
+  gap retained at the public VM boundary even below caught host-bridge fallbacks,
+  fail-closed exact external fields, deterministic `compat-audit promote-gap`,
+  and inherited DEX `headersBuilder` execution).
+- Previous observable-reader-redirect checkpoint:
   `c9d62f1a188b7fd9f1026fd5cc85155e269830c9` (GET-only reader-image
   single-exchange redirect visibility and bounded follow-up, retaining exact DEX
   Request/tags/configured client state and correct application-once/network-per-
@@ -81,9 +89,9 @@ workflows for that implementation commit pass.
 - Original Phase 2 baseline: `6f9de0719f057646e228f14620806326840e5c75`
 - Expected state after cloning: clean `main`, tracking `origin/main`
 
-Always continue from the latest `origin/main`. The latest reader-image
-implementation head is `c9d62f1`; the retained source-execution baseline is
-`5535435`, the bounded source-operation interceptor
+Always continue from the latest `origin/main`. The latest implementation head
+is `b1cd246`; the observable reader-image baseline is `c9d62f1`, the retained
+source-execution baseline is `5535435`, the bounded source-operation interceptor
 baseline is `0ccb518`, the exact Baozi profile baseline is `9a1f647`, and its
 durable corpus implementation baseline is `a376064`. A documentation-only
 continuation commit may be newer than the implementation head.
@@ -111,6 +119,13 @@ Current verified state on 2026-08-29 (America/Lima):
   [Swift CI 33288777039](https://github.com/taizaki69/Kami/actions/runs/33288777039),
   [iOS Build 33288777021](https://github.com/taizaki69/Kami/actions/runs/33288777021),
   and [IPA Package 33288777024](https://github.com/taizaki69/Kami/actions/runs/33288777024).
+  Commit `b1cd246` retains the first typed compatibility gap below caught
+  host-bridge fallbacks, makes unknown external fields fail closed, executes inherited DEX
+  `headersBuilder` overrides, and adds deterministic report-to-XCTest promotion;
+  it passes exact-head
+  [Swift CI 33289953550](https://github.com/taizaki69/Kami/actions/runs/33289953550),
+  [iOS Build 33289953526](https://github.com/taizaki69/Kami/actions/runs/33289953526),
+  and [IPA Package 33289953529](https://github.com/taizaki69/Kami/actions/runs/33289953529).
 - The corpus lock is behavior-stratified at the 2026-08-23 snapshot:
   Keiyoushi catalog revision
   `4704d377ad00e7bc6f944cc7638a18e6e7fd4a23` and extensions-source revision
@@ -133,15 +148,16 @@ Current verified state on 2026-08-29 (America/Lima):
 - Three `CorpusLockTests` cover separated roles, manifest/fetch/hash round
   trips, manifest identity, release signature-parser conformance, and the
   deterministic static baseline. The fetch round trip passed, and the latest
-  local Windows MihonCompatKit run passed 220/220 tests. The Baozi regression
+  local Windows MihonCompatKit run passed 223/223 tests. The Baozi regression
   suite passed its construction, preference, filter, core-operation, and
   interpreted-image-request and observable redirect/follow-up checks against
   fake transport. Exact-head Swift CI verified all 27 committed fixtures
-  without a fallback download, the complete 220-test MihonCompatKit suite,
+  without a fallback download, the complete 223-test MihonCompatKit suite,
   26-test macOS KamiCore suite, the optimized `compat-audit` build, and its
-  artifact upload at the current observable-redirect head.
-- Count continuity: the observable-redirect milestone is 220/220 MihonCompatKit
-  and 15/15 portable KamiCore tests. The retained reader-image milestone was
+  artifact upload at the current first-gap diagnostics head.
+- Count continuity: the first-gap diagnostics milestone is 223/223
+  MihonCompatKit and 15/15 portable KamiCore tests. The observable-redirect
+  milestone was 220/220 MihonCompatKit and 15/15 KamiCore tests. The retained reader-image milestone was
   215/215 and 15/15. The bounded-interceptor milestone was 214/214
   and 14/14. The immediately preceding Baozi promotion was 207/207 and 14/14;
   pre-final-hardening reported 202/202
@@ -542,7 +558,14 @@ public wrapper discovery and four current lib 1.6 profiles are now complete;
 MangaMelon proves the first exact static filtered-search path, while Baozi adds
 bounded scalar preferences, its exact static filter graph, core source
 operations, and a DEX-defined image-request rewrite. Typed runtime gap reporting
-and the non-executing static corpus ranking seam are also complete. Corpus
+and the non-executing static corpus ranking seam are also complete. At
+`b1cd246`, the observer sits at public VM entry boundaries so the first typed
+gap survives a nested host-bridge catch; unknown external instance/static
+fields fail with exact diagnostics unless explicitly modeled, and
+`compat-audit promote-gap` emits a deterministic focused XCTest seed. The same
+runtime correction executes inherited DEX `headersBuilder` overrides without
+exception probing, so every BatCave source request now carries its exact
+`Referer` and `Origin` headers. Corpus
 locking remains rooted at `35e4435`/`a376064`; after Baozi promotion the
 behavior-stratified snapshot has 6 execution, 15 measurement-only current lib
 1.6, and 6 AOSP conformance artifacts, with 15/15 measurement APKs parsed.
@@ -557,10 +580,10 @@ the source actor, bounds live handles at 4,096, keeps hidden execution identity
 out of KamiCore except for an opaque UUID, and reuses the source cookie jar.
 
 The bounded intermediate-response/follow-up seam is now complete for supported
-GET-only reader images. The active compatibility frontier returns to issue #4's
-below-catch first-gap/field/bridge instrumentation and fixed-gap regression
-promotion, followed by evidence-driven promotion of the next locked structural
-candidate. Keep Baozi banner transformation unsupported until a bounded
+GET-only reader images. The active compatibility frontier is evidence-driven
+promotion of the next locked structural candidate using the completed first-gap
+and regression-seed tooling. Issue #4 remains partial only for app-facing local
+report export/share. Keep Baozi banner transformation unsupported until a bounded
 portable pixel/JPEG implementation exists; a metadata-only Bitmap shim is not
 compatibility. Dynamic/network-backed filters and production preference
 UI/persistence also remain open.
@@ -691,13 +714,13 @@ files, passwords, cookies, or signing credentials.
 
 ## Known-good verification checkpoint
 
-Current local observable-reader-redirect evidence, based on the durable corpus established
+Current local first-gap diagnostics evidence, based on the durable corpus established
 by `35e4435`/`a376064`: the behavior-stratified lock and fetch round trip cover
 27 artifacts (6 execution, 15 measurement-only current lib 1.6, and 6 AOSP
 conformance; 19 current lib 1.6 total). The 3 `CorpusLockTests` pass
 manifest/fetch/hash, manifest-identity, signature-parser-conformance, and
 deterministic-baseline assertions. The latest local Windows MihonCompatKit run
-is 220/220. The previous pre-promotion optimized measurement
+is 223/223. The previous pre-promotion optimized measurement
 `compat-audit gaps` runs were
 byte-identical 98,876-byte UTF-8 reports with SHA-256
 `37503437e4b0aa67bf17fe13fa0b1d1b1d5ab05d5d2583964b2de0c0fcfd99e3` and no
@@ -710,12 +733,12 @@ Verification detail:
 
 | Check | Result |
 |---|---|
-| MihonCompatKit | 220 Swift tests passed locally on Windows/Swift 6.3.3, including 3 corpus-lock regressions, 6 APK-signature regressions covering Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, and Baozi Manhua, 3 structural-plan regressions, 4 privacy-safe diagnostics regressions, 10 transport regressions, 9 interceptor-chain regressions, and 10 Baozi real-APK regressions; the prior 192-test exact corpus checkpoint remains linked below |
-| KamiCore | 15/15 portable tests passed locally on Windows/Swift 6.3.3, including exact Baozi factory admission and source-scoped image execution; the current observable-redirect exact-head run passed all 26 macOS tests covering reader settings/prefetch, exact image headers, in-flight deduplication/cache, error limits, Browse routing, SQLite persistence, install/restore/factory, update policy, and registry lifecycle coverage |
+| MihonCompatKit | 223 Swift tests passed locally on Windows/Swift 6.3.3, including 3 corpus-lock regressions, 6 APK-signature regressions covering Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, and Baozi Manhua, 3 structural-plan regressions, 7 privacy-safe diagnostics regressions, 10 transport regressions, 9 interceptor-chain regressions, and 10 Baozi real-APK regressions; the prior 192-test exact corpus checkpoint remains linked below |
+| KamiCore | 15/15 portable tests passed locally on Windows/Swift 6.3.3, including exact Baozi factory admission and source-scoped image execution; the current first-gap exact-head run passed all 26 macOS tests covering reader settings/prefetch, exact image headers, in-flight deduplication/cache, error limits, Browse routing, SQLite persistence, install/restore/factory, update policy, and registry lifecycle coverage |
 | Optimized package builds | Windows release builds passed for both MihonCompatKit/`compat-audit.exe` and KamiCore |
 | Real APK constructors | Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, and Baozi Manhua passed |
 | Structural execution plans | BatCave, Kawii Manga, MangaMelon, and Baozi Manhua produce deterministic single-DEX lib 1.6 plans; Akuma/MangaDex report lib 1.4 blockers; malformed input throws; full CLI batches continue after per-file errors and fail at the end |
-| Compatibility diagnostics | Typed runtime gaps are stage-deduplicated while arbitrary errors are ignored; a failed BatCave operation yields the exact missing method without its URL; static reports are deterministic/order-independent, sanitized, non-executing, and carry no admission authority; two release CLI corpus runs matched byte-for-byte with zero checked secret/path markers |
+| Compatibility diagnostics | The first typed runtime gap is retained at the VM boundary below caught fallbacks and stage-deduplicated while arbitrary errors are ignored; unknown external fields fail closed unless explicitly modeled; a failed BatCave operation yields the exact missing method without its URL; `promote-gap` emits a deterministic focused XCTest seed; static reports are deterministic/order-independent, sanitized, non-executing, and carry no admission authority; two release CLI corpus runs matched byte-for-byte with zero checked secret/path markers |
 | Structural verifier | 10 focused regressions cover instruction geometry, branch/fallthrough boundaries, R8's unreachable alignment NOP, and aligned, bounded, correctly typed payloads and switch targets |
 | Exception/control verifier | 13 focused regressions cover strict try/catch decoding, resolved `Throwable` validation, typed handler state/execution, and AOSP branch/result/exception-entry rules |
 | Register dataflow verifier | 21 focused regressions cover dead-code bounds, parameter seeding, common-supertype joins, polymorphic constants, exact primitive/wide/reference assignments, array covariance, result/invoke types, wide-pair clobbering, exception edges, and constructor/uninitialized-object state |
@@ -727,7 +750,7 @@ Verification detail:
 | Async interpreter/response regressions | 4 focused tests cover nested frame resumption, sync-entry diagnostics, typed DEX handler re-entry, cancellation, injected transport, charset decoding, one-shot reads, and close state |
 | OkHttp interceptor execution | 9 focused tests cover application/network descent and reverse unwind, exact Request/two-tag identity, response builder/header/body/redirect semantics, one-shot `proceed`, the 32-interceptor limit, shared outer VM budget, final-chain `await` versus `awaitSuccess`, cancellation, application-once/network-per-exchange reader redirects, retained follow-up tags, and a 64-step budget shared across hops; Baozi core operations traverse the real finite rate limiter |
 | HTML/selector hardening | 7 focused tests cover BatCave CSS/URL semantics, modern direct-child and `:containsData` selectors, input, base-URL, node, depth, attribute, selector length/result/work, and extracted-string limits |
-| BatCave execution | Exact metadata getters pass; popular, paginated text search, and latest updates return exact `MangasPage`; core details return exact `SManga`; combined updates return exact chapters; page list returns exact image URLs; malformed chapter/page payloads are typed failures; a 503 maps to `HttpException(code: 503)` |
+| BatCave execution | Exact metadata getters pass; popular, paginated text search, and latest updates return exact `MangasPage`; core details return exact `SManga`; combined updates return exact chapters; page list returns exact image URLs; every request carries the inherited DEX `headersBuilder`'s exact `Referer`/`Origin`; malformed chapter/page payloads are typed failures; a 503 maps to `HttpException(code: 503)` |
 | Kawii Manga execution | Exact metadata, popular/latest/search, combined details/chapters, and pages pass from the locked APK; all five exact GETs carry the custom `x-app-key` header |
 | MangaMelon execution | Exact metadata, static `Sort`/`Select` filters, popular/latest/filtered search, combined details/chapters, memo, and ordered pages pass from the locked APK; exact default-inclusive Base64 form JSON is asserted and a mutated schema fails before transport |
 | Filtered Browse UI | All eight app-facing filter cases render transactionally; text search preserves the full source shape, blank-query Apply routes to filtered search, Clear exits filter-only mode, and reset generations reject stale result appends |
@@ -736,24 +759,49 @@ Verification detail:
 | APK signer verification | 6 focused regressions cover the six real Keiyoushi v2 APKs (Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, and Baozi Manhua), AOSP v1/v3 and verified rotation, content/signature tampering, unsigned input, fingerprint normalization, and scheme stripping |
 | Persisted extension admission | 3 focused macOS test methods cover repository/user trust, unrelated-signer rejection, declared source-ID capability registration, verified signer rotation, and downgrade/same-version replacement rejection |
 | Install/restore/source factory | 3 historical macOS install tests plus 6 current portable factory tests cover repository-key install, explicit legacy confirmation, cancellation, startup restoration, exact-file replacement rejection, declared source-ID enforcement, real BatCave/MangaMelon/Baozi construction, and refusal to guess an unmeasured profile |
-| Swift CI | Exact observable-redirect implementation head `c9d62f1` [run 33288777039](https://github.com/taizaki69/Kami/actions/runs/33288777039) verified all 27 fixtures without fallback download, passed 220 MihonCompatKit tests and 26 KamiCore tests, built the optimized CLI, and uploaded `compat-audit-macos` |
-| iOS Simulator and unsigned device builds | Exact observable-redirect implementation head `c9d62f1` [run 33288777021](https://github.com/taizaki69/Kami/actions/runs/33288777021) passed both targets |
-| Unsigned IPA packaging | Exact observable-redirect implementation head `c9d62f1` [run 33288777024](https://github.com/taizaki69/Kami/actions/runs/33288777024) passed and uploaded `Kami-unsigned-ipa`; this is unsigned build/package evidence, not a signed release |
+| Swift CI | Exact first-gap diagnostics implementation head `b1cd246` [run 33289953550](https://github.com/taizaki69/Kami/actions/runs/33289953550) verified all 27 fixtures without fallback download, passed 223 MihonCompatKit tests and 26 KamiCore tests, built the optimized CLI, and uploaded `compat-audit-macos` |
+| iOS Simulator and unsigned device builds | Exact first-gap diagnostics implementation head `b1cd246` [run 33289953526](https://github.com/taizaki69/Kami/actions/runs/33289953526) passed both targets |
+| Unsigned IPA packaging | Exact first-gap diagnostics implementation head `b1cd246` [run 33289953529](https://github.com/taizaki69/Kami/actions/runs/33289953529) passed and uploaded `Kami-unsigned-ipa`; this is unsigned build/package evidence, not a signed release |
 | Repository integrity | implementation worktree was clean after push; staged and working diffs passed `git diff --check`; prior full `git fsck --full` found no corruption |
 
 The exact-head public-repository runs validate every implementation checkpoint
-through `c9d62f1`, including the durable corpus, typed runtime/static
+through `b1cd246`, including the durable corpus, first-gap runtime/static
 compatibility diagnostics, shared non-executing plan discovery, all four
 app-facing interpreted source profiles,
 signer-authenticated admission gate, durable install/restore flow, exact-byte
 factory, source selection UI, filtered Browse, source registration, and the
-native reader foundation, source-scoped reader-image execution, and observable
-GET redirect handling. They produced both `compat-audit-macos` and
+native reader foundation, source-scoped reader-image execution, observable GET
+redirect handling, and deterministic compatibility-regression promotion. They produced both `compat-audit-macos` and
 `Kami-unsigned-ipa` artifacts.
 
 ## What the latest continuation completed
 
-This milestone adds bounded observable redirects for supported source-scoped
+Commit `b1cd246` completes the current first-gap diagnostics frontier without
+changing signer trust, admission, or the four-entry executable catalog:
+
+- Each runtime source operation installs one scoped VM observer. Public
+  synchronous, asynchronous, nested asynchronous, and defined-override entries
+  report the first accepted typed class/method/field/opcode gap before a nested
+  host-bridge fallback can catch and replace it. Cancellation, budget,
+  verification, HTTP, parser, and arbitrary errors do not consume that slot.
+- External instance/static fields now fail with exact `unresolvedField`
+  diagnostics unless the DEX owns the declaring class or the host explicitly
+  models that exact field. Reached Kotlin and OkHttp singleton/ref fields are
+  explicit rather than silently defaulted.
+- `HttpSource.getHeaders` finds a real DEX-defined virtual override without
+  exception probing. This fixes BatCave's inherited `headersBuilder`; exact
+  `Referer: https://batcave.biz/` and `Origin: https://batcave.biz` now reach
+  every deterministic source request.
+- `compat-audit promote-gap <runtime-report.txt>` strictly parses the bounded,
+  canonical redacted v1 report and emits a deterministic paste-ready XCTest
+  assertion seed. It never echoes the path or raw report on failure.
+- Seven focused diagnostics regressions plus empty-report assertions on all
+  four exact profiles bring local MihonCompatKit verification to 223/223;
+  KamiCore remains 15/15 on portable Windows. Exact-head Swift CI passes
+  223/223 and 26/26, builds/uploads the optimized CLI, and both iOS targets and
+  unsigned IPA packaging pass.
+
+The immediately preceding milestone adds bounded observable redirects for supported source-scoped
 GET reader images without weakening the exact Baozi profile's hash, signer,
 manifest, admission, or declared-source-ID checks:
 
@@ -790,8 +838,8 @@ The underlying source-operation interceptor foundation remains:
 - The refreshed non-executing measurement baseline is 15/15 parsed, 11
   structural candidates, 540 unique unregistered external method surfaces, and
   zero unsupported opcodes.
-- Local Windows verification for the current observable-redirect milestone
-  passes 220/220 MihonCompatKit tests and 15/15 KamiCore tests. Exact current
+- Local Windows verification for that observable-redirect milestone passed
+  220/220 MihonCompatKit tests and 15/15 KamiCore tests. Its exact
   head `c9d62f1` passes
   [Swift CI 33288777039](https://github.com/taizaki69/Kami/actions/runs/33288777039),
   [iOS Build 33288777021](https://github.com/taizaki69/Kami/actions/runs/33288777021),
@@ -835,9 +883,10 @@ seam without expanding execution or admission:
 - Four focused regressions bring MihonCompatKit to 189 tests. Local full tests,
   clean dependent-package tests, optimized compilation, byte-for-byte corpus
   determinism/privacy checks, both Xcode destinations, unsigned IPA packaging,
-  and all three exact-head workflows pass. Issue #4 stays open for app export,
-  below-catch first-gap and broader field/bridge instrumentation, and automatic
-  fixed-gap regression promotion.
+  and all three exact-head workflows pass. At that historical checkpoint,
+  issue #4 still lacked app export, below-catch first-gap and broader
+  field/bridge instrumentation, and automatic fixed-gap regression promotion;
+  `b1cd246` subsequently completes the runtime/tooling portions.
 
 Earlier commit `c122193` establishes the first shared structural-plan seam:
 
@@ -1475,9 +1524,8 @@ Not proven or implemented:
   across incomplete external hierarchy data remains open.
 - Automatic safe profile admission beyond the four-entry exact catalog.
 - A signed installation on a physical iPhone or iPad.
-- App-facing Diagnostics/file export, below-catch first-gap capture, complete
-  runtime field/bridge telemetry, automatic fixed-gap regression promotion, or
-  a final distribution/licensing model.
+- App-facing Diagnostics/file export/share or a final distribution/licensing
+  model.
 
 Do not generalize the four pinned adapters into broad extension support.
 
@@ -1538,22 +1586,19 @@ Address these before treating arbitrary downloaded extensions as safe.
 | P0 | [#1 Complete DEX opcode coverage and verifier semantics](https://github.com/taizaki69/Kami/issues/1) | Remaining external hierarchy and super/default resolution, opcode, and differential semantics work |
 | Completed | [#2 Build the first end-to-end interpreted Mihon source](https://github.com/taizaki69/Kami/issues/2) | Exact pinned BatCave profile completed at `3708aa1`; general compatibility remains separate work |
 | Completed | [#3 Verify APK signing identity](https://github.com/taizaki69/Kami/issues/3) | v1/v2/v3 verification and persisted admission completed at `a902d06`; the later install/restore/factory product path is complete at `4d42def` |
-| Diagnostics (partial) | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Typed stage-counted runtime reports plus deterministic redacted static/corpus method/opcode/blocker ranking are complete at `e56bd9a`; app file export, below-catch first-gap/field/bridge coverage, and regression promotion remain |
+| Diagnostics (partial product surface) | [#4 Add privacy-safe compatibility telemetry](https://github.com/taizaki69/Kami/issues/4) | Typed stage-counted reports/static ranking began at `e56bd9a`; `b1cd246` adds below-catch first-gap capture, fail-closed exact external fields, caught-bridge coverage, and deterministic regression promotion. App-facing user-selected export/share remains |
 | Distribution | [#5 Choose Kami's distribution and licensing model](https://github.com/taizaki69/Kami/issues/5) | Preserve all options; do not add a project license without an explicit owner decision |
 
 The rest of the product backlog is in `TODO.md`.
 
 ## Recommended next implementation sequence
 
-1. Extend issue #4's typed recorder at the interpreter/bridge throw seam so
-   caught-and-transformed linkage gaps still preserve the first unsupported
-   surface, add exact external-field/bridge coverage, and add deterministic
-   tooling that turns a fixed corpus gap into a focused regression. Keep the
-   app's eventual user-selected file export on the same local-only redaction
-   contract.
-2. Use that evidence to promote the next authenticated locked structural
+1. Use the completed first-gap evidence and `compat-audit promote-gap` tooling
+   to promote the next authenticated locked structural
    candidate through exact construction, operations, app admission, and
    regression coverage; never infer execution from the static gap count.
+2. Add issue #4's app-facing user-selected report export/share flow while
+   preserving the same local-only redaction contract.
 3. Add production preference UI and persistence for the exact bounded scalar
    preference model; keep app-global state out of interpreted code.
 4. Keep Baozi banner cropping unsupported until there is a bounded portable
