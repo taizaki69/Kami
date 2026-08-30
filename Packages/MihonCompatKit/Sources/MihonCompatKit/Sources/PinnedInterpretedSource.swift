@@ -723,46 +723,40 @@ private actor PinnedInterpretedRuntime {
 
     func popular(page: Int) async throws -> MangasPageCompat {
         let page = try Self.pageNumber(page, operation: "popular manga")
-        do {
-            try await acquire()
-            defer { release() }
-            try Task.checkCancellation()
-            let result = try await vm.callAsync(
+        try await acquire()
+        defer { release() }
+        try Task.checkCancellation()
+        let result = try await withFirstCompatibilityGap(stage: .popular) {
+            try await vm.callAsync(
                 classDescriptor: entryClassDescriptor,
                 method: StableInterpretedSourceAPI.popular.name,
                 prototype: StableInterpretedSourceAPI.popular.prototype,
                 args: [receiver, .int(page), .null]
             )
-            guard let converted = HostBridge.mangasPageCompat(from: result) else {
-                throw PinnedInterpretedSourceError.unexpectedResult(operation: "popular manga")
-            }
-            return converted
-        } catch {
-            compatibilityRecorder.record(stage: .popular, error: error)
-            throw error
         }
+        guard let converted = HostBridge.mangasPageCompat(from: result) else {
+            throw PinnedInterpretedSourceError.unexpectedResult(operation: "popular manga")
+        }
+        return converted
     }
 
     func latest(page: Int) async throws -> MangasPageCompat {
         let page = try Self.pageNumber(page, operation: "latest updates")
-        do {
-            try await acquire()
-            defer { release() }
-            try Task.checkCancellation()
-            let result = try await vm.callAsync(
+        try await acquire()
+        defer { release() }
+        try Task.checkCancellation()
+        let result = try await withFirstCompatibilityGap(stage: .latest) {
+            try await vm.callAsync(
                 classDescriptor: entryClassDescriptor,
                 method: StableInterpretedSourceAPI.latest.name,
                 prototype: StableInterpretedSourceAPI.latest.prototype,
                 args: [receiver, .int(page), .null]
             )
-            guard let converted = HostBridge.mangasPageCompat(from: result) else {
-                throw PinnedInterpretedSourceError.unexpectedResult(operation: "latest updates")
-            }
-            return converted
-        } catch {
-            compatibilityRecorder.record(stage: .latest, error: error)
-            throw error
         }
+        guard let converted = HostBridge.mangasPageCompat(from: result) else {
+            throw PinnedInterpretedSourceError.unexpectedResult(operation: "latest updates")
+        }
+        return converted
     }
 
     func search(
@@ -771,23 +765,23 @@ private actor PinnedInterpretedRuntime {
         filters: [SourceFilter]
     ) async throws -> MangasPageCompat {
         let page = try Self.pageNumber(page, operation: "search")
-        do {
-            try await acquire()
-            defer { release() }
-            try Task.checkCancellation()
-            let runtimeFilterValue: RVal
-            if let filterListValue {
-                guard HostBridge.applySourceFilters(filters, to: filterListValue) else {
-                    throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
-                }
-                runtimeFilterValue = filterListValue
-            } else {
-                guard filters.isEmpty else {
-                    throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
-                }
-                runtimeFilterValue = .null
+        try await acquire()
+        defer { release() }
+        try Task.checkCancellation()
+        let runtimeFilterValue: RVal
+        if let filterListValue {
+            guard HostBridge.applySourceFilters(filters, to: filterListValue) else {
+                throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
             }
-            let result = try await vm.callAsync(
+            runtimeFilterValue = filterListValue
+        } else {
+            guard filters.isEmpty else {
+                throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
+            }
+            runtimeFilterValue = .null
+        }
+        let result = try await withFirstCompatibilityGap(stage: .search) {
+            try await vm.callAsync(
                 // Keiyoushi's stable public wrapper routes URL queries and then
                 // virtually dispatches to the extension's R8-renamed worker.
                 classDescriptor: sourceAPIWrapperDescriptor,
@@ -795,14 +789,11 @@ private actor PinnedInterpretedRuntime {
                 prototype: StableInterpretedSourceAPI.search.prototype,
                 args: [receiver, .int(page), HostBridge.string(query), runtimeFilterValue, .null]
             )
-            guard let converted = HostBridge.mangasPageCompat(from: result) else {
-                throw PinnedInterpretedSourceError.unexpectedResult(operation: "search")
-            }
-            return converted
-        } catch {
-            compatibilityRecorder.record(stage: .search, error: error)
-            throw error
         }
+        guard let converted = HostBridge.mangasPageCompat(from: result) else {
+            throw PinnedInterpretedSourceError.unexpectedResult(operation: "search")
+        }
+        return converted
     }
 
     func mangaUpdate(manga: SMangaCompat) async throws -> SMangaUpdateCompat {
@@ -811,11 +802,11 @@ private actor PinnedInterpretedRuntime {
               manga.title.utf8.count <= 4_096 else {
             throw PinnedInterpretedSourceError.invalidInput(operation: "manga update")
         }
-        do {
-            try await acquire()
-            defer { release() }
-            try Task.checkCancellation()
-            let result = try await vm.callAsync(
+        try await acquire()
+        defer { release() }
+        try Task.checkCancellation()
+        let result = try await withFirstCompatibilityGap(stage: .mangaUpdate) {
+            try await vm.callAsync(
                 // The inherited wrapper owns concurrency protection and initialized
                 // state, then virtually dispatches to the extension implementation.
                 classDescriptor: sourceAPIWrapperDescriptor,
@@ -830,14 +821,11 @@ private actor PinnedInterpretedRuntime {
                     .null,
                 ]
             )
-            guard let converted = HostBridge.mangaUpdateCompat(from: result) else {
-                throw PinnedInterpretedSourceError.unexpectedResult(operation: "manga update")
-            }
-            return converted
-        } catch {
-            compatibilityRecorder.record(stage: .mangaUpdate, error: error)
-            throw error
         }
+        guard let converted = HostBridge.mangaUpdateCompat(from: result) else {
+            throw PinnedInterpretedSourceError.unexpectedResult(operation: "manga update")
+        }
+        return converted
     }
 
     func pages(chapter: SChapterCompat) async throws -> [PageCompat] {
@@ -846,24 +834,21 @@ private actor PinnedInterpretedRuntime {
               chapter.name.utf8.count <= 4_096 else {
             throw PinnedInterpretedSourceError.invalidInput(operation: "page list")
         }
-        do {
-            try await acquire()
-            defer { release() }
-            try Task.checkCancellation()
-            let result = try await vm.callAsync(
+        try await acquire()
+        defer { release() }
+        try Task.checkCancellation()
+        let result = try await withFirstCompatibilityGap(stage: .pages) {
+            try await vm.callAsync(
                 classDescriptor: entryClassDescriptor,
                 method: StableInterpretedSourceAPI.pages.name,
                 prototype: StableInterpretedSourceAPI.pages.prototype,
                 args: [receiver, HostBridge.chapterValue(from: chapter), .null]
             )
-            guard let converted = HostBridge.pagesCompat(from: result) else {
-                throw PinnedInterpretedSourceError.unexpectedResult(operation: "page list")
-            }
-            return converted
-        } catch {
-            compatibilityRecorder.record(stage: .pages, error: error)
-            throw error
         }
+        guard let converted = HostBridge.pagesCompat(from: result) else {
+            throw PinnedInterpretedSourceError.unexpectedResult(operation: "page list")
+        }
+        return converted
     }
 
     func imageRequest(page: PageCompat) async -> ImageRequest? {
@@ -877,12 +862,14 @@ private actor PinnedInterpretedRuntime {
                 try await acquire()
                 defer { release() }
                 try Task.checkCancellation()
-                let result = try vm.call(
-                    classDescriptor: entryClassDescriptor,
-                    method: "imageRequest",
-                    prototype: "(Leu/kanade/tachiyomi/source/model/Page;)Lokhttp3/Request;",
-                    args: [receiver, HostBridge.pageValue(from: page)]
-                )
+                let result = try withFirstCompatibilityGap(stage: .imageRequest) {
+                    try vm.call(
+                        classDescriptor: entryClassDescriptor,
+                        method: "imageRequest",
+                        prototype: "(Leu/kanade/tachiyomi/source/model/Page;)Lokhttp3/Request;",
+                        args: [receiver, HostBridge.pageValue(from: page)]
+                    )
+                }
                 try Task.checkCancellation()
                 guard let request = HostBridge.imageRequest(from: result) else {
                     throw PinnedInterpretedSourceError.unexpectedResult(
@@ -933,11 +920,9 @@ private actor PinnedInterpretedRuntime {
             } catch let error as VMError {
                 if case .cancelled = error { return nil }
                 if Task.isCancelled { return nil }
-                compatibilityRecorder.record(stage: .imageRequest, error: error)
                 return nil
             } catch {
                 if Task.isCancelled { return nil }
-                compatibilityRecorder.record(stage: .imageRequest, error: error)
                 return nil
             }
         }
@@ -953,25 +938,43 @@ private actor PinnedInterpretedRuntime {
                     operation: "reader image request"
                 )
             }
-            return try await bridge.executeImageRequest(
-                requestValue: retained.request,
-                clientValue: retained.client,
-                vm: vm
-            )
+            return try await withFirstCompatibilityGap(stage: .imageRequest) {
+                try await bridge.executeImageRequest(
+                    requestValue: retained.request,
+                    clientValue: retained.client,
+                    vm: vm
+                )
+            }
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as VMError {
             if case .cancelled = error { throw CancellationError() }
-            compatibilityRecorder.record(stage: .imageRequest, error: error)
             throw error
         } catch {
-            compatibilityRecorder.record(stage: .imageRequest, error: error)
             throw error
         }
     }
 
     private func releaseRetainedImageRequest(id: UUID) {
         retainedImageRequests.removeValue(forKey: id)
+    }
+
+    private func withFirstCompatibilityGap<T>(
+        stage: InterpretedCompatibilityStage,
+        operation: () throws -> T
+    ) throws -> T {
+        try vm.withFirstCompatibilityGapObservation({ [compatibilityRecorder] error in
+            compatibilityRecorder.record(stage: stage, error: error)
+        }, operation: operation)
+    }
+
+    private func withFirstCompatibilityGap<T>(
+        stage: InterpretedCompatibilityStage,
+        operation: () async throws -> T
+    ) async throws -> T {
+        try await vm.withFirstCompatibilityGapObservation({ [compatibilityRecorder] error in
+            compatibilityRecorder.record(stage: stage, error: error)
+        }, operation: operation)
     }
 
     private func acquire() async throws {

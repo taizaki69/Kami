@@ -929,6 +929,14 @@ public final class HostBridge {
         ) { _, args in
             try argument(args, 0, "Result.constructor-impl")
         }
+        bridge.staticFields["Lkotlin/Result;->Companion"] = .obj(ObjInstance(
+            dexType: "Lkotlin/Result$Companion;",
+            isHost: true
+        ))
+        bridge.staticFields["Lkotlin/Unit;->INSTANCE"] = .obj(ObjInstance(
+            dexType: "Lkotlin/Unit;",
+            isHost: true
+        ))
         bridge.register(
             class: "Lkotlin/Result;",
             "isFailure-impl",
@@ -1303,11 +1311,32 @@ public final class HostBridge {
             }
             return string(formURLEncodeUTF8(value))
         }
+        let booleanRef = "Lkotlin/jvm/internal/Ref$BooleanRef;"
+        bridge.objectFactories[booleanRef] = { _ in
+            .obj(ObjInstance(
+                dexType: booleanRef,
+                fields: ["element": .int(0)],
+                isHost: true
+            ))
+        }
         bridge.register(
-            class: "Lkotlin/jvm/internal/Ref$BooleanRef;",
+            class: booleanRef,
             "<init>",
             prototype: "()V"
-        ) { _, _ in .null }
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "BooleanRef.<init>") else {
+                throw VMError.verify("BooleanRef constructor receiver")
+            }
+            object.fields["element"] = .int(0)
+            return .null
+        }
+        bridge.staticFields["Lkotlin/LazyThreadSafetyMode;->PUBLICATION"] = .obj(
+            ObjInstance(
+                dexType: "Lkotlin/LazyThreadSafetyMode;",
+                payload: "PUBLICATION",
+                isHost: true
+            )
+        )
         bridge.register(
             class: "Lkotlin/LazyKt;",
             "lazy",
@@ -5349,21 +5378,12 @@ public final class HostBridge {
                 isHost: true
             ))
             let configuredBuilder: RVal
-            if case let .obj(source) = receiver {
-                do {
-                    configuredBuilder = try vm.call(
-                        classDescriptor: source.dexType,
-                        method: "headersBuilder",
-                        prototype: "()Lokhttp3/Headers$Builder;",
-                        args: [receiver]
-                    )
-                } catch let error as VMError {
-                    if case .unresolvedMethod = error {
-                        configuredBuilder = emptyBuilder
-                    } else {
-                        throw error
-                    }
-                }
+            if case .obj = receiver {
+                configuredBuilder = try vm.callDefinedVirtualOverride(
+                    receiver: receiver,
+                    method: "headersBuilder",
+                    prototype: "()Lokhttp3/Headers$Builder;"
+                ) ?? emptyBuilder
             } else {
                 throw VMError.verify("HttpSource.getHeaders receiver")
             }
@@ -5642,6 +5662,18 @@ public final class HostBridge {
         }
 
         let compressionInterceptor = "Lokhttp3/CompressionInterceptor;"
+        bridge.staticFields["Lokhttp3/brotli/Brotli;->INSTANCE"] = .obj(ObjInstance(
+            dexType: "Lokhttp3/brotli/Brotli;",
+            isHost: true
+        ))
+        bridge.staticFields["Lokhttp3/Gzip;->INSTANCE"] = .obj(ObjInstance(
+            dexType: "Lokhttp3/Gzip;",
+            isHost: true
+        ))
+        bridge.staticFields["Lokhttp3/zstd/Zstd;->INSTANCE"] = .obj(ObjInstance(
+            dexType: "Lokhttp3/zstd/Zstd;",
+            isHost: true
+        ))
         bridge.register(
             class: compressionInterceptor,
             "<init>",

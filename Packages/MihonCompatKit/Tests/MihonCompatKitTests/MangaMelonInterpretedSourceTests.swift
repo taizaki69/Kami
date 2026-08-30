@@ -144,6 +144,7 @@ final class MangaMelonInterpretedSourceTests: XCTestCase {
             ),
             CompatHTTPFormField(name: "sessionid", value: ""),
         ]))
+        XCTAssertTrue(source.compatibilityReport().findings.isEmpty)
     }
 
     func testCurrentMangaMelonProfileRejectsMutatedFilterSchemaBeforeTransport() async throws {
@@ -170,6 +171,7 @@ final class MangaMelonInterpretedSourceTests: XCTestCase {
         }
         let requests = await transport.snapshot()
         XCTAssertTrue(requests.isEmpty)
+        XCTAssertTrue(source.compatibilityReport().findings.isEmpty)
     }
 
     func testCurrentMangaMelonProfileExecutesEveryCoreSourceOperation() async throws {
@@ -259,5 +261,6 @@ final class MangaMelonInterpretedSourceTests: XCTestCase {
             try requests.first { $0.url == pagesURL }.map(decodedFormJSON),
             #"{"target":"chapter-7","all":true}"#
         )
+        XCTAssertTrue(source.compatibilityReport().findings.isEmpty)
     }
 }

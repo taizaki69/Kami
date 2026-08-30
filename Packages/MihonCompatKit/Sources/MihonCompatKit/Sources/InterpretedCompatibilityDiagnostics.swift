@@ -197,6 +197,245 @@ public final class InterpretedCompatibilityRecorder: @unchecked Sendable {
     }
 }
 
+public enum InterpretedCompatibilityRegressionPromotionError:
+    Error, Equatable, LocalizedError
+{
+    case reportTooLarge
+    case invalidReport
+    case noFinding
+
+    public var errorDescription: String? {
+        switch self {
+        case .reportTooLarge:
+            return "The compatibility report exceeds the promotion limit."
+        case .invalidReport:
+            return "The compatibility report is malformed or not privacy-safe."
+        case .noFinding:
+            return "The compatibility report has no runtime finding to promote."
+        }
+    }
+}
+
+/// A reviewable assertion seed for turning one fixed runtime gap into a focused
+/// exact-profile regression. It contains only the already-redacted report
+/// identity and typed surface; it never embeds request or response data.
+public struct InterpretedCompatibilityRegressionSeed: Equatable, Sendable {
+    public let packageName: String
+    public let versionName: String
+    public let versionCode: Int64
+    public let stage: InterpretedCompatibilityStage
+    public let surface: InterpretedCompatibilitySurface
+
+    /// Swift/XCTest assertion intended to be pasted after the deterministic
+    /// operation that previously reached this gap. The assertion fails if the
+    /// fixed surface reappears in that exact profile's compatibility report.
+    public func renderedXCTestAssertion() -> String {
+        let fixedSurface: String
+        switch surface {
+        case let .unresolvedClass(descriptor):
+            fixedSurface = ".unresolvedClass(\(Self.swiftLiteral(descriptor)))"
+        case let .unresolvedMethod(classDescriptor, signature):
+            fixedSurface = """
+            .unresolvedMethod(
+                classDescriptor: \(Self.swiftLiteral(classDescriptor)),
+                signature: \(Self.swiftLiteral(signature))
+            )
+            """
+        case let .unresolvedField(classDescriptor, name):
+            fixedSurface = """
+            .unresolvedField(
+                classDescriptor: \(Self.swiftLiteral(classDescriptor)),
+                name: \(Self.swiftLiteral(name))
+            )
+            """
+        case let .unsupportedOpcode(opcode):
+            fixedSurface = String(format: ".unsupportedOpcode(0x%02x)", opcode)
+        }
+
+        return """
+        // Promoted from a privacy-safe Kami runtime compatibility report.
+        // package: \(packageName)
+        // version: \(versionName) (\(versionCode))
+        // Execute the exact deterministic \(stage.rawValue) operation before this assertion.
+        let fixedCompatibilitySurface: InterpretedCompatibilitySurface = \(fixedSurface)
+        XCTAssertFalse(
+            source.compatibilityReport().findings.contains {
+                $0.stage == .\(Self.swiftStage(stage)) &&
+                    $0.surface == fixedCompatibilitySurface
+            },
+            "fixed compatibility gap regressed"
+        )
+        """ + "\n"
+    }
+
+    private static func swiftStage(_ stage: InterpretedCompatibilityStage) -> String {
+        switch stage {
+        case .construction: return "construction"
+        case .metadata: return "metadata"
+        case .filters: return "filters"
+        case .popular: return "popular"
+        case .latest: return "latest"
+        case .search: return "search"
+        case .mangaUpdate: return "mangaUpdate"
+        case .pages: return "pages"
+        case .imageRequest: return "imageRequest"
+        }
+    }
+
+    private static func swiftLiteral(_ value: String) -> String {
+        var escaped = value.replacingOccurrences(of: "\\", with: "\\\\")
+        escaped = escaped.replacingOccurrences(of: "\"", with: "\\\"")
+        escaped = escaped.replacingOccurrences(of: "\n", with: "\\n")
+        escaped = escaped.replacingOccurrences(of: "\r", with: "\\r")
+        return "\"" + escaped + "\""
+    }
+}
+
+/// Strict parser/promotion seam for the recorder's canonical v1 text. Input is
+/// bounded and every exported identity is revalidated through the same
+/// redaction allow-list before a Swift assertion is emitted.
+public enum InterpretedCompatibilityRegressionPromotion {
+    /// Covers the recorder's maximum 4,096 unique findings even when both
+    /// symbols in every method finding reach their 4 KiB redaction cap.
+    public static let maximumReportBytes = 40 * 1_024 * 1_024
+
+    public static func seed(
+        fromRenderedReport text: String
+    ) throws -> InterpretedCompatibilityRegressionSeed {
+        guard text.utf8.count <= maximumReportBytes else {
+            throw InterpretedCompatibilityRegressionPromotionError.reportTooLarge
+        }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard lines.count >= 5,
+              lines[0] == "Kami compatibility report v1",
+              let packageName = value(after: "package: ", in: lines[1]),
+              packageName == InterpretedCompatibilityRedaction.safePackage(packageName),
+              let versionPayload = value(after: "version: ", in: lines[2]),
+              let versionRange = versionPayload.range(of: " (", options: .backwards),
+              versionPayload.hasSuffix(")"),
+              let versionCode = Int64(versionPayload[
+                  versionRange.upperBound..<versionPayload.index(before: versionPayload.endIndex)
+              ]),
+              versionCode >= 0,
+              let findingCountText = value(after: "findings: ", in: lines[3]),
+              let findingCount = Int(findingCountText),
+              (0...4_096).contains(findingCount) else {
+            throw InterpretedCompatibilityRegressionPromotionError.invalidReport
+        }
+        guard findingCount > 0 else {
+            throw InterpretedCompatibilityRegressionPromotionError.noFinding
+        }
+        let versionName = String(versionPayload[..<versionRange.lowerBound])
+        guard versionName == InterpretedCompatibilityRedaction.safeVersion(versionName),
+              lines.count >= 5 + findingCount else {
+            throw InterpretedCompatibilityRegressionPromotionError.invalidReport
+        }
+        var parsedFindings: [(
+            stage: InterpretedCompatibilityStage,
+            surface: InterpretedCompatibilitySurface
+        )] = []
+        parsedFindings.reserveCapacity(findingCount)
+        for line in lines[4..<(4 + findingCount)] {
+            parsedFindings.append(try parseFinding(line))
+        }
+        let tail = Array(lines.dropFirst(4 + findingCount))
+        let validTail: Bool
+        if tail == [""] {
+            validTail = true
+        } else if tail.count == 2,
+                  tail[1].isEmpty,
+                  let droppedText = value(after: "dropped: ", in: tail[0]),
+                  let dropped = Int(droppedText),
+                  dropped > 0 {
+            validTail = true
+        } else {
+            validTail = false
+        }
+        guard validTail, let first = parsedFindings.first else {
+            throw InterpretedCompatibilityRegressionPromotionError.invalidReport
+        }
+        return InterpretedCompatibilityRegressionSeed(
+            packageName: packageName,
+            versionName: versionName,
+            versionCode: versionCode,
+            stage: first.stage,
+            surface: first.surface
+        )
+    }
+
+    private static func parseFinding(
+        _ line: String
+    ) throws -> (
+        stage: InterpretedCompatibilityStage,
+        surface: InterpretedCompatibilitySurface
+    ) {
+        let components = line.components(separatedBy: " | ")
+        guard components.count == 4,
+              let stage = InterpretedCompatibilityStage(rawValue: components[0]),
+              let countText = value(after: "count=", in: components[3]),
+              let count = Int(countText),
+              count > 0 else {
+            throw InterpretedCompatibilityRegressionPromotionError.invalidReport
+        }
+        return (
+            stage,
+            try parseSurface(kind: components[1], summary: components[2])
+        )
+    }
+
+    private static func parseSurface(
+        kind: String,
+        summary: String
+    ) throws -> InterpretedCompatibilitySurface {
+        switch kind {
+        case "class":
+            guard summary == InterpretedCompatibilityRedaction.safeDEXSymbol(summary) else {
+                throw InterpretedCompatibilityRegressionPromotionError.invalidReport
+            }
+            return .unresolvedClass(summary)
+        case "method", "field":
+            guard let separator = summary.range(of: "->") else {
+                throw InterpretedCompatibilityRegressionPromotionError.invalidReport
+            }
+            let classDescriptor = String(summary[..<separator.lowerBound])
+            let member = String(summary[separator.upperBound...])
+            guard classDescriptor == InterpretedCompatibilityRedaction.safeDEXSymbol(
+                classDescriptor
+            ), member == InterpretedCompatibilityRedaction.safeDEXSymbol(member) else {
+                throw InterpretedCompatibilityRegressionPromotionError.invalidReport
+            }
+            if kind == "method" {
+                return .unresolvedMethod(
+                    classDescriptor: classDescriptor,
+                    signature: member
+                )
+            }
+            return .unresolvedField(classDescriptor: classDescriptor, name: member)
+        case "opcode":
+            guard let token = summary.split(separator: " ").first,
+                  token.count == 4,
+                  token.hasPrefix("0x"),
+                  let opcode = UInt8(token.dropFirst(2), radix: 16),
+                  summary == String(
+                      format: "0x%02x %@",
+                      opcode,
+                      DexOpcodeInventory.name(for: opcode)
+                  ) else {
+                throw InterpretedCompatibilityRegressionPromotionError.invalidReport
+            }
+            return .unsupportedOpcode(opcode)
+        default:
+            throw InterpretedCompatibilityRegressionPromotionError.invalidReport
+        }
+    }
+
+    private static func value(after prefix: String, in line: String) -> String? {
+        guard line.hasPrefix(prefix) else { return nil }
+        return String(line.dropFirst(prefix.count))
+    }
+}
+
 enum InterpretedCompatibilityRedaction {
     static func safePackage(_ value: String) -> String {
         guard !value.isEmpty, value.utf8.count <= 512,

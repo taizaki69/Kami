@@ -14,6 +14,7 @@ import MihonCompatKit
 ///   compat-audit opcodes <apk-or-dir>      Exact all-DEX opcode inventory.
 ///   compat-audit plan <apk-or-dir>         Structural execution-plan blockers.
 ///   compat-audit gaps <apk-or-dir>         Redacted static gap/corpus report.
+///   compat-audit promote-gap <report>      Swift assertion for a fixed gap.
 ///
 /// Works on any Swift host (Windows/Linux/macOS); pure Foundation.
 
@@ -32,6 +33,7 @@ struct CompatAudit {
               compat-audit opcodes <apk-or-directory>
               compat-audit plan <apk-or-directory>
               compat-audit gaps <apk-or-directory>
+              compat-audit promote-gap <runtime-report.txt>
             """)
             exit(64)
         }
@@ -84,6 +86,9 @@ struct CompatAudit {
 
         case "gaps":
             compatibilityGapReport(at: args[2])
+
+        case "promote-gap":
+            compatibilityRegressionSeed(at: args[2])
 
         default:
             print("unknown subcommand \(args[1])")
@@ -332,6 +337,33 @@ struct CompatAudit {
             if encounteredErrors > 0 { exit(70) }
         } catch {
             print("error: unable to enumerate bounded APK inputs")
+            exit(70)
+        }
+    }
+
+    /// Converts the first exact finding in a bounded, already-redacted runtime
+    /// report into a deterministic XCTest assertion seed. The path and raw
+    /// input are never echoed on failure.
+    static func compatibilityRegressionSeed(at path: String) {
+        do {
+            let url = URL(fileURLWithPath: path)
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values.isRegularFile == true,
+                  let size = values.fileSize,
+                  size <= InterpretedCompatibilityRegressionPromotion.maximumReportBytes else {
+                throw CocoaError(.fileReadTooLarge)
+            }
+            let data = try Data(contentsOf: url, options: .mappedIfSafe)
+            guard data.count == size,
+                  let text = String(data: data, encoding: .utf8) else {
+                throw CocoaError(.fileReadInapplicableStringEncoding)
+            }
+            let seed = try InterpretedCompatibilityRegressionPromotion.seed(
+                fromRenderedReport: text
+            )
+            print(seed.renderedXCTestAssertion(), terminator: "")
+        } catch {
+            print("error: unable to promote a bounded privacy-safe runtime report")
             exit(70)
         }
     }

@@ -25,6 +25,13 @@ final class RealExtensionExecutionTests: XCTestCase {
         }
     }
 
+    private var batCaveHeaders: [CompatHTTPHeader] {
+        [
+            CompatHTTPHeader(name: "Referer", value: "https://batcave.biz/"),
+            CompatHTTPHeader(name: "Origin", value: "https://batcave.biz"),
+        ]
+    }
+
     private func corpusAPK(_ name: String) throws -> [UInt8] {
         let path = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // …/MihonCompatKitTests
@@ -227,6 +234,7 @@ final class RealExtensionExecutionTests: XCTestCase {
         XCTAssertEqual(request, CompatHTTPRequest(
             url: "https://batcave.biz/comix/",
             method: "POST",
+            headers: batCaveHeaders,
             body: .form(fields: [
                 CompatHTTPFormField(name: "dlenewssortby", value: "rating"),
                 CompatHTTPFormField(name: "dledirection", value: "desc"),
@@ -286,6 +294,7 @@ final class RealExtensionExecutionTests: XCTestCase {
         let expected = CompatHTTPRequest(
             url: "https://batcave.biz/comix/",
             method: "POST",
+            headers: batCaveHeaders,
             body: .form(fields: [
                 CompatHTTPFormField(name: "dlenewssortby", value: "rating"),
                 CompatHTTPFormField(name: "dledirection", value: "desc"),
@@ -335,6 +344,7 @@ final class RealExtensionExecutionTests: XCTestCase {
 
         let expected = CompatHTTPRequest(
             url: "https://batcave.biz/page/3",
+            headers: batCaveHeaders,
             cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
         )
         let requests = await transport.requests()
@@ -382,6 +392,7 @@ final class RealExtensionExecutionTests: XCTestCase {
 
         let expected = CompatHTTPRequest(
             url: "https://batcave.biz/search/alpha+beta/page/2/",
+            headers: batCaveHeaders,
             cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
         )
         let requests = await transport.requests()
@@ -435,6 +446,7 @@ final class RealExtensionExecutionTests: XCTestCase {
 
         let expected = CompatHTTPRequest(
             url: detailURL,
+            headers: batCaveHeaders,
             cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
         )
         let requests = await transport.requests()
@@ -502,6 +514,7 @@ final class RealExtensionExecutionTests: XCTestCase {
 
         let expected = CompatHTTPRequest(
             url: detailURL,
+            headers: batCaveHeaders,
             cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
         )
         let requests = await transport.requests()
@@ -574,6 +587,7 @@ final class RealExtensionExecutionTests: XCTestCase {
                 requests,
                 [CompatHTTPRequest(
                     url: detailURL,
+                    headers: batCaveHeaders,
                     cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
                 )],
                 testCase.name
@@ -623,6 +637,7 @@ final class RealExtensionExecutionTests: XCTestCase {
         let expected = CompatHTTPRequest(
             url: endpoint,
             method: "POST",
+            headers: batCaveHeaders,
             body: .text(
                 value: #"{"news_id":"42","chapter_id":"7"}"#,
                 mediaType: "application/json"

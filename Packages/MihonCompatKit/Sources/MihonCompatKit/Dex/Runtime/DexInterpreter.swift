@@ -81,6 +81,20 @@ public final class DexInterpreter {
     /// executing on a dedicated big-stack thread (see docs/EXTENSION_RUNTIME).
     public var maxCallDepth = 48
 
+    /// One operation-scoped observer. The object identity lets nested or
+    /// re-entrant public VM entries report the same compatibility failure only
+    /// once before a host fallback or outer frame can catch and replace it.
+    private final class CompatibilityGapObservation {
+        let record: (VMError) -> Bool
+        var didRecord = false
+
+        init(record: @escaping (VMError) -> Bool) {
+            self.record = record
+        }
+    }
+
+    private var compatibilityGapObservations: [CompatibilityGapObservation] = []
+
     public init(dex: DexFile,
                 bridge: HostBridge = HostBridge.minimal(),
                 maxInstructions: Int = 2_000_000,
@@ -101,33 +115,112 @@ public final class DexInterpreter {
 
     // MARK: - Public entry points
 
+    /// Runs one synchronous source operation while preserving the first exact
+    /// unsupported VM surface even when a nested host bridge catches the error
+    /// and returns a compatibility fallback. Returning `false` from `record`
+    /// means the error was not a reportable surface and leaves the observation
+    /// open for a later exact gap.
+    func withFirstCompatibilityGapObservation<T>(
+        _ record: @escaping (VMError) -> Bool,
+        operation: () throws -> T
+    ) throws -> T {
+        let observation = CompatibilityGapObservation(record: record)
+        compatibilityGapObservations.append(observation)
+        defer { removeCompatibilityGapObservation(observation) }
+        return try reportCompatibilityGap(from: operation)
+    }
+
+    /// Async counterpart. The observation remains active while an interpreted
+    /// frame is suspended so async bridge failures and nested DEX re-entry share
+    /// the same first-gap boundary.
+    func withFirstCompatibilityGapObservation<T>(
+        _ record: @escaping (VMError) -> Bool,
+        operation: () async throws -> T
+    ) async throws -> T {
+        let observation = CompatibilityGapObservation(record: record)
+        compatibilityGapObservations.append(observation)
+        defer { removeCompatibilityGapObservation(observation) }
+        return try await reportCompatibilityGap(from: operation)
+    }
+
+    /// Executes the most-specific DEX-defined virtual override when one exists
+    /// in the receiver's parsed class chain. A missing override is an ordinary
+    /// `nil` result so host defaults do not probe by throwing and accidentally
+    /// masquerade as compatibility gaps.
+    func callDefinedVirtualOverride(
+        receiver: RVal,
+        method: String,
+        prototype: String
+    ) throws -> RVal? {
+        try reportCompatibilityGap {
+            guard let runtimeDescriptor = typeHierarchy.runtimeDescriptor(of: receiver) else {
+                throw VMError.verify("virtual override receiver is not a reference")
+            }
+            var descriptor = runtimeDescriptor
+            var visited: Set<String> = []
+            while visited.insert(descriptor).inserted,
+                  let definitionIndex = dex.classIndexByDescriptor[descriptor] {
+                let definition = dex.classDefs[definitionIndex]
+                let matches = definition.virtualMethods.filter {
+                    let reference = dex.methodIds[$0.methodIndex]
+                    return reference.name == method &&
+                        reference.prototype.descriptor == prototype
+                }
+                guard matches.count <= 1 else {
+                    throw VMError.verify(
+                        "duplicate encoded method \(descriptor).\(method)\(prototype)"
+                    )
+                }
+                if let match = matches.first {
+                    return try withInstructionBudget {
+                        try execute(def: definition, method: match, args: [receiver])
+                    }
+                }
+                guard definition.superclassIndex >= 0,
+                      definition.superclassIndex < dex.typeDescriptors.count else {
+                    break
+                }
+                descriptor = dex.typeDescriptors[definition.superclassIndex]
+            }
+            return nil
+        }
+    }
+
     @discardableResult
     public func call(classDescriptor: String, method: String, args: [RVal] = []) throws -> RVal {
-        guard let defIndex = dex.classIndexByDescriptor[classDescriptor] else {
-            throw VMError.unresolvedClass(classDescriptor)
-        }
-        let def = dex.classDefs[defIndex]
-        let all = def.directMethods + def.virtualMethods
-        let matches = all.filter { dex.methodIds[$0.methodIndex].name == method }
-        guard !matches.isEmpty else {
-            throw VMError.unresolvedMethod(class: classDescriptor, signature: method)
-        }
-        guard matches.count == 1, let match = matches.first else {
-            let candidates = matches.map { dex.methodIds[$0.methodIndex].signature }.sorted()
-            throw VMError.ambiguousMethod(class: classDescriptor, name: method, candidates: candidates)
-        }
-        return try withInstructionBudget {
-            if method == "<clinit>" {
-                guard args.isEmpty else {
-                    throw VMError.verify("\(classDescriptor).<clinit>()V expects no arguments")
+        try reportCompatibilityGap {
+            guard let defIndex = dex.classIndexByDescriptor[classDescriptor] else {
+                throw VMError.unresolvedClass(classDescriptor)
+            }
+            let def = dex.classDefs[defIndex]
+            let all = def.directMethods + def.virtualMethods
+            let matches = all.filter { dex.methodIds[$0.methodIndex].name == method }
+            guard !matches.isEmpty else {
+                throw VMError.unresolvedMethod(class: classDescriptor, signature: method)
+            }
+            guard matches.count == 1, let match = matches.first else {
+                let candidates = matches.map { dex.methodIds[$0.methodIndex].signature }.sorted()
+                throw VMError.ambiguousMethod(
+                    class: classDescriptor,
+                    name: method,
+                    candidates: candidates
+                )
+            }
+            return try withInstructionBudget {
+                if method == "<clinit>" {
+                    guard args.isEmpty else {
+                        throw VMError.verify(
+                            "\(classDescriptor).<clinit>()V expects no arguments"
+                        )
+                    }
+                    try ensureClassInitialized(classDescriptor)
+                    return .null
                 }
-                try ensureClassInitialized(classDescriptor)
-                return .null
+                if match.accessFlags & 0x8 != 0 {
+                    try ensureClassInitialized(classDescriptor)
+                }
+                return try execute(def: def, method: match, args: args)
             }
-            if match.accessFlags & 0x8 != 0 {
-                try ensureClassInitialized(classDescriptor)
-            }
-            return try execute(def: def, method: match, args: args)
         }
     }
 
@@ -136,32 +229,42 @@ public final class DexInterpreter {
     @discardableResult
     public func call(classDescriptor: String, method: String, prototype: String,
                      args: [RVal] = []) throws -> RVal {
-        guard let defIndex = dex.classIndexByDescriptor[classDescriptor] else {
-            throw VMError.unresolvedClass(classDescriptor)
-        }
-        let def = dex.classDefs[defIndex]
-        let matches = (def.directMethods + def.virtualMethods).filter {
-            let reference = dex.methodIds[$0.methodIndex]
-            return reference.name == method && reference.prototype.descriptor == prototype
-        }
-        guard !matches.isEmpty else {
-            throw VMError.unresolvedMethod(class: classDescriptor, signature: method + prototype)
-        }
-        guard matches.count == 1, let match = matches.first else {
-            throw VMError.verify("duplicate encoded method \(classDescriptor).\(method)\(prototype)")
-        }
-        return try withInstructionBudget {
-            if method == "<clinit>" {
-                guard prototype == "()V", args.isEmpty else {
-                    throw VMError.verify("\(classDescriptor).<clinit>()V expects no arguments")
+        try reportCompatibilityGap {
+            guard let defIndex = dex.classIndexByDescriptor[classDescriptor] else {
+                throw VMError.unresolvedClass(classDescriptor)
+            }
+            let def = dex.classDefs[defIndex]
+            let matches = (def.directMethods + def.virtualMethods).filter {
+                let reference = dex.methodIds[$0.methodIndex]
+                return reference.name == method &&
+                    reference.prototype.descriptor == prototype
+            }
+            guard !matches.isEmpty else {
+                throw VMError.unresolvedMethod(
+                    class: classDescriptor,
+                    signature: method + prototype
+                )
+            }
+            guard matches.count == 1, let match = matches.first else {
+                throw VMError.verify(
+                    "duplicate encoded method \(classDescriptor).\(method)\(prototype)"
+                )
+            }
+            return try withInstructionBudget {
+                if method == "<clinit>" {
+                    guard prototype == "()V", args.isEmpty else {
+                        throw VMError.verify(
+                            "\(classDescriptor).<clinit>()V expects no arguments"
+                        )
+                    }
+                    try ensureClassInitialized(classDescriptor)
+                    return .null
                 }
-                try ensureClassInitialized(classDescriptor)
-                return .null
+                if match.accessFlags & 0x8 != 0 {
+                    try ensureClassInitialized(classDescriptor)
+                }
+                return try execute(def: def, method: match, args: args)
             }
-            if match.accessFlags & 0x8 != 0 {
-                try ensureClassInitialized(classDescriptor)
-            }
-            return try execute(def: def, method: match, args: args)
         }
     }
 
@@ -172,14 +275,16 @@ public final class DexInterpreter {
     @discardableResult
     public func callAsync(classDescriptor: String, method: String,
                            args: [RVal] = []) async throws -> RVal {
-        activeAsyncEntryDepth += 1
-        defer { activeAsyncEntryDepth -= 1 }
-        do {
-            return try allowingAsyncHostInvocation {
-                try call(classDescriptor: classDescriptor, method: method, args: args)
+        try await reportCompatibilityGap {
+            activeAsyncEntryDepth += 1
+            defer { activeAsyncEntryDepth -= 1 }
+            do {
+                return try allowingAsyncHostInvocation {
+                    try call(classDescriptor: classDescriptor, method: method, args: args)
+                }
+            } catch let suspension as DexAsyncSuspension {
+                return try await resolve(suspension)
             }
-        } catch let suspension as DexAsyncSuspension {
-            return try await resolve(suspension)
         }
     }
 
@@ -187,19 +292,21 @@ public final class DexInterpreter {
     @discardableResult
     public func callAsync(classDescriptor: String, method: String, prototype: String,
                            args: [RVal] = []) async throws -> RVal {
-        activeAsyncEntryDepth += 1
-        defer { activeAsyncEntryDepth -= 1 }
-        do {
-            return try allowingAsyncHostInvocation {
-                try call(
-                    classDescriptor: classDescriptor,
-                    method: method,
-                    prototype: prototype,
-                    args: args
-                )
+        try await reportCompatibilityGap {
+            activeAsyncEntryDepth += 1
+            defer { activeAsyncEntryDepth -= 1 }
+            do {
+                return try allowingAsyncHostInvocation {
+                    try call(
+                        classDescriptor: classDescriptor,
+                        method: method,
+                        prototype: prototype,
+                        args: args
+                    )
+                }
+            } catch let suspension as DexAsyncSuspension {
+                return try await resolve(suspension)
             }
-        } catch let suspension as DexAsyncSuspension {
-            return try await resolve(suspension)
         }
     }
 
@@ -211,24 +318,28 @@ public final class DexInterpreter {
     @discardableResult
     func callNestedAsync(classDescriptor: String, method: String, prototype: String,
                          args: [RVal] = []) async throws -> RVal {
-        guard activeAsyncEntryDepth > 0 else {
-            throw VMError.verify("nested async DEX entry requires an active async VM session")
-        }
-        activeAsyncEntryDepth += 1
-        defer { activeAsyncEntryDepth -= 1 }
-        do {
-            return try preservingInstructionBudget {
-                try allowingAsyncHostInvocation {
-                    try call(
-                        classDescriptor: classDescriptor,
-                        method: method,
-                        prototype: prototype,
-                        args: args
-                    )
-                }
+        try await reportCompatibilityGap {
+            guard activeAsyncEntryDepth > 0 else {
+                throw VMError.verify(
+                    "nested async DEX entry requires an active async VM session"
+                )
             }
-        } catch let suspension as DexAsyncSuspension {
-            return try await resolve(suspension)
+            activeAsyncEntryDepth += 1
+            defer { activeAsyncEntryDepth -= 1 }
+            do {
+                return try preservingInstructionBudget {
+                    try allowingAsyncHostInvocation {
+                        try call(
+                            classDescriptor: classDescriptor,
+                            method: method,
+                            prototype: prototype,
+                            args: args
+                        )
+                    }
+                }
+            } catch let suspension as DexAsyncSuspension {
+                return try await resolve(suspension)
+            }
         }
     }
 
@@ -239,43 +350,98 @@ public final class DexInterpreter {
     func withFreshAsyncSession<T>(
         _ operation: () async throws -> T
     ) async throws -> T {
-        guard activeAsyncEntryDepth == 0, entryDepth == 0, depth == 0 else {
-            throw VMError.verify("fresh async DEX session overlaps active execution")
+        try await reportCompatibilityGap {
+            guard activeAsyncEntryDepth == 0, entryDepth == 0, depth == 0 else {
+                throw VMError.verify("fresh async DEX session overlaps active execution")
+            }
+            remainingInstructions = maxInstructions
+            activeAsyncEntryDepth += 1
+            defer { activeAsyncEntryDepth -= 1 }
+            return try await operation()
         }
-        remainingInstructions = maxInstructions
-        activeAsyncEntryDepth += 1
-        defer { activeAsyncEntryDepth -= 1 }
-        return try await operation()
     }
 
     /// Allocates a DEX class instance and runs `<init>` (constructor).
     @discardableResult
     public func instantiate(classDescriptor: String) throws -> RVal {
-        guard let defIndex = dex.classIndexByDescriptor[classDescriptor] else {
-            throw VMError.unresolvedClass(classDescriptor)
+        try reportCompatibilityGap {
+            guard let defIndex = dex.classIndexByDescriptor[classDescriptor] else {
+                throw VMError.unresolvedClass(classDescriptor)
+            }
+            let def = dex.classDefs[defIndex]
+            return try withInstructionBudget {
+                try ensureClassInitialized(classDescriptor)
+                let obj = ObjInstance(dexType: classDescriptor)
+                for f in def.instanceFields {
+                    guard let field = try? fieldAt(f.fieldIndex) else { continue }
+                    obj.fields[field.name] = defaultValue(for: field.type)
+                }
+                let constructors = def.directMethods.filter {
+                    dex.methodIds[$0.methodIndex].name == "<init>"
+                }
+                let noArgumentConstructors = constructors.filter {
+                    let reference = dex.methodIds[$0.methodIndex]
+                    return reference.prototype.descriptor == "()V"
+                }
+                if noArgumentConstructors.count == 1,
+                   let ctor = noArgumentConstructors.first {
+                    _ = try execute(def: def, method: ctor, args: [.obj(obj)])
+                } else if noArgumentConstructors.count > 1 {
+                    throw VMError.verify(
+                        "duplicate encoded constructor \(classDescriptor).<init>()V"
+                    )
+                } else if !constructors.isEmpty {
+                    throw VMError.unresolvedMethod(
+                        class: classDescriptor,
+                        signature: "<init>()V"
+                    )
+                }
+                return .obj(obj)
+            }
         }
-        let def = dex.classDefs[defIndex]
-        return try withInstructionBudget {
-            try ensureClassInitialized(classDescriptor)
-            let obj = ObjInstance(dexType: classDescriptor)
-            for f in def.instanceFields {
-                guard let field = try? fieldAt(f.fieldIndex) else { continue }
-                obj.fields[field.name] = defaultValue(for: field.type)
-            }
-            let constructors = def.directMethods.filter { dex.methodIds[$0.methodIndex].name == "<init>" }
-            let noArgumentConstructors = constructors.filter {
-                let reference = dex.methodIds[$0.methodIndex]
-                return reference.prototype.descriptor == "()V"
-            }
-            if noArgumentConstructors.count == 1, let ctor = noArgumentConstructors.first {
-                _ = try execute(def: def, method: ctor, args: [.obj(obj)])
-            } else if noArgumentConstructors.count > 1 {
-                throw VMError.verify("duplicate encoded constructor \(classDescriptor).<init>()V")
-            } else if !constructors.isEmpty {
-                throw VMError.unresolvedMethod(class: classDescriptor, signature: "<init>()V")
-            }
-            return .obj(obj)
+    }
+
+    private func reportCompatibilityGap<T>(
+        from operation: () throws -> T
+    ) throws -> T {
+        do {
+            return try operation()
+        } catch let error as VMError {
+            recordCompatibilityGap(error)
+            throw error
         }
+    }
+
+    private func reportCompatibilityGap<T>(
+        from operation: () async throws -> T
+    ) async throws -> T {
+        do {
+            return try await operation()
+        } catch let error as VMError {
+            recordCompatibilityGap(error)
+            throw error
+        }
+    }
+
+    private func recordCompatibilityGap(_ error: VMError) {
+        // Inner observations see the gap first. Mark only observers whose
+        // recorder accepted the error as an exact compatibility surface; a
+        // budget/cancellation/verification failure must not mask a later gap.
+        for observation in compatibilityGapObservations.reversed()
+        where !observation.didRecord {
+            if observation.record(error) {
+                observation.didRecord = true
+            }
+        }
+    }
+
+    private func removeCompatibilityGapObservation(
+        _ observation: CompatibilityGapObservation
+    ) {
+        guard let index = compatibilityGapObservations.lastIndex(where: {
+            $0 === observation
+        }) else { return }
+        compatibilityGapObservations.remove(at: index)
     }
 
     private func withInstructionBudget<T>(_ operation: () throws -> T) throws -> T {
@@ -960,6 +1126,13 @@ public final class DexInterpreter {
             let a = Int(u[0] >> 8 & 0x0F), b = Int(u[0] >> 12)
             let field = try fieldAt(Int(u[1]))
             let target = try obj(b)
+            let isDEXDefined = dex.classIndexByDescriptor[field.declaringClass] != nil
+            guard isDEXDefined || target.fields[field.name] != nil else {
+                throw VMError.unresolvedField(
+                    class: field.declaringClass,
+                    name: field.name
+                )
+            }
             if op <= 0x58 {
                 setReg(a, target.fields[field.name] ?? defaultValue(for: field.type))
             } else {
@@ -979,9 +1152,19 @@ public final class DexInterpreter {
                 "depth=\(depth) \(reference.declaringClass)->\(reference.signature) "
                     + "pc=\(pc) static-field=\(key):\(field.type)"
             )
+            let isDEXDefined = dex.classIndexByDescriptor[field.declaringClass] != nil
+            guard isDEXDefined || bridge.staticFields[key] != nil else {
+                throw VMError.unresolvedField(
+                    class: field.declaringClass,
+                    name: field.name
+                )
+            }
             if op <= 0x66 {
-                setReg(a, dexStatics[key] ?? bridge.staticFields[key] ?? defaultValue(for: field.type))
-            } else if dex.classIndexByDescriptor[field.declaringClass] != nil {
+                setReg(
+                    a,
+                    dexStatics[key] ?? bridge.staticFields[key] ?? defaultValue(for: field.type)
+                )
+            } else if isDEXDefined {
                 dexStatics[key] = reg(a)
             } else {
                 bridge.staticFields[key] = reg(a)

@@ -7,6 +7,13 @@ final class PinnedInterpretedSourceTests: XCTestCase {
         case missingResponse
     }
 
+    private var batCaveHeaders: [CompatHTTPHeader] {
+        [
+            CompatHTTPHeader(name: "Referer", value: "https://batcave.biz/"),
+            CompatHTTPHeader(name: "Origin", value: "https://batcave.biz"),
+        ]
+    }
+
     /// Reentrant while its deterministic delay is suspended. If the source
     /// fails to serialize VM ownership, `maximumActiveRequests` rises above 1.
     private actor RoutingTransport: CompatHTTPTransport {
@@ -251,6 +258,7 @@ final class PinnedInterpretedSourceTests: XCTestCase {
             CompatHTTPRequest(
                 url: "https://batcave.biz/comix/",
                 method: "POST",
+                headers: batCaveHeaders,
                 body: .form(fields: [
                     CompatHTTPFormField(name: "dlenewssortby", value: "rating"),
                     CompatHTTPFormField(name: "dledirection", value: "desc"),
@@ -260,33 +268,40 @@ final class PinnedInterpretedSourceTests: XCTestCase {
             ),
             CompatHTTPRequest(
                 url: "https://batcave.biz/page/3",
+                headers: batCaveHeaders,
                 cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
             ),
             CompatHTTPRequest(
                 url: "https://batcave.biz/search/alpha+beta/page/2/",
+                headers: batCaveHeaders,
                 cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
             ),
             CompatHTTPRequest(
                 url: "https://batcave.biz/comic/adapter-hero",
+                headers: batCaveHeaders,
                 cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
             ),
             CompatHTTPRequest(
                 url: "https://batcave.biz/comic/adapter-hero",
+                headers: batCaveHeaders,
                 cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
             ),
             CompatHTTPRequest(
                 url: "https://batcave.biz/comic/adapter-hero",
+                headers: batCaveHeaders,
                 cachePolicy: CompatHTTPCachePolicy(maxAgeSeconds: 600)
             ),
             CompatHTTPRequest(
                 url: "https://batcave.biz/engine/ajax/controller.php?mod=api&action=reader/getChapterData",
                 method: "POST",
+                headers: batCaveHeaders,
                 body: .text(
                     value: #"{"news_id":"42","chapter_id":"7"}"#,
                     mediaType: "application/json"
                 )
             ),
         ])
+        XCTAssertTrue(source.compatibilityReport().findings.isEmpty)
     }
 
     func testPinnedImageRequestsFollowTheConfiguredTransportPolicy() async throws {

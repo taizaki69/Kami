@@ -156,5 +156,6 @@ final class KawiiMangaInterpretedSourceTests: XCTestCase {
                 $0.name.lowercased() == "x-app-key" && $0.value == "km_2026_live"
             })
         }
+        XCTAssertTrue(source.compatibilityReport().findings.isEmpty)
     }
 }
