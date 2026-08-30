@@ -12,6 +12,9 @@ cache policy, requests, isolated client identities, interceptor lists, and
 calls. `OkHttpClient.newCall` produces a transport-neutral
 `CompatHTTPRequest`; `OkHttpExtensionsKt.await` and `awaitSuccess` cross an
 explicitly injected async transport without blocking an interpreter thread.
+The current await path sends that request projection directly. It does not yet
+execute source-defined OkHttp interceptors or preserve DEX `Request` identity
+and tags across the transport boundary.
 
 `URLSessionCompatHTTPTransport` is an actor owned by one source identity. It
 applies request, redirect, timeout, header, and body limits; rejects insecure
@@ -53,11 +56,47 @@ places the result in a bounded form body. Popular, latest, filtered search,
 details, chapters, and pages all cross the same source-scoped fake transport;
 tests assert the decoded JSON for every request and remain fully offline.
 
+The pinned Baozi Manhua 1.6.29 path uses the same source-scoped fake transport
+for deterministic popular, latest, search, details, chapters, and pages tests.
+Its exact DEX `imageRequest(Page)` method is executed before the request reaches
+the app-facing image seam; the regression proves the fixture's CDN-host rewrite
+without network I/O. The image request is projected to URL/headers only.
+
 Each pinned `KamiSource` owns its transport together with one mutable
 interpreter behind a bounded actor queue, so a suspended request cannot permit
 another caller to enter the same VM concurrently. Production transport
-disallows plain HTTP by default; deterministic injected transports remain the
-only paths used by the corpus tests.
+disallows plain HTTP by default when constructed with its default policy;
+deterministic injected transports remain the only paths used by the corpus
+tests. The source retains that exact policy and `ReaderView` passes it into the
+reader pipeline. Reader requests are validated before even an injected
+transport sees the URL/headers, HTTPS is the default, HTTP requires explicit
+source opt-in, and redirects use the same source-scoped policy. Reader-specific
+image response limits remain independent of the source response-body limit.
+
+## Source interceptor and reader boundary
+
+The Baozi APK contains source interceptors, but their behavior is not part of
+the current runtime proof. `ReaderImagePipeline` converts `ImageRequest` to a
+`CompatHTTPRequest` and calls the transport directly, so it drops DEX request
+tags and does not run the APK's application/network interceptor chain. Banner
+cropping, redirect-domain rewriting, and missing-image handling are therefore
+not executed or proven through reader image loads. `URLSessionCompatHTTPTransport`
+also follows redirects inside its delegate path; that final-response behavior
+does not prove an interceptor can observe or rewrite intermediate redirects.
+
+The next networking milestone is a bounded, source-scoped interceptor seam with
+immutable interceptor snapshots, preserved request identity/tags, one-use
+`proceed`, cancellation, and explicit budgets. The measured Baozi defaults are
+at most 32 interceptors, 64 interceptor/terminal steps per call, depth at most
+32, and one forward `proceed` per chain object. Over-budget or reentrant paths
+must fail through a typed `IllegalStateException`/verification path; response-
+body replacements count against the existing transport maximum, and nested
+async execution must share the parent VM instruction budget. These constraints
+are proposed for the next seam, not implemented behavior. It must be integrated
+into the reader path before any source-defined image transform is claimed.
+Reader retry must also regenerate and revalidate the source `ImageRequest` and
+define expiry/credential-refresh behavior; the current per-page retry reuses the
+request resolved during page loading.
 
 ## Remaining extension-facing stack
 
@@ -70,11 +109,14 @@ compatibility:
 - Additional request/response overloads, including byte-array and streaming
   request bodies, only as measured extensions reach them.
 - Persistent per-source cookies and preferences; the current compat cookie jar
-  is source-isolated but in memory only.
+  is source-isolated but in memory only. Baozi scalar preferences are accepted
+  by the exact profile when injected, but production preference UI/persistence
+  is not wired.
 - Rate limiting: `RateLimitInterceptor` semantics (permits per interval).
 - Cloudflare: challenge detection → WKWebView solve → cookie/UA sync → retry
   (see EXTENSION_RUNTIME.md M4). No bypass pretense.
-- Additional retry/interceptor semantics as real corpus paths require them.
+- Additional retry/interceptor semantics as real corpus paths require them;
+  source interceptor execution remains open as described above.
 
 ## Diagnostics
 

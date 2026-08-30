@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "source": "SHA-256-locked Keiyoushi release assets and AOSP apksig conformance fixtures",
-  "locked": "2026-08-23",
+  "locked": "2026-08-29",
   "upstream": {
     "catalogRepository": "https://github.com/keiyoushi/extensions",
     "catalogBranch": "repo",
@@ -12,8 +12,8 @@
   "selection": {
     "kind": "behavior-stratified measurement, not a statistical compatibility sample",
     "currentLib16ArtifactCount": 19,
-    "executionArtifactCount": 5,
-    "measurementArtifactCount": 16,
+    "executionArtifactCount": 6,
+    "measurementArtifactCount": 15,
     "conformanceArtifactCount": 6,
     "measurementPolicy": "Measurement artifacts are parsed, signature-verified for parser conformance, and statically audited only. Corpus membership never grants signer trust, admits, installs, or executes an extension."
   },
@@ -202,15 +202,15 @@
     },
     {
       "name": "baozimanhua",
-      "path": "measurement/baozimanhua.apk",
-      "role": "measurement",
+      "path": "baozimanhua.apk",
+      "role": "execution",
       "package": "eu.kanade.tachiyomi.extension.zh.baozimanhua",
       "version": "1.6.29",
       "versionCode": 29,
       "extensionLib": "1.6",
       "sourceCount": 1,
       "contentWarning": "safe",
-      "behaviorFamily": "custom API, preferences, and image request",
+      "behaviorFamily": "single-source custom HTML, preferences, and image request",
       "url": "https://github.com/keiyoushi/extensions/releases/download/4277105/tachiyomi-zh.baozimanhua-v1.6.29.apk",
       "sha256": "7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec"
     },

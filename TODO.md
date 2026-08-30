@@ -19,14 +19,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 - [x] `compat-audit` CLI (inspect/missing/index/methods/disasm/opcodes/plan/gaps) —
       deterministic file and directory inspection, run on the locked corpus
 - [x] SHA/URL-locked behavior-stratified current lib 1.6 measurement corpus —
-      16 measurement-only Keiyoushi APKs under `Tests/corpus/measurement/`,
-      alongside 5 execution and 6 AOSP conformance fixtures (27 total; 19
-      current lib 1.6 artifacts); 16/16 static analyses complete with 0 errors,
-      12 structural candidates, 4 stable-wrapper blockers, 626 unique
-      unregistered external method surfaces, and 0 unsupported opcodes. The
-      1.24 MB set is prioritization evidence, not a statistical sample or
-      execution/admission proof. Three `CorpusLockTests` bring the local
-      MihonCompatKit verification to 192/192.
+      15 measurement-only Keiyoushi APKs under `Tests/corpus/measurement/`,
+      alongside 6 execution and 6 AOSP conformance fixtures (27 total; 19
+      current lib 1.6 artifacts). The remaining 15 measurement APKs analyze as
+      11 structural candidates with 563 unique unregistered external method
+      surfaces and zero unsupported opcodes. This is prioritization evidence,
+      not a statistical sample or execution/admission proof. The local suite
+      passes 207/207 with the corpus present.
 
 ## P0 — App foundation
 
@@ -56,7 +55,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       [#1](https://github.com/taizaki69/Kami/issues/1)
 - [~] Kotlin/Java class library M2 — Object/String/StringBuilder, core Kotlin
       ABI, bounded collections, atomics, reflection, and Mihon filters cover
-      the pinned BatCave, Kawii, and MangaMelon request paths; bounded form/header/URL/cache/request/
+      the pinned BatCave, Kawii, MangaMelon, and Baozi request paths; bounded form/header/URL/cache/request/
       call models, Kotlin duration shims, async frame resumption, source-scoped
       transport, response/body/Okio values, bounded Jsoup document/element/CSS
       selectors (including modern direct-child and `:containsData` semantics),
@@ -67,13 +66,18 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       bounded `HttpUrl.Builder`, custom source headers, Kotlin `Instant`, and
       stable-wrapper execution; MangaMelon additionally proves exact static
       filters, JSON defaults/longs/memo, structured coroutine lambdas,
-      comparator sorting, and UTF-8/ByteString/Base64 form data; measured long
+      comparator sorting, and UTF-8/ByteString/Base64 form data; Baozi
+      additionally proves its bounded scalar SharedPreferences and interpreted
+      image-request path; measured long
       tail remains a static prioritization target in the locked measurement set
 - [~] tachiyomix API bridge M3 (`HttpSource` → `KamiSource`) — the exact pinned
-      BatCave 1.6.9, Kawii Manga 1.6.1, and MangaMelon 1.6.1 profiles implement
-      the app-facing contract through stable public wrappers; static
-      `Sort`/`Select` filters are proven while dynamic filters, preferences,
-      custom image requests, and broader runtime coverage remain open
+      BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, and Baozi Manhua
+      1.6.29 profiles implement the measured app-facing contract through stable
+      public wrappers; static
+      `Sort`/`Select` filters, Baozi's bounded scalar preferences, and Baozi's
+      interpreted custom image request are proven; dynamic/network-backed
+      filters, production preference UI/persistence, source interceptor
+      execution, and broader runtime coverage remain open
 - [x] First pinned real extension executing
       popular→search→details→chapters→pages — BatCave's unmodified locked APK
       now crosses deterministic transport and its real parsing/serialization
@@ -91,7 +95,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       content-addressed APKs persist, repository keys or explicit legacy-store
       signer confirmation establish trust, every startup re-authenticates the
       exact bytes, and enabled downloaded sources appear in Browse. The factory
-      intentionally supports only exact measured profiles today.
+      intentionally supports only exact measured profiles today. Its exact
+      profile source-ID set is preflighted before DEX construction and the
+      constructed source IDs are postvalidated; registry removal is scoped to
+      the owning package. The raw exact-profile constructors remain a deliberate
+      built-in/test seam and still reverify the exact hash and signer; downloaded
+      app execution must use persisted admission plus the sole factory.
 - [x] Generic source-filter Browse UI: transactional editing for every
       app-facing Mihon filter case, source-default preservation for text
       searches, blank-query filtered search, reset/clear, pull-to-refresh, and
@@ -109,15 +118,41 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       discovery checks manifest identity, supported lib version, single-source
       and single-DEX shape, absence of native `.so` entries, entry placement,
       and stable public wrappers without executing or admitting unknown APKs;
-      the three execution profiles and all 16 measurement APKs produce
-      deterministic results: 12 measurement candidates and four stable-wrapper
+      the four execution profiles and all 15 remaining measurement APKs produce
+      deterministic results: 11 measurement candidates, 563 unique
+      unregistered surfaces, zero unsupported opcodes, and four stable-wrapper
       blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC); legacy lib 1.4
       specimens remain explicit blockers
-- [ ] Expand beyond the exact three-profile catalog with a fourth current
-      extension — Baozi Manhua 1.6.29 is selected as the next target because it
-      is current, catalog-labeled `safe`, and a structural-plan candidate that exercises
-      preferences plus a custom `imageRequest`; measurement membership alone
-      does not authorize execution
+- [x] Expand the exact catalog with a fourth current extension — Baozi Manhua
+      1.6.29 is admitted by exact SHA-256, signer, manifest, source-ID, and
+      structural gates. Deterministic fake-transport tests prove its
+      popular/latest/search/details/chapters/pages path, exact static filters,
+      bounded scalar preferences, a valid non-default filter state, and DEX
+      `imageRequest` URL rewrite.
+- [ ] Execute source-defined OkHttp interceptors through a bounded, source-scoped
+      chain that preserves DEX `Request` identity/tags and is usable by the
+      reader image path. Initial measured limits: 32 interceptors, 64 total
+      interceptor/terminal steps per call, depth 32, and one `proceed` per chain
+      object, with replacement bytes charged to the transport limit and nested
+      async work sharing the parent VM instruction budget. Baozi banner
+      cropping, redirect-domain rewriting, and missing-image behavior are not
+      yet executed or proven.
+- [x] Carry each source's explicit insecure-HTTP policy into reader image
+      fetching: pinned sources retain the factory policy, `ReaderView` passes
+      it into `ReaderImagePipeline`, initial URL/headers are validated before
+      injected or production transport, HTTPS is the default, and HTTP requires
+      explicit source opt-in. Redirects use the same source-scoped policy.
+- [ ] On reader-image retry, regenerate and revalidate the source's
+      `ImageRequest`, and define request/header expiry and credential-refresh
+      semantics. The current retry task reuses the request resolved during page
+      loading.
+- [ ] Harden regex execution with a bounded or demonstrably linear-time
+      matcher (or an explicit match-step budget). Current `NSRegularExpression`
+      use is bounded by pattern/input/output sizes but not by worst-case match
+      time.
+- [ ] Wire production preference UI and persistence for the bounded
+      `InterpretedExtensionPreferences` model; current app construction uses
+      profile defaults.
 - [~] Privacy-safe compatibility telemetry — typed runtime class/method/field/
       opcode failures are stage-deduplicated without arbitrary error strings,
       and `compat-audit gaps` emits a deterministic path-free static/corpus

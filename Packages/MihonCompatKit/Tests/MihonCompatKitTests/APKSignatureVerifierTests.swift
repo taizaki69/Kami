@@ -26,7 +26,10 @@ final class APKSignatureVerifierTests: XCTestCase {
 
     func testKeiyoushiCorpusMatchesRepositoryFingerprintAfterV2Verification() throws {
         let verifier = APKSignatureVerifier()
-        for name in ["akuma", "mangadex", "batcave", "kawiimanga", "mangamelon"] {
+        for name in [
+            "akuma", "mangadex", "batcave", "kawiimanga", "mangamelon",
+            "baozimanhua",
+        ] {
             let identity = try verifier.verify(apkBytes: corpus(name))
             XCTAssertEqual(identity.scheme, .v2, name)
             XCTAssertEqual(identity.signers.count, 1, name)

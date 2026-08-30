@@ -219,13 +219,15 @@ final class PinnedInterpretedSourceTests: XCTestCase {
         XCTAssertEqual(pages[1].index, 1)
         XCTAssertEqual(pages[1].imageURL, "https://cdn.example/page-two.jpg")
 
-        let imageRequest = try XCTUnwrap(source.getImageRequest(page: pages[0]))
+        let resolvedImageRequest = await source.getImageRequest(page: pages[0])
+        let imageRequest = try XCTUnwrap(resolvedImageRequest)
         XCTAssertEqual(imageRequest.url, "https://batcave.biz/uploads/page-one.jpg")
         XCTAssertTrue(imageRequest.headers.isEmpty)
-        XCTAssertNil(source.getImageRequest(page: PageCompat(
+        let invalidImageRequest = await source.getImageRequest(page: PageCompat(
             index: 0,
             imageURL: "file:///private/reader-page.jpg"
-        )))
+        ))
+        XCTAssertNil(invalidImageRequest)
 
         do {
             _ = try await source.getSearchManga(page: 1, query: "   ", filters: [])
@@ -285,6 +287,31 @@ final class PinnedInterpretedSourceTests: XCTestCase {
                 )
             ),
         ])
+    }
+
+    func testPinnedImageRequestsFollowTheConfiguredTransportPolicy() async throws {
+        let page = PageCompat(index: 0, imageURL: "http://images.example/page.jpg")
+
+        let strictSource = try PinnedInterpretedSource.batCave169(
+            apkBytes: corpusAPK(),
+            transport: RoutingTransport(responses: [:]),
+            transportPolicy: CompatHTTPTransportPolicy(allowsInsecureHTTP: false)
+        )
+        XCTAssertFalse(strictSource.transportPolicy.allowsInsecureHTTP)
+        let strictRequest = await strictSource.getImageRequest(page: page)
+        XCTAssertNil(strictRequest)
+
+        let explicitlyInsecureSource = try PinnedInterpretedSource.batCave169(
+            apkBytes: corpusAPK(),
+            transport: RoutingTransport(responses: [:]),
+            transportPolicy: CompatHTTPTransportPolicy(allowsInsecureHTTP: true)
+        )
+        XCTAssertTrue(explicitlyInsecureSource.transportPolicy.allowsInsecureHTTP)
+        let insecureRequest = await explicitlyInsecureSource.getImageRequest(page: page)
+        XCTAssertEqual(
+            insecureRequest?.url,
+            page.imageURL
+        )
     }
 
     func testBatCaveProfileRejectsAPKTamperingBeforeParsing() throws {

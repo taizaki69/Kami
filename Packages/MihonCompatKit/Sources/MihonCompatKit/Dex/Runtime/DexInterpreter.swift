@@ -301,7 +301,7 @@ public final class DexInterpreter {
                 throw VMError.verify("\(context) receiver is not a reference")
             }
             if Self.isNullReference(receiver) {
-                throw DEXThrowable(HostBridge.string("NullPointerException"))
+                throw DEXThrowable(HostBridge.string("NullPointerException: null receiver for \(context)"))
             }
             offset = 1
         }
@@ -674,11 +674,19 @@ public final class DexInterpreter {
         func f32(_ i: Int) -> Float { if case let .float(v) = reg(i) { return v }; return 0 }
         func f64(_ i: Int) -> Double { if case let .double(v) = reg(i) { return v }; return 0 }
         func obj(_ i: Int) throws -> ObjInstance {
-            guard case let .obj(o) = reg(i) else { throw DEXThrowable(HostBridge.string("NullPointerException")) }
+            guard case let .obj(o) = reg(i) else {
+                throw DEXThrowable(HostBridge.string(
+                    "NullPointerException: expected object in \(reference.declaringClass)->\(reference.signature) at pc \(pc)"
+                ))
+            }
             return o
         }
         func arr(_ i: Int) throws -> ArrInstance {
-            guard case let .arr(a) = reg(i) else { throw DEXThrowable(HostBridge.string("NullPointerException")) }
+            guard case let .arr(a) = reg(i) else {
+                throw DEXThrowable(HostBridge.string(
+                    "NullPointerException: expected array in \(reference.declaringClass)->\(reference.signature) at pc \(pc)"
+                ))
+            }
             return a
         }
 
@@ -810,7 +818,9 @@ public final class DexInterpreter {
         case 0x27: // throw vAA
             let value = reg(Int(u[0] >> 8))
             if Self.isNullReference(value) {
-                throw DEXThrowable(HostBridge.string("NullPointerException"))
+                throw DEXThrowable(HostBridge.string(
+                    "NullPointerException: null throw in \(reference.declaringClass)->\(reference.signature) at pc \(pc)"
+                ))
             }
             throw DEXThrowable(value)
 
@@ -904,6 +914,10 @@ public final class DexInterpreter {
                 try ensureClassInitialized(field.declaringClass)
             }
             let key = "\(field.declaringClass)->\(field.name)"
+            trace?(
+                "depth=\(depth) \(reference.declaringClass)->\(reference.signature) "
+                    + "pc=\(pc) static-field=\(key):\(field.type)"
+            )
             if op <= 0x66 {
                 setReg(a, dexStatics[key] ?? bridge.staticFields[key] ?? defaultValue(for: field.type))
             } else if dex.classIndexByDescriptor[field.declaringClass] != nil {
@@ -930,6 +944,7 @@ public final class DexInterpreter {
                 indices: indices,
                 kind: invocationKind,
                 callerDescriptor: def.descriptor,
+                callerIdentity: "\(reference.declaringClass)->\(reference.signature) at pc \(pc)",
                 callerOutsSize: Int(code.outsSize)
             )
             return pc + 3
@@ -950,6 +965,7 @@ public final class DexInterpreter {
                 indices: indices,
                 kind: invocationKind,
                 callerDescriptor: def.descriptor,
+                callerIdentity: "\(reference.declaringClass)->\(reference.signature) at pc \(pc)",
                 callerOutsSize: Int(code.outsSize)
             )
             return pc + 3
@@ -1132,8 +1148,9 @@ public final class DexInterpreter {
     /// Invoke with explicit argument register words. The method prototype, not
     /// the runtime value tags, determines how those words are grouped.
     private func invokeRegs(methodIndex: Int, regs: [RVal], indices: [Int],
-                            kind: DexInvocationKind, callerDescriptor: String,
-                            callerOutsSize: Int) throws {
+                             kind: DexInvocationKind, callerDescriptor: String,
+                             callerIdentity: String,
+                             callerOutsSize: Int) throws {
         guard methodIndex >= 0, methodIndex < dex.methodIds.count else { throw VMError.verify("method index \(methodIndex)") }
         let ref = dex.methodIds[methodIndex]
         let isStaticInvocation = kind.isStatic
@@ -1177,7 +1194,10 @@ public final class DexInterpreter {
         if hasReceiver {
             let receiver = try value(at: 0, descriptor: "Ljava/lang/Object;", label: "receiver")
             if receiver.isNull {
-                throw DEXThrowable(HostBridge.string("NullPointerException"))
+                throw DEXThrowable(HostBridge.string(
+                    "NullPointerException: null receiver for \(ref.declaringClass)->\(ref.signature) "
+                        + "from \(callerIdentity)"
+                ))
             }
             args.append(receiver)
             word = 1

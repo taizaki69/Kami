@@ -32,6 +32,34 @@ final class CompatHTTPRequestTests: XCTestCase {
         return try method(vm, args)
     }
 
+    func testKotlinBoxedIntComparisonMatchesNaturalOrder() throws {
+        let (vm, bridge) = try makeVM()
+        let lower = try invoke(
+            bridge, vm,
+            class: "Lkotlin/coroutines/jvm/internal/Boxing;", "boxInt",
+            prototype: "(I)Ljava/lang/Integer;",
+            isStatic: true,
+            args: [.int(41)]
+        )
+        let higher = try invoke(
+            bridge, vm,
+            class: "Lkotlin/coroutines/jvm/internal/Boxing;", "boxInt",
+            prototype: "(I)Ljava/lang/Integer;",
+            isStatic: true,
+            args: [.int(42)]
+        )
+        let comparison = try invoke(
+            bridge, vm,
+            class: "Ljava/lang/Integer;", "compareTo",
+            prototype: "(Ljava/lang/Object;)I",
+            args: [lower, higher]
+        )
+        guard case let .int(value) = comparison else {
+            return XCTFail("expected Integer.compareTo result")
+        }
+        XCTAssertEqual(value, -1)
+    }
+
     func testHostBridgeBuildsTransportNeutralBoundedRequest() throws {
         let (vm, bridge) = try makeVM()
         let source = RVal.obj(ObjInstance(dexType: "LTestSource;"))
@@ -276,6 +304,12 @@ final class CompatHTTPRequestTests: XCTestCase {
             prototype: "(Ljava/lang/String;)Lokhttp3/HttpUrl;",
             args: [urlCompanion, HostBridge.string("file:///private/secret")]
         ))
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Lokhttp3/HttpUrl$Companion;", "get",
+            prototype: "(Ljava/lang/String;)Lokhttp3/HttpUrl;",
+            args: [urlCompanion, HostBridge.string("https://name:value@example.test/path")]
+        ))
 
         let source = RVal.obj(ObjInstance(dexType: "LTestSource;"))
         let headerBuilder = try invoke(
@@ -305,6 +339,58 @@ final class CompatHTTPRequestTests: XCTestCase {
             args: [formBuilder, HostBridge.string("payload"), HostBridge.string(String(repeating: "x", count: 1_048_577))]
         ))
         XCTAssertNil(bridge.lastPreparedRequest)
+    }
+
+    func testSourceModelBridgeBoundsPageFieldsAndResultCounts() throws {
+        let (vm, bridge) = try makeVM()
+        let pageDescriptor = "Leu/kanade/tachiyomi/source/model/Page;"
+        let oversizedPage = RVal.obj(ObjInstance(dexType: pageDescriptor, isHost: true))
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: pageDescriptor, "<init>",
+            prototype: "(ILjava/lang/String;Ljava/lang/String;Landroid/net/Uri;)V",
+            args: [
+                oversizedPage,
+                .int(0),
+                HostBridge.string(""),
+                HostBridge.string("https://example.test/" + String(repeating: "x", count: 8_193)),
+                .null,
+            ]
+        ))
+
+        let pageValues = (0...2_048).map {
+            HostBridge.pageValue(from: PageCompat(
+                index: $0,
+                imageURL: "https://example.test/page-\($0).jpg"
+            ))
+        }
+        let pageList = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "listOf",
+            prototype: "([Ljava/lang/Object;)Ljava/util/List;",
+            isStatic: true,
+            args: [.arr(ArrInstance(elemDescriptor: "Ljava/lang/Object;", elements: pageValues))]
+        )
+        XCTAssertNil(HostBridge.pagesCompat(from: pageList))
+
+        let mangaValues = (0...2_048).map {
+            HostBridge.mangaValue(from: SMangaCompat(url: "/manga/\($0)", title: "Manga \($0)"))
+        }
+        let mangaList = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "listOf",
+            prototype: "([Ljava/lang/Object;)Ljava/util/List;",
+            isStatic: true,
+            args: [.arr(ArrInstance(elemDescriptor: "Ljava/lang/Object;", elements: mangaValues))]
+        )
+        let mangasPageDescriptor = "Leu/kanade/tachiyomi/source/model/MangasPage;"
+        let mangasPage = RVal.obj(ObjInstance(dexType: mangasPageDescriptor, isHost: true))
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: mangasPageDescriptor, "<init>",
+            prototype: "(Ljava/util/List;Z)V",
+            args: [mangasPage, mangaList, .int(0)]
+        ))
     }
 
     func testURLFormEncoderMatchesJavaUTF8SemanticsAndIsBounded() throws {
@@ -721,6 +807,85 @@ final class CompatHTTPRequestTests: XCTestCase {
             args: [regex, HostBridge.string("chapter-7"), .int(0), .int(0), .null]
         )
         XCTAssertTrue(noMatch.isNull)
+
+        let containsMatch = try invoke(
+            bridge, vm,
+            class: regexDescriptor, "containsMatchIn",
+            prototype: "(Ljava/lang/CharSequence;)Z",
+            args: [regex, HostBridge.string("7-chapter")]
+        )
+        let doesNotContainMatch = try invoke(
+            bridge, vm,
+            class: regexDescriptor, "containsMatchIn",
+            prototype: "(Ljava/lang/CharSequence;)Z",
+            args: [regex, HostBridge.string("chapter-seven")]
+        )
+        guard case let .int(containsMatchValue) = containsMatch,
+              case let .int(doesNotContainMatchValue) = doesNotContainMatch else {
+            return XCTFail("expected Regex.containsMatchIn boolean results")
+        }
+        XCTAssertEqual(containsMatchValue, 1)
+        XCTAssertEqual(doesNotContainMatchValue, 0)
+
+        let ignoreCase = try XCTUnwrap(
+            bridge.staticFields["Lkotlin/text/RegexOption;->IGNORE_CASE"]
+        )
+        let caseInsensitiveRegex = RVal.obj(ObjInstance(dexType: regexDescriptor, isHost: true))
+        _ = try invoke(
+            bridge, vm,
+            class: regexDescriptor, "<init>",
+            prototype: "(Ljava/lang/String;Lkotlin/text/RegexOption;)V",
+            args: [
+                caseInsensitiveRegex,
+                HostBridge.string(#"/(\d+)\.(jpg|png)$"#),
+                ignoreCase,
+            ]
+        )
+        let uppercaseExtension = try invoke(
+            bridge, vm,
+            class: regexDescriptor, "containsMatchIn",
+            prototype: "(Ljava/lang/CharSequence;)Z",
+            args: [caseInsensitiveRegex, HostBridge.string("/42.JPG")]
+        )
+        guard case let .int(uppercaseExtensionValue) = uppercaseExtension else {
+            return XCTFail("expected RegexOption.IGNORE_CASE boolean result")
+        }
+        XCTAssertEqual(uppercaseExtensionValue, 1)
+
+        let uppercaseMatch = try invoke(
+            bridge, vm,
+            class: regexDescriptor, "find$default",
+            prototype: findPrototype,
+            isStatic: true,
+            args: [
+                caseInsensitiveRegex,
+                HostBridge.string("/42.JPG"),
+                .int(0),
+                .int(0),
+                .null,
+            ]
+        )
+        let uppercaseGroups = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/MatchResult;", "getGroupValues",
+            prototype: "()Ljava/util/List;",
+            args: [uppercaseMatch]
+        )
+        let numericGroup = try invoke(
+            bridge, vm,
+            class: "Ljava/util/List;", "get",
+            prototype: "(I)Ljava/lang/Object;",
+            args: [uppercaseGroups, .int(1)]
+        )
+        let extensionGroup = try invoke(
+            bridge, vm,
+            class: "Ljava/util/List;", "get",
+            prototype: "(I)Ljava/lang/Object;",
+            args: [uppercaseGroups, .int(2)]
+        )
+        XCTAssertEqual(vmStringValue(numericGroup), "42")
+        XCTAssertEqual(vmStringValue(extensionGroup), "JPG")
+
         XCTAssertThrowsError(try invoke(
             bridge, vm,
             class: regexDescriptor, "find$default",

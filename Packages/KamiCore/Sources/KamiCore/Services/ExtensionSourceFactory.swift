@@ -10,6 +10,7 @@ public enum ExtensionSourceFactoryError: Error, Equatable, LocalizedError {
     case apkContentMismatch
     case signerIdentityMismatch
     case manifestIdentityMismatch
+    case sourceIdentityMismatch
     case unsupportedProfile(packageName: String, versionName: String)
 
     public var errorDescription: String? {
@@ -24,6 +25,8 @@ public enum ExtensionSourceFactoryError: Error, Equatable, LocalizedError {
             return "The admitted extension signer changed before source construction."
         case .manifestIdentityMismatch:
             return "The admitted extension manifest changed before source construction."
+        case .sourceIdentityMismatch:
+            return "The admitted extension source identities do not match its measured profile."
         case let .unsupportedProfile(packageName, versionName):
             return "Kami does not yet have a measured runtime profile for \(packageName) \(versionName)."
         }
@@ -42,15 +45,18 @@ public struct ExtensionSourceFactory: Sendable {
 
     public func makeSources(
         admission: ExtensionAdmission,
-        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
+        preferences: InterpretedExtensionPreferences = .init()
     ) throws -> [any KamiSource] {
         let apkBytes = try authenticatedBytes(admission: admission)
+        try validateExpectedSourceIDs(admission: admission)
         let sources = try InterpretedExtensionProfileCatalog.makeSources(
             packageName: admission.packageName,
             versionName: admission.versionName,
             versionCode: admission.versionCode,
             apkBytes: apkBytes,
-            transportPolicy: transportPolicy
+            transportPolicy: transportPolicy,
+            preferences: preferences
         )
         return try validate(sources: sources, admission: admission)
     }
@@ -58,15 +64,20 @@ public struct ExtensionSourceFactory: Sendable {
     /// Deterministic source-scoped transport seam for integration tests.
     func makeSources(
         admission: ExtensionAdmission,
-        transport: any CompatHTTPTransport
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
+        preferences: InterpretedExtensionPreferences = .init()
     ) throws -> [any KamiSource] {
         let apkBytes = try authenticatedBytes(admission: admission)
+        try validateExpectedSourceIDs(admission: admission)
         let sources = try InterpretedExtensionProfileCatalog.makeSources(
             packageName: admission.packageName,
             versionName: admission.versionName,
             versionCode: admission.versionCode,
             apkBytes: apkBytes,
-            transport: transport
+            transport: transport,
+            transportPolicy: transportPolicy,
+            preferences: preferences
         )
         return try validate(sources: sources, admission: admission)
     }
@@ -105,16 +116,28 @@ public struct ExtensionSourceFactory: Sendable {
                 versionName: admission.versionName
             )
         }
-        var sourceIDs = Set<Int64>()
-        for source in sources {
-            guard admission.sourceIDs.contains(source.id) else {
-                throw ExtensionAdmissionError.sourceNotDeclared(source.id)
-            }
-            guard sourceIDs.insert(source.id).inserted else {
-                throw ExtensionAdmissionError.sourceNotDeclared(source.id)
-            }
+        let sourceIDs = Set(sources.map(\.id))
+        guard sourceIDs.count == sources.count,
+              sourceIDs == admission.sourceIDs else {
+            throw ExtensionSourceFactoryError.sourceIdentityMismatch
         }
         return sources
+    }
+
+    private func validateExpectedSourceIDs(admission: ExtensionAdmission) throws {
+        guard let expected = InterpretedExtensionProfileCatalog.expectedSourceIDs(
+            packageName: admission.packageName,
+            versionName: admission.versionName,
+            versionCode: admission.versionCode
+        ) else {
+            throw ExtensionSourceFactoryError.unsupportedProfile(
+                packageName: admission.packageName,
+                versionName: admission.versionName
+            )
+        }
+        guard admission.sourceIDs == expected else {
+            throw ExtensionSourceFactoryError.sourceIdentityMismatch
+        }
     }
 
     private static func readAPK(path: String) throws -> [UInt8] {

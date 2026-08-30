@@ -107,6 +107,49 @@ final class ReaderSupportTests: XCTestCase {
             equals: ReaderImagePipelineError.imageTooLarge(limit: 4)
         )
     }
+
+    func testImagePipelineAppliesSourceHTTPPolicyBeforeInjectedTransport() async throws {
+        let transport = RecordingImageTransport(responses: [
+            CompatHTTPResponse(
+                finalURL: "http://cdn.example/page.jpg",
+                statusCode: 200,
+                body: [1, 2, 3]
+            ),
+        ])
+        let pipeline = ReaderImagePipeline(
+            sourceID: "42",
+            maximumImageBytes: 16,
+            maximumCacheBytes: 16,
+            transport: transport,
+            transportPolicy: CompatHTTPTransportPolicy(allowsInsecureHTTP: false)
+        )
+        let request = ImageRequest(
+            url: "http://cdn.example/page.jpg",
+            headers: ["Referer": "http://reader.example"]
+        )
+
+        await XCTAssertThrowsErrorAsync(
+            try await pipeline.data(for: request),
+            equals: CompatHTTPTransportError.disallowedScheme
+        )
+        let rejectedRequests = await transport.recordedRequests()
+        XCTAssertTrue(rejectedRequests.isEmpty)
+
+        let explicitlyInsecurePipeline = ReaderImagePipeline(
+            sourceID: "42",
+            maximumImageBytes: 16,
+            maximumCacheBytes: 16,
+            transport: transport,
+            transportPolicy: CompatHTTPTransportPolicy(allowsInsecureHTTP: true)
+        )
+        _ = try await explicitlyInsecurePipeline.data(for: request)
+        let recorded = await transport.recordedRequests()
+        XCTAssertEqual(recorded.count, 1)
+        XCTAssertEqual(recorded[0].url, request.url)
+        XCTAssertEqual(recorded[0].headers, [
+            CompatHTTPHeader(name: "Referer", value: "http://reader.example"),
+        ])
+    }
 }
 
 private actor RecordingImageTransport: CompatHTTPTransport {

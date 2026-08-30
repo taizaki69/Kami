@@ -6,6 +6,7 @@ import MihonCompatKit
 final class ExtensionSourceFactoryTests: XCTestCase {
     private static let batCaveSourceID: Int64 = 7_422_099_479_605_463_706
     private static let mangaMelonSourceID: Int64 = 7_505_916_148_185_744_347
+    private static let baoziManhuaSourceID: Int64 = 5_724_751_873_601_868_259
     private static let keiyoushiFingerprint =
         "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
 
@@ -74,6 +75,7 @@ final class ExtensionSourceFactoryTests: XCTestCase {
         XCTAssertEqual(source.name, "BatCave")
         XCTAssertEqual(source.language, "en")
         XCTAssertEqual(source.baseURL, "https://batcave.biz")
+        XCTAssertFalse(source.transportPolicy.allowsInsecureHTTP)
 
         try await MainActor.run {
             let registry = SourceRegistry()
@@ -112,6 +114,40 @@ final class ExtensionSourceFactoryTests: XCTestCase {
         XCTAssertEqual(source.getFilterList().count, 2)
     }
 
+    func testFactoryAdmitsExactBaoziProfileThroughRepositoryAdmission() throws {
+        let bytes = try corpus("baozimanhua")
+        let temporary = try temporaryAPK(bytes)
+        defer { try? FileManager.default.removeItem(at: temporary.directory) }
+        let admission = ExtensionAdmission(
+            packageName: "eu.kanade.tachiyomi.extension.zh.baozimanhua",
+            versionName: "1.6.29",
+            versionCode: 29,
+            apkPath: temporary.apk.path,
+            apkSHA256: APKSignatureVerifier.apkSHA256(bytes),
+            signingIdentity: try APKSignatureVerifier().verify(apkBytes: bytes),
+            trustSource: .user(fingerprint: Self.keiyoushiFingerprint),
+            sourceIDs: [Self.baoziManhuaSourceID]
+        )
+
+        let sources = try ExtensionSourceFactory().makeSources(
+            admission: admission,
+            transport: NoNetworkTransport(),
+            preferences: try InterpretedExtensionPreferences(
+                strings: ["BAOZI_BANNER": "0", "CHAPTER_ORDER": "1"],
+                booleans: ["QUICK_PAGES": true, "REMOVE_DUPLICATE_IMAGES": false]
+            )
+        )
+        let source = try XCTUnwrap(sources.first)
+        XCTAssertEqual(sources.count, 1)
+        XCTAssertEqual(source.id, Self.baoziManhuaSourceID)
+        XCTAssertEqual(source.name, "包子漫画")
+        XCTAssertEqual(source.language, "zh")
+        XCTAssertEqual(source.baseURL, "https://cn.baozimh.com")
+        XCTAssertTrue(source.supportsLatest)
+        XCTAssertFalse(source.getFilterList().isEmpty)
+        XCTAssertFalse(source.transportPolicy.allowsInsecureHTTP)
+    }
+
     func testFactoryRejectsFileReplacementBeforeSignatureOrDEXConstruction() throws {
         let bytes = try corpus("batcave")
         let temporary = try temporaryAPK(bytes)
@@ -131,26 +167,36 @@ final class ExtensionSourceFactoryTests: XCTestCase {
         }
     }
 
-    func testFactoryRejectsRuntimeSourceIDMissingFromRepositoryAdmission() throws {
+    func testFactoryRejectsNonExactSourceIDsBeforeProfileConstruction() throws {
         let bytes = try corpus("batcave")
         let temporary = try temporaryAPK(bytes)
         defer { try? FileManager.default.removeItem(at: temporary.directory) }
-        let admission = try admission(
-            apkBytes: bytes,
-            apkURL: temporary.apk,
-            sourceIDs: [123]
+        let nonExactSourceIDSets: [Set<Int64>] = [
+            [123],
+            [Self.batCaveSourceID, 123],
+        ]
+        let profileInvalidPreferences = try InterpretedExtensionPreferences(
+            strings: ["UNSUPPORTED": "value"]
         )
 
-        XCTAssertThrowsError(
-            try ExtensionSourceFactory().makeSources(
-                admission: admission,
-                transport: NoNetworkTransport()
+        for sourceIDs in nonExactSourceIDSets {
+            let invalidAdmission = try admission(
+                apkBytes: bytes,
+                apkURL: temporary.apk,
+                sourceIDs: sourceIDs
             )
-        ) {
-            XCTAssertEqual(
-                $0 as? ExtensionAdmissionError,
-                .sourceNotDeclared(Self.batCaveSourceID)
-            )
+            XCTAssertThrowsError(
+                try ExtensionSourceFactory().makeSources(
+                    admission: invalidAdmission,
+                    transport: NoNetworkTransport(),
+                    preferences: profileInvalidPreferences
+                )
+            ) {
+                XCTAssertEqual(
+                    $0 as? ExtensionSourceFactoryError,
+                    .sourceIdentityMismatch
+                )
+            }
         }
     }
 

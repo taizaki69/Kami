@@ -12,6 +12,7 @@ public enum InterpretedCompatibilityStage: String, CaseIterable, Sendable {
     case search
     case mangaUpdate = "manga-update"
     case pages
+    case imageRequest = "image-request"
 }
 
 /// An exact unsupported interpreter/bridge surface with no request values,

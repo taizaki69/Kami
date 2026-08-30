@@ -39,9 +39,10 @@ MihonCompatKit, never in the app.
 
 ## Key decisions
 
-- **`KamiSource` is the seam.** Native sources and the pinned BatCave, Kawii, and MangaMelon
-  Manga DEX-backed sources implement the same protocol; the registry hides
-  which is which. Future profiles must preserve this boundary.
+- **`KamiSource` is the seam.** Native sources and the pinned BatCave, Kawii,
+  MangaMelon, and Baozi Manhua Manga DEX-backed sources implement the same
+  protocol; the registry hides which is which. Future profiles must preserve
+  this boundary.
   The protocol mirrors tachiyomix semantics (popular/latest/search/details/
   chapters/pages + image requests with headers) so the bridge is 1:1.
 - **Compat kit stays host-portable.** No UIKit/Combine/URLSession-only APIs
@@ -49,12 +50,29 @@ MihonCompatKit, never in the app.
   Windows during development and keeps the parsers unit-testable anywhere.
 - **One database actor.** All persistence goes through `LibraryStore`
   (SQLite, WAL, versioned migrations). Views never see SQL.
-- **Reader images cross one bounded seam.** A source's `ImageRequest` URL and
-  headers enter the source-scoped `ReaderImagePipeline`, which reuses the
-  compatibility transport's validation, redirect, response-stream, and cookie
-  isolation rules. The actor deduplicates in-flight identities and owns a
-  bounded compressed LRU. Apple-specific ImageIO downsampling and decoded-image
-  viewport retention stay in the app layer; UIKit never enters KamiCore.
+- **Reader images cross one bounded seam.** After page-list resolution, the app
+  asynchronously asks the source for one `ImageRequest` per page. The request's
+  URL and headers enter the source-scoped `ReaderImagePipeline`, which reuses
+  the compatibility transport's validation, redirect, response-stream, and
+  cookie isolation rules. The actor deduplicates in-flight identities and owns
+  a bounded compressed LRU. Apple-specific ImageIO downsampling and decoded-
+  image viewport retention stay in the app layer; UIKit never enters KamiCore.
+  Baozi's exact DEX `imageRequest(Page)` URL rewrite is therefore visible to
+  the reader, but the current seam carries only the URL/headers projection: DEX
+  `Request` identity/tags and source OkHttp interceptor execution are not
+  retained or run. Banner cropping, redirect-domain rewriting, and missing-image
+  behavior are not proven through reader loads. `ReaderView` retries chapter
+  loading through a structured `.task(id: reloadID)`; its disappearance cleanup
+  increments the load generation so dismissal invalidates stale completions.
+  Reader image fetching inherits the source's admitted transport policy,
+  defaults to HTTPS-only, validates initial URL/headers before injected or
+  production transport, and permits HTTP only through explicit source opt-in;
+  redirect handling uses the same source-scoped policy.
+- **Source-model values stay bounded at the bridge.** Manga-page and page-list
+  outputs are capped at 2,048 entries, manga updates at 20,000 chapters, and
+  `Page` URL/image-URL fields at 8 KiB. Metadata and source inputs have their
+  own field limits; these are resource bounds rather than a claim of full
+  tachiyomix model fidelity.
 - **Downloaded sources require a persisted capability.** APK v1/v2/v3 signer
   verification runs before manifest/DEX work. `ExtensionAdmissionService`
   binds package, version, APK digest, source IDs, signer history, and the
@@ -71,10 +89,14 @@ MihonCompatKit, never in the app.
   identity/history, user trust (when applicable), and manifest still match.
   `ExtensionSourceFactory` is the only capability consumer: it reads one
   bounded immutable buffer, repeats those checks on the bytes it will execute,
-  selects an exact measured profile, and verifies every runtime source ID was
-  declared by the repository. Measured profiles route stable public source API
-  wrappers from either the generated entry class or its local superclass chain;
-  startup failures and unmeasured profiles are disabled rather than run.
+  preflights the profile's exact source-ID set before DEX construction, selects
+  an exact measured profile, and postvalidates every constructed source ID
+  against that set and the persisted admission. Measured profiles route stable
+  public source API wrappers from either the generated entry class or its local
+  superclass chain; startup failures and unmeasured profiles are disabled
+  rather than run. The raw exact-profile constructors remain a deliberate
+  built-in/test seam: they still reverify exact hash and signer, while the
+  downloaded app path requires persisted admission and this factory.
 - **Structural plans are descriptions, never capabilities.**
   `InterpretedExtensionPlanInspector` performs bounded, deterministic manifest,
   ZIP, and DEX discovery without executing code or establishing signer trust.
@@ -93,10 +115,29 @@ MihonCompatKit, never in the app.
   trust, catalog membership, source-ID authority, or registry access.
 - **Untrusted code boundary.** Extension APKs are data until the interpreter
   runs them; even then they only reach iOS capabilities through explicit
-  bridges (HTTP, preferences, cookies, WebView) with budgets and isolation
-  (EXTENSION_RUNTIME.md M1 guardrails).
+  bridges (HTTP, bounded injected preferences, cookies, WebView) with budgets
+  and isolation (EXTENSION_RUNTIME.md M1 guardrails). Production preference UI
+  and persistence are not wired yet.
 - **xcodegen, not a committed pbxproj.** `project.yml` is the source of
   truth; generated per-machine. Keeps diffs clean and remerges trivial.
+
+## Exact interpreted profile boundary
+
+The executable catalog is deliberately exact rather than heuristic. It
+currently contains BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, and
+Baozi Manhua 1.6.29. Baozi is admitted only when the APK's SHA-256
+(`7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec`), signer
+fingerprint
+(`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`),
+manifest identity, and declared source ID (`5724751873601868259`) match the
+profile and persisted admission capability. Its tested core scope is
+popular/latest/search/details/chapters/pages, one static header plus four
+static `Select` filters, bounded scalar preferences, and its interpreted
+`imageRequest(Page)` URL rewrite. The remaining corpus is measurement evidence,
+not automatic admission or a compatibility percentage. For the downloaded
+path, the exact source-ID set is checked before DEX construction and again after
+profile construction; `SourceRegistry` removal is package-owner scoped, so
+disabling one extension cannot remove another package's source ID.
 
 ## Concurrency model
 - UI: SwiftUI + `@MainActor` observable models.

@@ -10,8 +10,14 @@ final class ReaderImageStore: ObservableObject {
     private var prefetchTask: Task<Void, Never>?
     private var clearTask: Task<Void, Never>?
 
-    init(sourceID: String) {
-        pipeline = ReaderImagePipeline(sourceID: sourceID)
+    init(
+        sourceID: String,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) {
+        pipeline = ReaderImagePipeline(
+            sourceID: sourceID,
+            transportPolicy: transportPolicy
+        )
     }
 
     func data(for request: ImageRequest) async throws -> Data {

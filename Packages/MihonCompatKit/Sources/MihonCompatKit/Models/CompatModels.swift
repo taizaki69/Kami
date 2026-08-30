@@ -200,6 +200,9 @@ public protocol KamiSource: Sendable {
     var language: String { get }
     var supportsLatest: Bool { get }
     var baseURL: String { get }
+    /// Network policy used by both source operations and reader image loads.
+    /// Implementations should opt into insecure HTTP only deliberately.
+    var transportPolicy: CompatHTTPTransportPolicy { get }
 
     func getPopularManga(page: Int) async throws -> MangasPageCompat
     func getLatestUpdates(page: Int) async throws -> MangasPageCompat
@@ -208,7 +211,7 @@ public protocol KamiSource: Sendable {
     func getChapterList(manga: SMangaCompat) async throws -> [SChapterCompat]
     func getMangaUpdate(manga: SMangaCompat) async throws -> SMangaUpdateCompat
     func getPageList(chapter: SChapterCompat) async throws -> [PageCompat]
-    func getImageRequest(page: PageCompat) -> ImageRequest?
+    func getImageRequest(page: PageCompat) async -> ImageRequest?
     func getFilterList() -> [SourceFilter]
 }
 
@@ -224,8 +227,54 @@ public struct ImageRequest: Sendable {
     }
 }
 
+/// Source-scoped scalar preferences exposed to measured interpreted profiles.
+/// The bridge never reads process-global state, and exact profiles decide which
+/// keys and values they accept before DEX construction begins.
+public struct InterpretedExtensionPreferences: Sendable, Equatable {
+    public enum ValidationError: Error, Sendable, Equatable {
+        case tooManyValues
+        case invalidKey
+        case duplicateKey
+        case stringValueTooLarge
+    }
+
+    let strings: [String: String]
+    let booleans: [String: Bool]
+
+    public init() {
+        strings = [:]
+        booleans = [:]
+    }
+
+    public init(
+        strings: [String: String] = [:],
+        booleans: [String: Bool] = [:]
+    ) throws {
+        guard strings.count + booleans.count <= 64 else {
+            throw ValidationError.tooManyValues
+        }
+        let keys = Array(strings.keys) + Array(booleans.keys)
+        guard keys.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 256 }) else {
+            throw ValidationError.invalidKey
+        }
+        guard Set(strings.keys).isDisjoint(with: booleans.keys) else {
+            throw ValidationError.duplicateKey
+        }
+        guard strings.values.allSatisfy({ $0.utf8.count <= 4_096 }) else {
+            throw ValidationError.stringValueTooLarge
+        }
+        self.strings = strings
+        self.booleans = booleans
+    }
+
+    var isEmpty: Bool { strings.isEmpty && booleans.isEmpty }
+}
+
 public extension KamiSource {
     var supportsLatest: Bool { false }
+    var transportPolicy: CompatHTTPTransportPolicy {
+        CompatHTTPTransportPolicy(allowsInsecureHTTP: false)
+    }
     func getLatestUpdates(page: Int) async throws -> MangasPageCompat {
         MangasPageCompat(mangas: [], hasNextPage: false)
     }
@@ -235,7 +284,7 @@ public extension KamiSource {
         let chapters = try await getChapterList(manga: details)
         return SMangaUpdateCompat(manga: details, chapters: chapters)
     }
-    func getImageRequest(page: PageCompat) -> ImageRequest? {
+    func getImageRequest(page: PageCompat) async -> ImageRequest? {
         guard let url = page.imageURL else { return nil }
         return ImageRequest(url: url)
     }

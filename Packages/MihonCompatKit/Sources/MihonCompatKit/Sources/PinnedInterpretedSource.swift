@@ -13,6 +13,7 @@ public enum PinnedInterpretedSourceError: Error, Sendable, Equatable, LocalizedE
     case missingSourceAPIWrapper(profile: String)
     case unsupportedStructure(profile: String)
     case invalidMetadata(profile: String)
+    case invalidPreferences(profile: String)
     case invalidInput(operation: String)
     case unsupportedOperation(String)
     case unexpectedResult(operation: String)
@@ -38,6 +39,8 @@ public enum PinnedInterpretedSourceError: Error, Sendable, Equatable, LocalizedE
             return "Pinned extension \(profile) does not match the bounded structural execution plan."
         case let .invalidMetadata(profile):
             return "Pinned extension \(profile) returned invalid source metadata."
+        case let .invalidPreferences(profile):
+            return "Pinned extension \(profile) received unsupported preference values."
         case let .invalidInput(operation):
             return "The interpreted source rejected invalid input for \(operation)."
         case let .unsupportedOperation(operation):
@@ -59,6 +62,7 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
     public let language: String
     public let supportsLatest: Bool
     public let baseURL: String
+    public let transportPolicy: CompatHTTPTransportPolicy
 
     private let runtime: PinnedInterpretedRuntime
     private let filters: [SourceFilter]
@@ -74,18 +78,25 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
             sourceID: profile.networkIdentity,
             policy: transportPolicy
         )
-        return try Self(profile: profile, apkBytes: apkBytes, transport: transport)
+        return try Self(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
     }
 
     /// Injection seam for deterministic tests and source-scoped custom hosts.
     public static func batCave169(
         apkBytes: [UInt8],
-        transport: any CompatHTTPTransport
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
     ) throws -> Self {
         try Self(
             profile: .batCave169,
             apkBytes: apkBytes,
-            transport: transport
+            transport: transport,
+            transportPolicy: transportPolicy
         )
     }
 
@@ -99,18 +110,25 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
             sourceID: profile.networkIdentity,
             policy: transportPolicy
         )
-        return try Self(profile: profile, apkBytes: apkBytes, transport: transport)
+        return try Self(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
     }
 
     /// Injection seam for deterministic Kawii Manga tests.
     public static func kawiiManga161(
         apkBytes: [UInt8],
-        transport: any CompatHTTPTransport
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
     ) throws -> Self {
         try Self(
             profile: .kawiiManga161,
             apkBytes: apkBytes,
-            transport: transport
+            transport: transport,
+            transportPolicy: transportPolicy
         )
     }
 
@@ -124,25 +142,70 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
             sourceID: profile.networkIdentity,
             policy: transportPolicy
         )
-        return try Self(profile: profile, apkBytes: apkBytes, transport: transport)
+        return try Self(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
     }
 
     /// Injection seam for deterministic MangaMelon tests.
     public static func mangaMelon161(
         apkBytes: [UInt8],
-        transport: any CompatHTTPTransport
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
     ) throws -> Self {
         try Self(
             profile: .mangaMelon161,
             apkBytes: apkBytes,
-            transport: transport
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
+    /// Loads the exact current Baozi Manhua 1.6.29 artifact through production transport.
+    public static func baoziManhua1629(
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
+        preferences: InterpretedExtensionPreferences = .init()
+    ) throws -> Self {
+        let profile = PinnedInterpretedProfile.baoziManhua1629
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: profile.networkIdentity,
+            policy: transportPolicy
+        )
+        return try Self(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy,
+            preferences: preferences
+        )
+    }
+
+    /// Injection seam for deterministic Baozi Manhua tests.
+    public static func baoziManhua1629(
+        apkBytes: [UInt8],
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
+        preferences: InterpretedExtensionPreferences = .init()
+    ) throws -> Self {
+        try Self(
+            profile: .baoziManhua1629,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy,
+            preferences: preferences
         )
     }
 
     fileprivate init(
         profile: PinnedInterpretedProfile,
         apkBytes: [UInt8],
-        transport: any CompatHTTPTransport
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
+        preferences: InterpretedExtensionPreferences = .init()
     ) throws {
         let compatibilityRecorder = InterpretedCompatibilityRecorder(
             packageName: profile.packageName,
@@ -153,6 +216,8 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
             profile: profile,
             apkBytes: apkBytes,
             transport: transport,
+            transportPolicy: transportPolicy,
+            preferences: preferences,
             compatibilityRecorder: compatibilityRecorder
         )
         let metadata = runtime.metadata
@@ -161,6 +226,7 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         self.language = metadata.language
         self.supportsLatest = metadata.supportsLatest
         self.baseURL = metadata.baseURL
+        self.transportPolicy = transportPolicy
         self.runtime = runtime
         self.filters = runtime.filters
         self.compatibilityRecorder = compatibilityRecorder
@@ -212,17 +278,8 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         try await runtime.pages(chapter: chapter)
     }
 
-    public func getImageRequest(page: PageCompat) -> ImageRequest? {
-        guard let rawURL = page.imageURL,
-              rawURL.utf8.count <= 8_192,
-              let components = URLComponents(string: rawURL),
-              components.user == nil,
-              components.password == nil,
-              components.host?.isEmpty == false,
-              let scheme = components.scheme?.lowercased(),
-              scheme == "https" || scheme == "http",
-              components.url != nil else { return nil }
-        return ImageRequest(url: rawURL)
+    public func getImageRequest(page: PageCompat) async -> ImageRequest? {
+        await runtime.imageRequest(page: page)
     }
 
     public func getFilterList() -> [SourceFilter] { filters }
@@ -243,7 +300,8 @@ public enum InterpretedExtensionProfileCatalog {
         versionName: String,
         versionCode: Int64,
         apkBytes: [UInt8],
-        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
+        preferences: InterpretedExtensionPreferences = .init()
     ) throws -> [any KamiSource] {
         guard let profile = profile(
             packageName: packageName,
@@ -258,7 +316,9 @@ public enum InterpretedExtensionProfileCatalog {
         return [try PinnedInterpretedSource(
             profile: profile,
             apkBytes: apkBytes,
-            transport: transport
+            transport: transport,
+            transportPolicy: transportPolicy,
+            preferences: preferences
         )]
     }
 
@@ -269,7 +329,9 @@ public enum InterpretedExtensionProfileCatalog {
         versionName: String,
         versionCode: Int64,
         apkBytes: [UInt8],
-        transport: any CompatHTTPTransport
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
+        preferences: InterpretedExtensionPreferences = .init()
     ) throws -> [any KamiSource] {
         guard let profile = profile(
             packageName: packageName,
@@ -280,7 +342,9 @@ public enum InterpretedExtensionProfileCatalog {
         return [try PinnedInterpretedSource(
             profile: profile,
             apkBytes: apkBytes,
-            transport: transport
+            transport: transport,
+            transportPolicy: transportPolicy,
+            preferences: preferences
         )]
     }
 
@@ -296,6 +360,22 @@ public enum InterpretedExtensionProfileCatalog {
         ) != nil
     }
 
+    /// Exact source identifiers expected from a measured profile. Admission
+    /// callers use this as a pre-Dex gate and must still validate constructed
+    /// metadata afterward as defense in depth.
+    public static func expectedSourceIDs(
+        packageName: String,
+        versionName: String,
+        versionCode: Int64
+    ) -> Set<Int64>? {
+        guard let profile = profile(
+            packageName: packageName,
+            versionName: versionName,
+            versionCode: versionCode
+        ) else { return nil }
+        return [profile.expectedSourceID]
+    }
+
     private static func profile(
         packageName: String,
         versionName: String,
@@ -305,6 +385,7 @@ public enum InterpretedExtensionProfileCatalog {
             .batCave169,
             .kawiiManga161,
             .mangaMelon161,
+            .baoziManhua1629,
         ]
         return profiles.first {
             $0.packageName == packageName &&
@@ -328,6 +409,35 @@ private struct PinnedInterpretedProfile: Sendable {
         case staticList
     }
 
+    enum PreferenceSupport: Sendable {
+        case none
+        case baoziManhua
+
+        func validates(_ preferences: InterpretedExtensionPreferences) -> Bool {
+            switch self {
+            case .none:
+                return preferences.isEmpty
+            case .baoziManhua:
+                let allowedStrings: [String: Set<String>] = [
+                    "BAOZI_BANNER": ["0", "1", "2"],
+                    "CHAPTER_ORDER": ["0", "1", "2"],
+                ]
+                let allowedBooleans: Set<String> = [
+                    "QUICK_PAGES",
+                    "REMOVE_DUPLICATE_IMAGES",
+                ]
+                return preferences.strings.allSatisfy { key, value in
+                    allowedStrings[key]?.contains(value) == true
+                } && Set(preferences.booleans.keys).isSubset(of: allowedBooleans)
+            }
+        }
+    }
+
+    enum ImageRequestSupport: Sendable {
+        case pageURL
+        case interpreted
+    }
+
     let identifier: String
     let sha256: String
     let signerFingerprint: String
@@ -335,7 +445,10 @@ private struct PinnedInterpretedProfile: Sendable {
     let packageName: String
     let versionName: String
     let versionCode: Int64
+    let expectedSourceID: Int64
     let filterSupport: FilterSupport
+    let preferenceSupport: PreferenceSupport
+    let imageRequestSupport: ImageRequestSupport
 
     var networkIdentity: String { "\(packageName)@\(versionName)" }
 
@@ -347,7 +460,10 @@ private struct PinnedInterpretedProfile: Sendable {
         packageName: "eu.kanade.tachiyomi.extension.en.batcave",
         versionName: "1.6.9",
         versionCode: 9,
-        filterSupport: .none
+        expectedSourceID: 7_422_099_479_605_463_706,
+        filterSupport: .none,
+        preferenceSupport: .none,
+        imageRequestSupport: .pageURL
     )
 
     static let kawiiManga161 = PinnedInterpretedProfile(
@@ -358,7 +474,10 @@ private struct PinnedInterpretedProfile: Sendable {
         packageName: "eu.kanade.tachiyomi.extension.ar.kawiimanga",
         versionName: "1.6.1",
         versionCode: 1,
-        filterSupport: .none
+        expectedSourceID: 5_037_404_094_705_788_694,
+        filterSupport: .none,
+        preferenceSupport: .none,
+        imageRequestSupport: .pageURL
     )
 
     static let mangaMelon161 = PinnedInterpretedProfile(
@@ -369,7 +488,24 @@ private struct PinnedInterpretedProfile: Sendable {
         packageName: "eu.kanade.tachiyomi.extension.en.mangamelon",
         versionName: "1.6.1",
         versionCode: 1,
-        filterSupport: .staticList
+        expectedSourceID: 7_505_916_148_185_744_347,
+        filterSupport: .staticList,
+        preferenceSupport: .none,
+        imageRequestSupport: .pageURL
+    )
+
+    static let baoziManhua1629 = PinnedInterpretedProfile(
+        identifier: "baozi-manhua-1.6.29",
+        sha256: "7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+        maximumAPKBytes: 64 * 1024 * 1024,
+        packageName: "eu.kanade.tachiyomi.extension.zh.baozimanhua",
+        versionName: "1.6.29",
+        versionCode: 29,
+        expectedSourceID: 5_724_751_873_601_868_259,
+        filterSupport: .staticList,
+        preferenceSupport: .baoziManhua,
+        imageRequestSupport: .interpreted
     )
 }
 
@@ -383,6 +519,7 @@ private actor PinnedInterpretedRuntime {
     }
 
     private let profile: PinnedInterpretedProfile
+    private let transportPolicy: CompatHTTPTransportPolicy
     private let vm: DexInterpreter
     private let receiver: RVal
     private let entryClassDescriptor: String
@@ -397,8 +534,13 @@ private actor PinnedInterpretedRuntime {
         profile: PinnedInterpretedProfile,
         apkBytes: [UInt8],
         transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy,
+        preferences: InterpretedExtensionPreferences,
         compatibilityRecorder: InterpretedCompatibilityRecorder
     ) throws {
+        guard profile.preferenceSupport.validates(preferences) else {
+            throw PinnedInterpretedSourceError.invalidPreferences(profile: profile.identifier)
+        }
         guard !apkBytes.isEmpty, apkBytes.count <= profile.maximumAPKBytes else {
             throw PinnedInterpretedSourceError.invalidAPKSize(profile: profile.identifier)
         }
@@ -448,9 +590,20 @@ private actor PinnedInterpretedRuntime {
         let entryClassDescriptor = plan.entryClassDescriptor
         let sourceAPIWrapperDescriptor = plan.sourceAPIWrapperDescriptor
 
+        let extensionPackageName: String?
+        switch profile.preferenceSupport {
+        case .none:
+            extensionPackageName = nil
+        case .baoziManhua:
+            extensionPackageName = profile.packageName
+        }
         let vm = DexInterpreter(
             dex: dex,
-            bridge: HostBridge.minimal(transport: transport),
+            bridge: HostBridge.minimal(
+                transport: transport,
+                extensionPackageName: extensionPackageName,
+                preferences: preferences
+            ),
             cancelled: { Task.isCancelled }
         )
         let receiver = try vm.instantiate(classDescriptor: entryClassDescriptor)
@@ -507,7 +660,7 @@ private actor PinnedInterpretedRuntime {
             filters = converted
         }
         guard case let .long(id) = idValue,
-              id > 0,
+              id == profile.expectedSourceID,
               case let .int(rawSupportsLatest) = supportsLatestValue,
               rawSupportsLatest == 0 || rawSupportsLatest == 1,
               Self.validMetadata(name: name, language: language, baseURL: baseURL) else {
@@ -515,6 +668,7 @@ private actor PinnedInterpretedRuntime {
         }
 
         self.profile = profile
+        self.transportPolicy = transportPolicy
         self.vm = vm
         self.receiver = receiver
         self.entryClassDescriptor = entryClassDescriptor
@@ -676,6 +830,45 @@ private actor PinnedInterpretedRuntime {
         }
     }
 
+    func imageRequest(page: PageCompat) async -> ImageRequest? {
+        guard page.url.utf8.count <= 8_192,
+              (page.imageURL?.utf8.count ?? 0) <= 8_192 else { return nil }
+        switch profile.imageRequestSupport {
+        case .pageURL:
+            return Self.pageURLImageRequest(page, policy: transportPolicy)
+        case .interpreted:
+            do {
+                try await acquire()
+                defer { release() }
+                try Task.checkCancellation()
+                let result = try vm.call(
+                    classDescriptor: entryClassDescriptor,
+                    method: "imageRequest",
+                    prototype: "(Leu/kanade/tachiyomi/source/model/Page;)Lokhttp3/Request;",
+                    args: [receiver, HostBridge.pageValue(from: page)]
+                )
+                try Task.checkCancellation()
+                guard let request = HostBridge.imageRequest(from: result) else {
+                    throw PinnedInterpretedSourceError.unexpectedResult(
+                        operation: "image request"
+                    )
+                }
+                return Self.validatedImageRequest(request, policy: transportPolicy)
+            } catch is CancellationError {
+                return nil
+            } catch let error as VMError {
+                if case .cancelled = error { return nil }
+                if Task.isCancelled { return nil }
+                compatibilityRecorder.record(stage: .imageRequest, error: error)
+                return nil
+            } catch {
+                if Task.isCancelled { return nil }
+                compatibilityRecorder.record(stage: .imageRequest, error: error)
+                return nil
+            }
+        }
+    }
+
     private func acquire() async throws {
         try Task.checkCancellation()
         if !executing {
@@ -725,6 +918,37 @@ private actor PinnedInterpretedRuntime {
             throw PinnedInterpretedSourceError.invalidInput(operation: operation)
         }
         return page
+    }
+
+    private static func pageURLImageRequest(
+        _ page: PageCompat,
+        policy: CompatHTTPTransportPolicy
+    ) -> ImageRequest? {
+        guard let rawURL = page.imageURL else { return nil }
+        return validatedImageRequest(ImageRequest(url: rawURL), policy: policy)
+    }
+
+    private static func validatedImageRequest(
+        _ request: ImageRequest,
+        policy: CompatHTTPTransportPolicy
+    ) -> ImageRequest? {
+        guard request.headers.count <= 128 else { return nil }
+        let compatRequest = CompatHTTPRequest(
+            url: request.url,
+            method: "GET",
+            headers: request.headers
+                .sorted { lhs, rhs in
+                    if lhs.key != rhs.key { return lhs.key < rhs.key }
+                    return lhs.value < rhs.value
+                }
+                .map { CompatHTTPHeader(name: $0.key, value: $0.value) }
+        )
+        do {
+            try policy.validate(request: compatRequest)
+            return request
+        } catch {
+            return nil
+        }
     }
 
     private static func metadataString(

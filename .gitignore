@@ -8,6 +8,7 @@ Tests/corpus/**/*.apk
 !Tests/corpus/batcave.apk
 !Tests/corpus/kawiimanga.apk
 !Tests/corpus/mangamelon.apk
+!Tests/corpus/baozimanhua.apk
 !Tests/corpus/measurement/hayalistic.apk
 !Tests/corpus/measurement/eternalmangas.apk
 !Tests/corpus/measurement/mangapandaonl.apk
@@ -16,7 +17,6 @@ Tests/corpus/**/*.apk
 !Tests/corpus/measurement/foolslidecustomizable.apk
 !Tests/corpus/measurement/doctruyen3q.apk
 !Tests/corpus/measurement/readmanga.apk
-!Tests/corpus/measurement/baozimanhua.apk
 !Tests/corpus/measurement/sssscanlator.apk
 !Tests/corpus/measurement/komikcast.apk
 !Tests/corpus/measurement/pixivcomic.apk

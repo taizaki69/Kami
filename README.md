@@ -18,8 +18,9 @@ and constructor state, resolved reference assignability and joins, and resolved
 catch types. Runtime dispatch resolves virtual overrides, lexical
 `invoke-super`, and maximally specific interface defaults across the parsed DEX
 class graph while leaving incomplete external graphs explicitly unresolved.
-Pinned real-APK tests execute the Akuma, MangaDex, BatCave, Kawii Manga, and
-MangaMelon entry constructors plus BatCave's `getBaseUrl`, `getLang`, `getName`, and `getId`
+Pinned real-APK tests execute the Akuma, MangaDex, BatCave, Kawii Manga,
+MangaMelon, and Baozi Manhua entry constructors plus BatCave's `getBaseUrl`,
+`getLang`, `getName`, and `getId`
 methods. BatCave's real popular-manga path now runs through Kotlin class
 initialization, filters, collections, iteration, coroutine setup, and a bounded
 OkHttp model. It constructs the exact BatCave popular POST request, crosses an
@@ -68,22 +69,38 @@ proves default-inclusive generated JSON encoding, bounded UTF-8/Okio/Base64
 form bodies, structured coroutine lambdas, long decoding, stable comparator
 sorting, string-valued chapter memo JSON, and deterministic page ordering.
 
-The corpus now also locks 16 current lib 1.6 Keiyoushi APKs under
-`Tests/corpus/measurement/` for measurement only. Together with the five
-existing execution fixtures and six AOSP apksig conformance fixtures, the lock
-contains 27 artifacts; 19 are current lib 1.6 artifacts (three existing
-execution fixtures plus the 16 measurement fixtures). The measurement set is
-behavior-stratified, not a statistical sample, and occupies 1.24 MB
-(1,242,086 bytes). A deterministic static run analyzed all 16 measurement APKs
-with zero errors, found 12 structural candidates and four stable-wrapper
+The fourth exact profile is Baozi Manhua 1.6.29
+(`eu.kanade.tachiyomi.extension.zh.baozimanhua`, version code 29). Admission
+is pinned to SHA-256
+`7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec`, signer
+fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, the
+authenticated manifest, and source ID `5724751873601868259`. Its deterministic
+fake-transport regression covers construction, popular/latest/text search,
+combined details and chapters, pages, and the exact static filter schema (one
+header plus four `Select` filters), including a valid non-default tag selection
+that reaches a distinct filtered request. The bounded scalar preference bridge accepts
+`BAOZI_BANNER`/`CHAPTER_ORDER` values `0`–`2` and
+`QUICK_PAGES`/`REMOVE_DUPLICATE_IMAGES` booleans. Its DEX `imageRequest(Page)`
+rewrite is proven to change the fixture's `static.baozicdn.com` host to
+`static.baozimh.com` without network I/O, and `ReaderView` now resolves each
+page request asynchronously before passing its URL/headers to the image
+pipeline.
+
+The corpus now also locks 15 current lib 1.6 Keiyoushi APKs under
+`Tests/corpus/measurement/` for measurement only. Together with the six
+execution fixtures and six AOSP apksig conformance fixtures, the lock contains
+27 artifacts; 19 are current lib 1.6 artifacts (four execution fixtures plus
+the 15 measurement fixtures). The measurement set is behavior-stratified, not a
+statistical sample. The pre-promotion 16-artifact set occupied 1.24 MB
+(1,242,086 bytes); its static run analyzed all 16 measurement
+APKs with zero errors, found 12 structural candidates and four stable-wrapper
 blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), and reported 626 unique
-unregistered external method surfaces with zero unsupported opcodes. These
-artifacts are parsed, signature-verified for parser conformance, and statically
-audited only: membership never grants signer trust, admission, installation, or
-execution. Baozi Manhua 1.6.29 is the selected next fourth-profile target
-because it is current, catalog-labeled `safe`, and a structural-plan candidate
-that exercises preferences and a custom `imageRequest`; no execution is claimed
-for it yet.
+unregistered external method surfaces with zero unsupported opcodes. The
+remaining 15 measurement artifacts continue to be parsed and statically
+audited only; membership never grants signer trust, admission, installation,
+execution, or compatibility proof. The preceding aggregate is historical to
+the 16-artifact measurement role and is not a compatibility rate.
 
 A bounded APK verifier now authenticates v2, v3/v3.1, and a conservative v1
 fallback, including signed content digests, X.509 signer keys, v3 certificate
@@ -91,6 +108,9 @@ rotation, and signature-stripping protection. KamiCore binds the verified
 package/version/APK hash and signer history to persisted repository or explicit
 user trust; downgrades, same-version byte replacement, unrelated signers, and
 unadmitted source IDs are rejected before downloaded-source registration.
+The signer regression includes all six real Keiyoushi execution APKs (Akuma,
+MangaDex, BatCave, Kawii Manga, MangaMelon, and Baozi Manhua); the tiny AOSP
+fixtures are separate signature-conformance inputs.
 
 The app now completes that trust path: it persists extension repositories and
 content-addressed APKs, automatically uses a repository's pinned signing key,
@@ -101,14 +121,30 @@ manifest. The only APK-to-`KamiSource` factory consumes that restored admission,
 re-authenticates the exact immutable buffer it executes, and refuses undeclared
 source IDs or unsupported profiles. Enabled downloaded sources appear beside
 the native MangaDex source in Browse.
+For a downloaded profile, the factory compares the admission's exact source-ID
+set with the catalog before DEX construction and postvalidates the IDs returned
+by the constructed source. `SourceRegistry` removes downloaded IDs only when
+their recorded package owner matches the disabling package, and never removes
+protected native IDs. The exact raw-byte profile constructors are a deliberate
+built-in/test seam: they still reverify the profile's exact hash and signer, but
+the downloaded app path requires persisted admission and this factory.
+
+The compatibility host bounds source-model outputs before they cross the
+app-facing seam: manga-page and page-list collections are capped at 2,048
+entries, a manga update at 20,000 chapters, and `Page` URL/image-URL fields at
+8 KiB. Metadata and source inputs have their own field limits; these are bounds,
+not a claim of unrestricted model fidelity.
 
 The first reusable profile-discovery seam is now shared by that exact runtime
 and `compat-audit plan`. Without executing DEX or granting trust, the bounded
 inspector either produces a deterministic lib 1.6 structural plan or explicit
 blockers for manifest identity, factories, DEX layout, native `.so` entries,
-entry-class placement, and stable public wrappers. The three current profiles
+entry-class placement, and stable public wrappers. The four current profiles
 produce the same plans on repeated inspection; the two legacy lib 1.4 corpus
-artifacts are reported unsupported instead of guessed. A structural plan is
+artifacts are reported unsupported instead of guessed. The remaining 15
+measurement APKs produce 11 structural candidates and four stable-wrapper
+blockers, with 563 unique unregistered external method surfaces and zero
+unsupported opcodes. A structural plan is
 only a description: it is not signer authentication, catalog admission, or
 proof that an extension's operations will execute.
 
@@ -143,15 +179,34 @@ webtoon pages release decoded images outside the lazy viewport. Runtime-to-
 reader cookie continuity, dual-page spreads, and physical-device performance
 profiling remain open; see `docs/READER.md`.
 
-This is still not a claim of broad extension execution: Kami can identify a
-bounded structural candidate, but the runtime profile catalog currently
-recognizes only the exact measured BatCave 1.6.9, Kawii Manga 1.6.1, and
-MangaMelon 1.6.1 builds. The broader 16-APK current-lib-1.6 corpus is a
-non-executing measurement set, not an admitted profile catalog. Automatic
-profile admission beyond that exact catalog, dynamic/network-backed filter
-lists, preferences, a measured extension-defined custom image-request override,
-and much of the Kotlin/Java surface remain open (`docs/EXTENSION_RUNTIME.md`).
-Kami starts
+Chapter retry is driven by a structured `.task(id: reloadID)`; changing the
+reload ID restarts the chapter load. Dismissing the reader runs its disappearance
+cleanup, increments the load generation, and prevents an in-flight page list or
+image-request resolution from publishing stale state. Per-page image retry is
+still deferred from regenerating an `ImageRequest` or defining request expiry.
+
+For Baozi, `ReaderView` first resolves each page's exact DEX-backed
+`ImageRequest` asynchronously; the image pipeline then receives its URL and
+headers. The pipeline currently drops DEX `Request` identity/tags and does not
+run source OkHttp interceptors, so source-defined banner cropping,
+redirect-domain rewriting, and missing-image handling are not proven through
+reader image loads.
+Reader image fetching now inherits the source's admitted transport policy. It
+is HTTPS-only by default, validates the initial URL and headers before even an
+injected transport sees them, and permits plain HTTP only when that source was
+explicitly configured for it; the same policy continues to govern redirects.
+
+This is still not a claim of broad extension execution: the runtime profile
+catalog recognizes only the exact measured BatCave 1.6.9, Kawii Manga 1.6.1,
+MangaMelon 1.6.1, and Baozi Manhua 1.6.29 builds. The remaining current-lib-1.6
+corpus is a non-executing measurement set, not an admitted profile catalog.
+Automatic profile admission beyond that exact catalog, dynamic/network-backed
+filter lists, and much of the Kotlin/Java surface remain open
+(`docs/EXTENSION_RUNTIME.md`). Baozi's bounded preferences are accepted by the
+profile, but production preference UI/persistence is not wired. The APK's
+OkHttp source interceptors and DEX `Request` tags are not executed by the
+current await/reader path, so banner cropping, redirect-domain rewriting, and
+missing-image behavior are not proven through reader image loads. Kami starts
 with native MangaDex and can additionally restore a supported, authenticated
 downloaded source.
 
@@ -185,11 +240,13 @@ security boundaries, and the recommended next implementation sequence.
 
 ## Verified on Windows too
 
-The compatibility kit and all 192 tests run locally on Windows with Swift 6.3,
-including the three corpus-lock regressions, together with 12 portable KamiCore
-tests (`scripts/windows_dev_test.bat`). Exact corpus head `a376064` passes
+The compatibility kit runs locally on Windows with Swift 6.3 through
+`scripts/windows_dev_test.bat`, including the Baozi real-APK regressions and
+portable KamiCore coverage; the current local `MihonCompatKit` suite passes
+207/207 with the corpus present, and the current portable KamiCore suite passes
+14/14. The preceding exact corpus head `a376064` passes
 [Swift CI](https://github.com/taizaki69/Kami/actions/runs/33279595763) with all
-27 fixtures, 192 MihonCompatKit tests, 23 KamiCore tests, and the optimized CLI;
+27 fixtures, the prior 192 MihonCompatKit tests, 23 KamiCore tests, and the optimized CLI;
 [iOS Build](https://github.com/taizaki69/Kami/actions/runs/33279595816) for both
 simulator and unsigned device; and
 [IPA Package](https://github.com/taizaki69/Kami/actions/runs/33279595746) with

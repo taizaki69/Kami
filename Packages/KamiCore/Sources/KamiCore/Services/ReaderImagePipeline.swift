@@ -35,6 +35,7 @@ public actor ReaderImagePipeline {
     }
 
     private let transport: any CompatHTTPTransport
+    private let transportPolicy: CompatHTTPTransportPolicy
     private let maximumImageBytes: Int
     private let maximumCacheBytes: Int
     private var cache: [String: CacheEntry] = [:]
@@ -46,23 +47,26 @@ public actor ReaderImagePipeline {
         sourceID: String,
         maximumImageBytes: Int = 32 * 1024 * 1024,
         maximumCacheBytes: Int = 64 * 1024 * 1024,
-        transport: (any CompatHTTPTransport)? = nil
+        transport: (any CompatHTTPTransport)? = nil,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
     ) {
         let imageLimit = max(1, min(maximumImageBytes, 128 * 1024 * 1024))
         self.maximumImageBytes = imageLimit
         self.maximumCacheBytes = max(1, min(maximumCacheBytes, 256 * 1024 * 1024))
+        let imageTransportPolicy = CompatHTTPTransportPolicy(
+            requestTimeoutSeconds: min(45, transportPolicy.requestTimeoutSeconds),
+            maximumRedirects: transportPolicy.maximumRedirects,
+            maximumRequestHeaderBytes: transportPolicy.maximumRequestHeaderBytes,
+            maximumRequestBodyBytes: 1,
+            maximumResponseHeaderBytes: transportPolicy.maximumResponseHeaderBytes,
+            maximumResponseBodyBytes: imageLimit,
+            allowsInsecureHTTP: transportPolicy.allowsInsecureHTTP,
+            allowsHTTPSDowngrade: transportPolicy.allowsHTTPSDowngrade
+        )
+        self.transportPolicy = imageTransportPolicy
         self.transport = transport ?? URLSessionCompatHTTPTransport(
             sourceID: "reader:\(sourceID)",
-            policy: CompatHTTPTransportPolicy(
-                requestTimeoutSeconds: 45,
-                maximumRedirects: 5,
-                maximumRequestHeaderBytes: 64 * 1024,
-                maximumRequestBodyBytes: 1,
-                maximumResponseHeaderBytes: 64 * 1024,
-                maximumResponseBodyBytes: imageLimit,
-                allowsInsecureHTTP: true,
-                allowsHTTPSDowngrade: false
-            )
+            policy: imageTransportPolicy
         )
     }
 
@@ -88,6 +92,7 @@ public actor ReaderImagePipeline {
                 }
                 .map { CompatHTTPHeader(name: $0.key, value: $0.value) }
         )
+        try transportPolicy.validate(request: request)
         let transport = self.transport
         let maximumImageBytes = self.maximumImageBytes
         let requestID = UUID()

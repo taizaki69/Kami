@@ -89,6 +89,7 @@ mangadex|https://github.com/keiyoushi/extensions/releases/download/01cba61/tachi
 batcave|https://github.com/keiyoushi/extensions/releases/download/a18924b/tachiyomi-en.batcave-v1.6.9.apk|f5338a90f9b9b40c27a2106ceb1e0c94713c38208998fd735bfabda18934fab6
 kawiimanga|https://github.com/keiyoushi/extensions/releases/download/a76c957-0/tachiyomi-ar.kawiimanga-v1.6.1.apk|9e6110b8d1946180e948d3a890347529a5889e636ca6a001170cd206f74dd52a
 mangamelon|https://github.com/keiyoushi/extensions/releases/download/808890d/tachiyomi-en.mangamelon-v1.6.1.apk|aedbd5ba3e3a092a381779f0e6ed610e630799070c1f032c5668f7455970d9aa
+baozimanhua|https://github.com/keiyoushi/extensions/releases/download/4277105/tachiyomi-zh.baozimanhua-v1.6.29.apk|7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec
 measurement/hayalistic|https://github.com/keiyoushi/extensions/releases/download/66535bd/tachiyomi-tr.hayalistic-v1.6.59.apk|57ebc2b3f9c0e2add4b8d1fe38069d2d216f9ee40f434653319da6284a47334c
 measurement/eternalmangas|https://github.com/keiyoushi/extensions/releases/download/a76c957-1/tachiyomi-es.eternalmangas-v1.6.28.apk|6325059f3d45e2b727268cdae936f7bcb08f914c5852b40c9e7bd736e0b78be6
 measurement/mangapandaonl|https://github.com/keiyoushi/extensions/releases/download/a76c957-0/tachiyomi-en.mangapandaonl-v1.6.36.apk|00ba5d0cfd65132b6feffee60b7c8d5eca23c4ce4bd5687c7908e6c9f15a3166
@@ -97,7 +98,6 @@ measurement/nhentaixxx|https://github.com/keiyoushi/extensions/releases/download
 measurement/foolslidecustomizable|https://github.com/keiyoushi/extensions/releases/download/a76c957-0/tachiyomi-all.foolslidecustomizable-v1.6.6.apk|d45b6d44760cb0465cc7be317d6d1b899c778bb9d7c02d03fb6c2c141dfa137e
 measurement/doctruyen3q|https://github.com/keiyoushi/extensions/releases/download/a18924b/tachiyomi-vi.doctruyen3q-v1.6.38.apk|3fe67ce34b42c4cb7b193a9536a27ae1b3f41805a866489e82797f56aad4c0a0
 measurement/readmanga|https://github.com/keiyoushi/extensions/releases/download/a76c957-2/tachiyomi-ru.readmanga-v1.6.89.apk|c19c626ca9e34e113ab871aadfe19566a441669644f77a38793a0dd5dab7a00a
-measurement/baozimanhua|https://github.com/keiyoushi/extensions/releases/download/4277105/tachiyomi-zh.baozimanhua-v1.6.29.apk|7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec
 measurement/sssscanlator|https://github.com/keiyoushi/extensions/releases/download/4277105/tachiyomi-pt.sssscanlator-v1.6.59.apk|2d7dfad2d4d293c58414b8905c6bcf454bcfb1a2bb6650a50d7480b0b9597883
 measurement/komikcast|https://github.com/keiyoushi/extensions/releases/download/01cba61/tachiyomi-id.komikcast-v1.6.83.apk|9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac
 measurement/pixivcomic|https://github.com/keiyoushi/extensions/releases/download/acab221/tachiyomi-ja.pixivcomic-v1.6.4.apk|86efecdc38f5aca875da0abd5e6f2a8449ca3b06682a3c81f262fab787bb3d71

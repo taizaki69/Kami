@@ -17,12 +17,22 @@
 - Each page has an independent loading/error state and retry action. Reader
   chrome shows chapter title and exact page progress; a compact progress badge
   remains when chrome is hidden.
+- Chapter retry increments a reload identity consumed by a structured
+  `.task(id: reloadID)`, so the chapter page list and per-page requests restart
+  as one cancellable load. Reader dismissal runs disappearance cleanup, which
+  increments the load generation; stale page-list or image-request completions
+  are ignored.
 
 ## Image request and memory boundary
 
-- Visible loads and prefetches consume the source's exact `ImageRequest` URL
-  and headers. This replaces `AsyncImage`, which could not honor source-provided
-  Referer, User-Agent, or authentication headers.
+- After page-list resolution, `ReaderView` asynchronously asks the source for
+  one exact `ImageRequest` per page. Visible loads and prefetches consume that
+  request's URL and headers. This replaces `AsyncImage`, which could not honor
+  source-provided Referer, User-Agent, or authentication headers.
+- Baozi Manhua 1.6.29 is the current custom-request regression: its real DEX
+  `imageRequest(Page)` rewrites the fixture URL from
+  `static.baozicdn.com` to `static.baozimh.com` without network I/O, and the
+  reader receives the resulting URL/headers projection.
 - `ReaderImagePipeline` is source-scoped and actor-isolated. Production loads
   reuse the compatibility transport's deterministic header validation,
   five-redirect limit, HTTPS-downgrade rejection, streamed 32 MiB response
@@ -44,6 +54,24 @@ inherit cookies established by the extension runtime while resolving the page
 list. Extensions that need that continuity remain a measured compatibility gap,
 even though explicit image-request headers are now honored correctly.
 
+Reader image fetching inherits the source's admitted transport policy. It is
+HTTPS-only by default, validates each initial URL and its headers before even an
+injected transport sees them, and accepts `http://` only when that source was
+explicitly configured for insecure HTTP. Redirect handling uses the same
+source-scoped policy, while reader-specific response-size limits stay separate.
+
+The reader image seam currently receives only URL/headers. It does not retain
+DEX `Request` identity or tags, and the await path does not execute source
+OkHttp interceptors. Baozi banner cropping, redirect-domain rewriting, and
+missing-image handling are therefore not executed or proven through reader
+image loads; URLSession's own redirect handling does not establish those
+interceptor semantics.
+
+Per-page image retry currently restarts the image task with the same resolved
+`ImageRequest`; it does not regenerate the request from the source or define
+expiry/credential-refresh behavior. Retry-time request regeneration and expiry
+semantics are explicitly deferred.
+
 ## Tracked next
 
 1. Previous/next chapter navigation, end-of-chapter behavior, and configurable
@@ -54,6 +82,8 @@ even though explicit image-request headers are now honored correctly.
 4. Memory-pressure-driven cache purging, long-image tiling, and integration
    with the future persistent download/disk cache.
 5. Share source cookies safely between interpreted requests and reader images;
-   add a real extension fixture proving a custom image request and continuity.
+   then run a bounded source interceptor/tag chain through the reader seam.
+   Add image-transform regressions only after the chain preserves request
+   identity and response semantics.
 6. Physical-device profiling and accessibility testing, including 500-page
    webtoon chapters, rotation, VoiceOver labels, and interrupted/retried loads.

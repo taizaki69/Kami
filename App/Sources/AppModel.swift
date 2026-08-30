@@ -177,7 +177,10 @@ final class AppModel: ObservableObject {
                 }
             } else {
                 try await store.setExtensionEnabled(false, packageName: packageName)
-                registry.removeDownloaded(sourceIDs: installed.sourceIDs)
+                registry.removeDownloaded(
+                    sourceIDs: installed.sourceIDs,
+                    packageName: installed.packageName
+                )
                 sourceGeneration &+= 1
             }
             await reloadInstalledExtensions()

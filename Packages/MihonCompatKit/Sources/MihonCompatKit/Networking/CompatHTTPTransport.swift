@@ -48,6 +48,20 @@ public struct CompatHTTPTransportPolicy: Sendable, Equatable {
         self.allowsInsecureHTTP = allowsInsecureHTTP
         self.allowsHTTPSDowngrade = allowsHTTPSDowngrade
     }
+
+    /// Validates a transport-neutral request against this source policy
+    /// without performing network I/O. Reader and other app-facing seams use
+    /// this before calling an injected transport, so a test transport cannot
+    /// accidentally bypass URL, header, or scheme checks.
+    public func validate(request: CompatHTTPRequest) throws {
+        var headerNames = Set<String>()
+        for header in request.headers {
+            guard headerNames.insert(header.name.lowercased()).inserted else {
+                throw CompatHTTPTransportError.invalidHeader
+            }
+        }
+        _ = try CompatHTTPRequestEncoder.encode(request, policy: self)
+    }
 }
 
 /// Async injection seam used by interpreted sources. A transport instance is

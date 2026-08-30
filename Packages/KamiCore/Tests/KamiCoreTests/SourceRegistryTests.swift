@@ -73,6 +73,7 @@ final class SourceRegistryTests: XCTestCase {
         let bytes = try corpusAPK()
         let identity = try APKSignatureVerifier().verify(apkBytes: bytes)
         let downloadedID: Int64 = 777
+        let otherDownloadedID: Int64 = 778
         let admission = ExtensionAdmission(
             packageName: "example.downloaded",
             versionName: "1.0",
@@ -82,6 +83,16 @@ final class SourceRegistryTests: XCTestCase {
             signingIdentity: identity,
             trustSource: .user(fingerprint: identity.signers[0].currentFingerprint),
             sourceIDs: [downloadedID]
+        )
+        let otherAdmission = ExtensionAdmission(
+            packageName: "example.other",
+            versionName: "1.0",
+            versionCode: 1,
+            apkPath: admission.apkPath,
+            apkSHA256: admission.apkSHA256,
+            signingIdentity: admission.signingIdentity,
+            trustSource: admission.trustSource,
+            sourceIDs: [otherDownloadedID]
         )
 
         try await MainActor.run {
@@ -99,10 +110,42 @@ final class SourceRegistryTests: XCTestCase {
                 registry.origin(of: downloadedID),
                 .downloadedExtension(packageName: admission.packageName)
             )
+            try registry.addDownloaded(
+                DummySource(id: otherDownloadedID, name: "Other runtime"),
+                admission: otherAdmission
+            )
 
-            registry.removeDownloaded(sourceIDs: admission.sourceIDs)
+            registry.removeDownloaded(
+                sourceIDs: [downloadedID, otherDownloadedID],
+                packageName: admission.packageName
+            )
             XCTAssertNil(registry.source(id: downloadedID))
             XCTAssertNil(registry.origin(of: downloadedID))
+            XCTAssertEqual(registry.source(id: otherDownloadedID)?.name, "Other runtime")
+            XCTAssertEqual(
+                registry.origin(of: otherDownloadedID),
+                .downloadedExtension(packageName: otherAdmission.packageName)
+            )
+
+            let hijack = ExtensionAdmission(
+                packageName: admission.packageName,
+                versionName: admission.versionName,
+                versionCode: admission.versionCode,
+                apkPath: admission.apkPath,
+                apkSHA256: admission.apkSHA256,
+                signingIdentity: admission.signingIdentity,
+                trustSource: admission.trustSource,
+                sourceIDs: [otherDownloadedID]
+            )
+            XCTAssertThrowsError(try registry.addDownloaded(
+                DummySource(id: otherDownloadedID, name: "Hijacked runtime"),
+                admission: hijack
+            )) {
+                XCTAssertEqual(
+                    $0 as? ExtensionAdmissionError,
+                    .sourceIDCollision(otherDownloadedID)
+                )
+            }
 
             let native = try XCTUnwrap(registry.sources.first)
             let collision = ExtensionAdmission(

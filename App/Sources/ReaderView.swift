@@ -23,6 +23,7 @@ struct ReaderView: View {
 
     @StateObject private var imageStore: ReaderImageStore
     @State private var pages: [PageCompat] = []
+    @State private var imageRequests: [ImageRequest?] = []
     @State private var currentIndex = 0
     @State private var errorText: String?
     @State private var loading = true
@@ -30,6 +31,7 @@ struct ReaderView: View {
     @State private var chromeVisible = true
     @State private var previousIdleTimerDisabled: Bool?
     @State private var loadGeneration = 0
+    @State private var reloadID = 0
 
     init(
         mangaTitle: String,
@@ -40,7 +42,9 @@ struct ReaderView: View {
         self.chapter = chapter
         self.source = source
         _imageStore = StateObject(wrappedValue: ReaderImageStore(
-            sourceID: String(source?.id ?? 0)
+            sourceID: String(source?.id ?? 0),
+            transportPolicy: source?.transportPolicy
+                ?? CompatHTTPTransportPolicy(allowsInsecureHTTP: false)
         ))
     }
 
@@ -97,7 +101,7 @@ struct ReaderView: View {
                 webtoonGap: $webtoonGap
             )
         }
-        .task { await load() }
+        .task(id: reloadID) { await load() }
         .onAppear {
             normalizeStoredSettings()
             if previousIdleTimerDisabled == nil {
@@ -106,6 +110,7 @@ struct ReaderView: View {
             applyIdleTimerSetting()
         }
         .onDisappear {
+            loadGeneration &+= 1
             if let previousIdleTimerDisabled {
                 UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled
             }
@@ -166,7 +171,7 @@ struct ReaderView: View {
             ForEach(pages.indices, id: \.self) { index in
                 ReaderPageImage(
                     pageNumber: index + 1,
-                    request: imageRequest(for: pages[index]),
+                    request: imageRequest(at: index),
                     store: imageStore,
                     layout: .paged,
                     isActive: abs(index - currentIndex) <= 1,
@@ -205,7 +210,7 @@ struct ReaderView: View {
                         ForEach(pages.indices, id: \.self) { index in
                             ReaderPageImage(
                                 pageNumber: index + 1,
-                                request: imageRequest(for: pages[index]),
+                                request: imageRequest(at: index),
                                 store: imageStore,
                                 layout: .webtoon,
                                 isActive: true,
@@ -251,15 +256,16 @@ struct ReaderView: View {
                 .foregroundStyle(.orange)
                 .multilineTextAlignment(.center)
             Button("Retry") {
-                Task { await load() }
+                reloadID &+= 1
             }
             .buttonStyle(.borderedProminent)
         }
         .padding()
     }
 
-    private func imageRequest(for page: PageCompat) -> ImageRequest? {
-        source?.getImageRequest(page: page)
+    private func imageRequest(at index: Int) -> ImageRequest? {
+        guard imageRequests.indices.contains(index) else { return nil }
+        return imageRequests[index]
     }
 
     private func handlePagedTap(_ horizontalFraction: CGFloat) {
@@ -322,7 +328,7 @@ struct ReaderView: View {
             ahead: settings.prefetchPages,
             behind: 1
         )
-        imageStore.prefetch(indexes.compactMap { imageRequest(for: pages[$0]) })
+        imageStore.prefetch(indexes.compactMap { imageRequest(at: $0) })
     }
 
     private func persistProgress(_ page: Int) {
@@ -341,10 +347,12 @@ struct ReaderView: View {
     }
 
     private func load() async {
-        loadGeneration += 1
+        loadGeneration &+= 1
         let generation = loadGeneration
         loading = true
         errorText = nil
+        pages = []
+        imageRequests = []
         await imageStore.reset()
 
         guard let source else {
@@ -361,8 +369,16 @@ struct ReaderView: View {
                     : String(format: "%g", chapter.number)
             )
             let loadedPages = try await source.getPageList(chapter: compat)
+            var loadedImageRequests: [ImageRequest?] = []
+            loadedImageRequests.reserveCapacity(loadedPages.count)
+            for page in loadedPages {
+                try Task.checkCancellation()
+                loadedImageRequests.append(await source.getImageRequest(page: page))
+            }
+            try Task.checkCancellation()
             guard generation == loadGeneration else { return }
             pages = loadedPages
+            imageRequests = loadedImageRequests
             currentIndex = min(chapter.lastPageRead, max(loadedPages.count - 1, 0))
             loading = false
             if loadedPages.isEmpty {
@@ -371,6 +387,8 @@ struct ReaderView: View {
                 schedulePrefetch(around: currentIndex)
                 persistProgress(currentIndex)
             }
+        } catch is CancellationError {
+            return
         } catch {
             guard generation == loadGeneration else { return }
             errorText = "Could not load pages: \(error.localizedDescription)"

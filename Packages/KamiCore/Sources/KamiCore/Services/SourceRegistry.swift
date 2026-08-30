@@ -55,6 +55,10 @@ public final class SourceRegistry {
         guard !protectedSourceIDs.contains(source.id) else {
             throw ExtensionAdmissionError.sourceIDCollision(source.id)
         }
+        if case let .downloadedExtension(existingPackage) = origins[source.id],
+           existingPackage != admission.packageName {
+            throw ExtensionAdmissionError.sourceIDCollision(source.id)
+        }
         if let index = sources.firstIndex(where: { $0.id == source.id }) {
             sources[index] = source
         } else {
@@ -65,8 +69,10 @@ public final class SourceRegistry {
 
     /// Disabling an installed extension removes only its non-built-in source
     /// IDs. Re-enabling reconstructs them through a fresh admission capability.
-    public func removeDownloaded(sourceIDs: Set<Int64>) {
-        let removable = sourceIDs.subtracting(protectedSourceIDs)
+    public func removeDownloaded(sourceIDs: Set<Int64>, packageName: String) {
+        let removable = sourceIDs.subtracting(protectedSourceIDs).filter {
+            origins[$0] == .downloadedExtension(packageName: packageName)
+        }
         sources.removeAll { removable.contains($0.id) }
         for sourceID in removable {
             origins.removeValue(forKey: sourceID)
