@@ -93,7 +93,7 @@ baozimanhua|https://github.com/keiyoushi/extensions/releases/download/4277105/ta
 measurement/hayalistic|https://github.com/keiyoushi/extensions/releases/download/66535bd/tachiyomi-tr.hayalistic-v1.6.59.apk|57ebc2b3f9c0e2add4b8d1fe38069d2d216f9ee40f434653319da6284a47334c
 measurement/eternalmangas|https://github.com/keiyoushi/extensions/releases/download/a76c957-1/tachiyomi-es.eternalmangas-v1.6.28.apk|6325059f3d45e2b727268cdae936f7bcb08f914c5852b40c9e7bd736e0b78be6
 measurement/mangapandaonl|https://github.com/keiyoushi/extensions/releases/download/a76c957-0/tachiyomi-en.mangapandaonl-v1.6.36.apk|00ba5d0cfd65132b6feffee60b7c8d5eca23c4ce4bd5687c7908e6c9f15a3166
-measurement/tuttoanimemanga|https://github.com/keiyoushi/extensions/releases/download/a76c957-1/tachiyomi-it.tuttoanimemanga-v1.6.10.apk|e50f1bac6e30121b6eb3461e2ce7297de431d98fc0ed1bab510a30ce784edae3
+tuttoanimemanga|https://github.com/keiyoushi/extensions/releases/download/a76c957-1/tachiyomi-it.tuttoanimemanga-v1.6.10.apk|e50f1bac6e30121b6eb3461e2ce7297de431d98fc0ed1bab510a30ce784edae3
 measurement/nhentaixxx|https://github.com/keiyoushi/extensions/releases/download/66535bd/tachiyomi-all.nhentaixxx-v1.6.10.apk|ecb3b01ecfe4987e704a517f33bdb173080d3aa4cae06e7b0925a648a52ac4ef
 measurement/foolslidecustomizable|https://github.com/keiyoushi/extensions/releases/download/a76c957-0/tachiyomi-all.foolslidecustomizable-v1.6.6.apk|d45b6d44760cb0465cc7be317d6d1b899c778bb9d7c02d03fb6c2c141dfa137e
 measurement/doctruyen3q|https://github.com/keiyoushi/extensions/releases/download/a18924b/tachiyomi-vi.doctruyen3q-v1.6.38.apk|3fe67ce34b42c4cb7b193a9536a27ae1b3f41805a866489e82797f56aad4c0a0

@@ -4,24 +4,47 @@ import XCTest
 
 final class InterpretedExtensionPlanTests: XCTestCase {
     func testCurrentLib16ProfilesProduceDeterministicStructuralPlans() throws {
-        let cases: [(fixture: String, package: String, version: String, code: Int64)] = [
+        let cases: [(
+            fixture: String,
+            package: String,
+            version: String,
+            code: Int64,
+            wrapper: String
+        )] = [
             (
                 "batcave",
                 "eu.kanade.tachiyomi.extension.en.batcave",
                 "1.6.9",
-                9
+                9,
+                "Lu0;"
             ),
             (
                 "kawiimanga",
                 "eu.kanade.tachiyomi.extension.ar.kawiimanga",
                 "1.6.1",
-                1
+                1,
+                "Leu/kanade/tachiyomi/extension/ar/kawiimanga/ExtensionGenerated;"
             ),
             (
                 "mangamelon",
                 "eu.kanade.tachiyomi.extension.en.mangamelon",
                 "1.6.1",
-                1
+                1,
+                "Lb0;"
+            ),
+            (
+                "baozimanhua",
+                "eu.kanade.tachiyomi.extension.zh.baozimanhua",
+                "1.6.29",
+                29,
+                "Lv;"
+            ),
+            (
+                "tuttoanimemanga",
+                "eu.kanade.tachiyomi.extension.it.tuttoanimemanga",
+                "1.6.10",
+                10,
+                "Leu/kanade/tachiyomi/extension/it/tuttoanimemanga/ExtensionGenerated;"
             ),
         ]
         let inspector = InterpretedExtensionPlanInspector()
@@ -47,7 +70,7 @@ final class InterpretedExtensionPlanTests: XCTestCase {
                 "L\(item.package.replacingOccurrences(of: ".", with: "/"))/ExtensionGenerated;",
                 item.fixture
             )
-            XCTAssertFalse(plan.sourceAPIWrapperDescriptor.isEmpty, item.fixture)
+            XCTAssertEqual(plan.sourceAPIWrapperDescriptor, item.wrapper, item.fixture)
         }
     }
 

@@ -431,6 +431,12 @@ public final class HostBridge {
 
     private struct JSONStringSerializerBox {}
 
+    private struct JSONIntSerializerBox {}
+
+    private struct JSONNullableSerializerBox {
+        let serializer: RVal
+    }
+
     private struct JSONConfigurationBox {
         let encodeDefaults: Bool
     }
@@ -2009,6 +2015,31 @@ public final class HostBridge {
             return encoding == "c" || encoding == "B"
         }
 
+        // JSONSerialization erases the original number spelling, but its
+        // NSNumber result retains integer versus floating-point storage
+        // (`i`/`q`/... versus `f`/`d`). Reject floating storage before numeric
+        // conversion so `1.0` and `1e0` cannot become JSON Int values merely
+        // because they are numerically integral.
+        let jsonIntegerEncodings: Set<String> = [
+            "c", "s", "i", "l", "q", "C", "S", "I", "L", "Q",
+        ]
+
+        func decodeJSONInt(_ value: Any) throws -> Int32 {
+            guard !isJSONBoolean(value), let number = value as? NSNumber else {
+                throw serializationThrowable("expected JSON integer")
+            }
+            let encoding = String(cString: number.objCType)
+            guard jsonIntegerEncodings.contains(encoding) else {
+                throw serializationThrowable("expected JSON integer")
+            }
+            let result = number.doubleValue
+            guard result.isFinite, result.rounded(.towardZero) == result,
+                  result >= Double(Int32.min), result <= Double(Int32.max) else {
+                throw serializationThrowable("JSON integer is out of range")
+            }
+            return Int32(result)
+        }
+
         func validateJSON(_ root: Any) throws {
             var stack: [(value: Any, depth: Int)] = [(root, 1)]
             var nodes = 0
@@ -2180,12 +2211,35 @@ public final class HostBridge {
                 throw serializationThrowable("encoded JSON exceeds depth limit")
             }
             if case let .obj(object) = strategy,
+               let nullable = object.payload as? JSONNullableSerializerBox {
+                return value.isNull
+                    ? .null
+                    : try serialize(
+                        nullable.serializer,
+                        value: value,
+                        vm: vm,
+                        depth: depth,
+                        encodeDefaults: encodeDefaults
+                    )
+            }
+            if case let .obj(object) = strategy,
                object.payload is JSONStringSerializerBox {
                 let value = try requiredString([value], 0, "JSON string encode")
                 guard value.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
                     throw serializationThrowable("JSON string is too long")
                 }
                 return .string(value)
+            }
+            if case let .obj(object) = strategy,
+               object.payload is JSONIntSerializerBox {
+                if case let .int(value) = value {
+                    return .int(value)
+                }
+                if case let .obj(boxed) = value,
+                   let value = boxed.payload as? Int32 {
+                    return .int(value)
+                }
+                throw serializationThrowable("expected JSON integer")
             }
             if case let .obj(object) = strategy,
                let listSerializer = object.payload as? ArrayListSerializerBox {
@@ -2231,11 +2285,21 @@ public final class HostBridge {
             vm: DexInterpreter
         ) throws -> RVal {
             if case let .obj(object) = strategy,
+               let nullable = object.payload as? JSONNullableSerializerBox {
+                return value is NSNull
+                    ? .null
+                    : try deserialize(nullable.serializer, value: value, vm: vm)
+            }
+            if case let .obj(object) = strategy,
                object.payload is JSONStringSerializerBox {
                 guard let value = value as? String else {
                     throw serializationThrowable("expected JSON string")
                 }
                 return string(value)
+            }
+            if case let .obj(object) = strategy,
+               object.payload is JSONIntSerializerBox {
+                return boxedInteger(try decodeJSONInt(value))
             }
             if case let .obj(object) = strategy,
                let listSerializer = object.payload as? ArrayListSerializerBox {
@@ -2514,11 +2578,33 @@ public final class HostBridge {
 
         let arrayListSerializer = "Lkotlinx/serialization/internal/ArrayListSerializer;"
         let stringSerializer = "Lkotlinx/serialization/internal/StringSerializer;"
+        let intSerializer = "Lkotlinx/serialization/internal/IntSerializer;"
         bridge.staticFields["\(stringSerializer)->INSTANCE"] = .obj(ObjInstance(
             dexType: stringSerializer,
             payload: JSONStringSerializerBox(),
             isHost: true
         ))
+        bridge.staticFields["\(intSerializer)->INSTANCE"] = .obj(ObjInstance(
+            dexType: intSerializer,
+            payload: JSONIntSerializerBox(),
+            isHost: true
+        ))
+        bridge.register(
+            class: "Lkotlinx/serialization/builtins/BuiltinSerializersKt;",
+            "getNullable",
+            prototype: "(Lkotlinx/serialization/KSerializer;)Lkotlinx/serialization/KSerializer;",
+            isStatic: true
+        ) { _, args in
+            let serializer = try argument(args, 0, "BuiltinSerializersKt.getNullable")
+            guard case .obj = serializer else {
+                throw VMError.verify("BuiltinSerializersKt.getNullable serializer")
+            }
+            return .obj(ObjInstance(
+                dexType: "Lkotlinx/serialization/internal/NullableSerializer;",
+                payload: JSONNullableSerializerBox(serializer: serializer),
+                isHost: true
+            ))
+        }
         bridge.objectFactories[arrayListSerializer] = { _ in
             .obj(ObjInstance(dexType: arrayListSerializer, isHost: true))
         }
@@ -2845,15 +2931,7 @@ public final class HostBridge {
             prototype: "(Lkotlinx/serialization/descriptors/SerialDescriptor;I)I"
         ) { _, args in
             let value = try element(args, "CompositeDecoder.decodeIntElement")
-            guard !isJSONBoolean(value), let number = value as? NSNumber else {
-                throw serializationThrowable("expected JSON integer")
-            }
-            let result = number.doubleValue
-            guard result.isFinite, result.rounded(.towardZero) == result,
-                  result >= Double(Int32.min), result <= Double(Int32.max) else {
-                throw serializationThrowable("JSON integer is out of range")
-            }
-            return .int(Int32(result))
+            return .int(try decodeJSONInt(value))
         }
         bridge.register(
             class: compositeDecoder,
@@ -3322,6 +3400,57 @@ public final class HostBridge {
                   bytes[digitStart...].allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }),
                   let parsed = Int32(value) else { return .null }
             return boxedInteger(parsed)
+        }
+        bridge.register(
+            class: strings,
+            "take",
+            prototype: "(Ljava/lang/String;I)Ljava/lang/String;",
+            isStatic: true
+        ) { _, args in
+            let source = try requiredString(args, 0, "StringsKt.take")
+            guard case let .int(rawCount) = try argument(args, 1, "StringsKt.take"),
+                  rawCount >= 0,
+                  source.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "requested character count is invalid"
+                )
+            }
+            // Kotlin counts UTF-16 Char units. Swift String cannot preserve an
+            // ill-formed UTF-16 prefix, so String(decoding:as:) intentionally
+            // normalizes a split surrogate to U+FFFD at this bounded VM seam.
+            let units = Array(source.utf16)
+            return string(String(
+                decoding: units.prefix(min(Int(rawCount), units.count)),
+                as: UTF16.self
+            ))
+        }
+        bridge.register(
+            class: d,
+            "valueOf",
+            prototype: "(I)Ljava/lang/String;",
+            isStatic: true
+        ) { _, args in
+            guard case let .int(value) = try argument(args, 0, "String.valueOf") else {
+                throw VMError.verify("String.valueOf integer argument")
+            }
+            return string(String(value))
+        }
+        bridge.register(
+            class: "Ljava/lang/Float;",
+            "parseFloat",
+            prototype: "(Ljava/lang/String;)F",
+            isStatic: true
+        ) { _, args in
+            let source = try requiredString(args, 0, "Float.parseFloat")
+            guard source.utf8.count <= 128,
+                  let value = Float(source.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                throw hostThrowable(
+                    "Ljava/lang/NumberFormatException;",
+                    "invalid floating-point value"
+                )
+            }
+            return .float(value)
         }
         for (name, isSuffix) in [("removePrefix", false), ("removeSuffix", true)] {
             bridge.register(
@@ -4382,6 +4511,47 @@ public final class HostBridge {
         }
         bridge.register(
             class: collections,
+            "filterNotNull",
+            prototype: "(Ljava/lang/Iterable;)Ljava/util/List;",
+            isStatic: true
+        ) { _, args in
+            let source = try listBox(args, "CollectionsKt.filterNotNull").elements
+            try requireCollectionCapacity(source.count, "CollectionsKt.filterNotNull")
+            return hostList(source.filter { !$0.isNull }, isMutable: false)
+        }
+        bridge.register(
+            class: collections,
+            "take",
+            prototype: "(Ljava/lang/Iterable;I)Ljava/util/List;",
+            isStatic: true
+        ) { _, args in
+            let source = try listBox(args, "CollectionsKt.take").elements
+            guard case let .int(rawCount) = try argument(args, 1, "CollectionsKt.take"),
+                  rawCount >= 0 else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "requested element count is invalid"
+                )
+            }
+            try requireCollectionCapacity(source.count, "CollectionsKt.take")
+            return hostList(
+                Array(source.prefix(min(Int(rawCount), source.count))),
+                isMutable: false
+            )
+        }
+        bridge.register(
+            class: collections,
+            "throwIndexOverflow",
+            prototype: "()V",
+            isStatic: true
+        ) { _, _ in
+            throw hostThrowable(
+                "Ljava/lang/ArithmeticException;",
+                "index overflow"
+            )
+        }
+        bridge.register(
+            class: collections,
             "collectionSizeOrDefault",
             prototype: "(Ljava/lang/Iterable;I)I",
             isStatic: true
@@ -4423,12 +4593,32 @@ public final class HostBridge {
             if lhs.isNull { return .int(rhs.isNull ? 0 : -1) }
             if rhs.isNull { return .int(1) }
             guard case let .obj(lhsObject) = lhs,
-                  case let .obj(rhsObject) = rhs,
-                  let lhsValue = lhsObject.payload as? Int32,
-                  let rhsValue = rhsObject.payload as? Int32 else {
-                throw VMError.verify("ComparisonsKt.compareValues supports boxed Int values only")
+                  case let .obj(rhsObject) = rhs else {
+                throw VMError.verify("ComparisonsKt.compareValues requires comparable objects")
             }
-            return .int(lhsValue == rhsValue ? 0 : (lhsValue < rhsValue ? -1 : 1))
+            if let lhsValue = lhsObject.payload as? Int32,
+               let rhsValue = rhsObject.payload as? Int32 {
+                return .int(lhsValue == rhsValue ? 0 : (lhsValue < rhsValue ? -1 : 1))
+            }
+            if let lhsValue = lhsObject.payload as? String,
+               let rhsValue = rhsObject.payload as? String {
+                guard lhsValue.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes,
+                      rhsValue.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                    throw VMError.verify("ComparisonsKt.compareValues string is too long")
+                }
+                for (lhsUnit, rhsUnit) in zip(lhsValue.utf16, rhsValue.utf16)
+                    where lhsUnit != rhsUnit {
+                    return .int(Int32(Int(lhsUnit) - Int(rhsUnit)))
+                }
+                let lengthDifference = lhsValue.utf16.count - rhsValue.utf16.count
+                guard let boundedDifference = Int32(exactly: lengthDifference) else {
+                    throw VMError.verify("ComparisonsKt.compareValues length difference")
+                }
+                return .int(boundedDifference)
+            }
+            throw VMError.verify(
+                "ComparisonsKt.compareValues supports matching boxed Int or String values only"
+            )
         }
         bridge.register(
             class: "Lkotlin/comparisons/ComparisonsKt;",
@@ -7376,6 +7566,27 @@ public final class HostBridge {
         }
         bridge.register(
             class: schapter,
+            "setScanlator",
+            prototype: "(Ljava/lang/String;)V"
+        ) { _, args in
+            let box = try chapterBox(args, "SChapter.setScanlator")
+            if let value = try optionalString(args, 1, "SChapter.setScanlator") {
+                box.value.scanlators = [value]
+            } else {
+                box.value.scanlators = []
+            }
+            return .null
+        }
+        bridge.register(
+            class: schapter,
+            "getScanlator",
+            prototype: "()Ljava/lang/String;"
+        ) { _, args in
+            let scanlator = try chapterBox(args, "SChapter.getScanlator").value.scanlators.first
+            return scanlator.map(string) ?? .null
+        }
+        bridge.register(
+            class: schapter,
             "setMemo",
             prototype: "(Lkotlinx/serialization/json/JsonObject;)V"
         ) { _, args in
@@ -7872,10 +8083,24 @@ public final class HostBridge {
               components.user == nil,
               components.password == nil,
               components.url != nil,
-              request.headers.count <= 128 else { return nil }
+              let headers = imageHeaders(from: request.headers) else { return nil }
+        return ImageRequest(url: request.url, headers: headers)
+    }
+
+    static func imageHeaders(from value: RVal) -> [String: String]? {
+        guard case let .obj(object) = value,
+              object.dexType == "Lokhttp3/Headers;",
+              let box = object.payload as? HeadersBox else { return nil }
+        return imageHeaders(from: box.headers)
+    }
+
+    private static func imageHeaders(
+        from sourceHeaders: [CompatHTTPHeader]
+    ) -> [String: String]? {
+        guard sourceHeaders.count <= 128 else { return nil }
         var headers: [String: String] = [:]
         var totalBytes = 0
-        for header in request.headers {
+        for header in sourceHeaders {
             guard headers.keys.allSatisfy({
                 $0.caseInsensitiveCompare(header.name) != .orderedSame
             }) else { return nil }
@@ -7893,7 +8118,7 @@ public final class HostBridge {
             totalBytes += added
             headers[header.name] = header.value
         }
-        return ImageRequest(url: request.url, headers: headers)
+        return headers
     }
 
     static func isOkHttpClient(_ value: RVal) -> Bool {

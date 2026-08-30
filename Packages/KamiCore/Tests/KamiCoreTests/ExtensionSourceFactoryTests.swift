@@ -7,6 +7,7 @@ final class ExtensionSourceFactoryTests: XCTestCase {
     private static let batCaveSourceID: Int64 = 7_422_099_479_605_463_706
     private static let mangaMelonSourceID: Int64 = 7_505_916_148_185_744_347
     private static let baoziManhuaSourceID: Int64 = 5_724_751_873_601_868_259
+    private static let tuttoAnimeMangaSourceID: Int64 = 2_102_507_871_480_604_746
     private static let keiyoushiFingerprint =
         "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
 
@@ -112,6 +113,46 @@ final class ExtensionSourceFactoryTests: XCTestCase {
         XCTAssertEqual(source.name, "MangaMelon")
         XCTAssertEqual(source.language, "en")
         XCTAssertEqual(source.getFilterList().count, 2)
+    }
+
+    func testFactoryAdmitsExactTuttoAnimeMangaProfile() async throws {
+        let bytes = try corpus("tuttoanimemanga")
+        let temporary = try temporaryAPK(bytes)
+        defer { try? FileManager.default.removeItem(at: temporary.directory) }
+        let admission = ExtensionAdmission(
+            packageName: "eu.kanade.tachiyomi.extension.it.tuttoanimemanga",
+            versionName: "1.6.10",
+            versionCode: 10,
+            apkPath: temporary.apk.path,
+            apkSHA256: APKSignatureVerifier.apkSHA256(bytes),
+            signingIdentity: try APKSignatureVerifier().verify(apkBytes: bytes),
+            trustSource: .user(fingerprint: Self.keiyoushiFingerprint),
+            sourceIDs: [Self.tuttoAnimeMangaSourceID]
+        )
+
+        let sources = try ExtensionSourceFactory().makeSources(
+            admission: admission,
+            transport: NoNetworkTransport()
+        )
+        let source = try XCTUnwrap(sources.first)
+        XCTAssertEqual(sources.count, 1)
+        XCTAssertEqual(source.id, Self.tuttoAnimeMangaSourceID)
+        XCTAssertEqual(source.name, "TuttoAnimeManga")
+        XCTAssertEqual(source.language, "it")
+        XCTAssertEqual(source.baseURL, "https://tuttoanimemanga.net")
+        XCTAssertTrue(source.supportsLatest)
+        XCTAssertTrue(source.getFilterList().isEmpty)
+        XCTAssertFalse(source.transportPolicy.allowsInsecureHTTP)
+        let imageRequest = await source.getImageRequest(page: PageCompat(
+            index: 0,
+            imageURL: "https://images.example/tutto-page.jpg"
+        ))
+        XCTAssertEqual(imageRequest?.url, "https://images.example/tutto-page.jpg")
+        XCTAssertEqual(imageRequest?.headers, [
+            "Referer": "https://tuttoanimemanga.net/",
+            "Origin": "https://tuttoanimemanga.net",
+        ])
+        XCTAssertNil(imageRequest?.sourceExecutionID)
     }
 
     func testFactoryAdmitsExactBaoziProfileThroughRepositoryAdmission() async throws {

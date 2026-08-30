@@ -12,7 +12,7 @@ Tests/corpus/**/*.apk
 !Tests/corpus/measurement/hayalistic.apk
 !Tests/corpus/measurement/eternalmangas.apk
 !Tests/corpus/measurement/mangapandaonl.apk
-!Tests/corpus/measurement/tuttoanimemanga.apk
+!Tests/corpus/tuttoanimemanga.apk
 !Tests/corpus/measurement/nhentaixxx.apk
 !Tests/corpus/measurement/foolslidecustomizable.apk
 !Tests/corpus/measurement/doctruyen3q.apk

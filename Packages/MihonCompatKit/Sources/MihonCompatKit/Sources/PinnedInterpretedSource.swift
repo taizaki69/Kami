@@ -200,6 +200,38 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         )
     }
 
+    /// Loads the exact current TuttoAnimeManga 1.6.10 artifact through production transport.
+    public static func tuttoAnimeManga1610(
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        let profile = PinnedInterpretedProfile.tuttoAnimeManga1610
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: profile.networkIdentity,
+            policy: transportPolicy
+        )
+        return try Self(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
+    /// Injection seam for deterministic TuttoAnimeManga tests.
+    public static func tuttoAnimeManga1610(
+        apkBytes: [UInt8],
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        try Self(
+            profile: .tuttoAnimeManga1610,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
     fileprivate init(
         profile: PinnedInterpretedProfile,
         apkBytes: [UInt8],
@@ -386,6 +418,7 @@ public enum InterpretedExtensionProfileCatalog {
             .kawiiManga161,
             .mangaMelon161,
             .baoziManhua1629,
+            .tuttoAnimeManga1610,
         ]
         return profiles.first {
             $0.packageName == packageName &&
@@ -507,6 +540,20 @@ private struct PinnedInterpretedProfile: Sendable {
         preferenceSupport: .baoziManhua,
         imageRequestSupport: .interpreted
     )
+
+    static let tuttoAnimeManga1610 = PinnedInterpretedProfile(
+        identifier: "tutto-anime-manga-1.6.10",
+        sha256: "e50f1bac6e30121b6eb3461e2ce7297de431d98fc0ed1bab510a30ce784edae3",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+        maximumAPKBytes: 64 * 1024 * 1024,
+        packageName: "eu.kanade.tachiyomi.extension.it.tuttoanimemanga",
+        versionName: "1.6.10",
+        versionCode: 10,
+        expectedSourceID: 2_102_507_871_480_604_746,
+        filterSupport: .none,
+        preferenceSupport: .none,
+        imageRequestSupport: .pageURL
+    )
 }
 
 private actor PinnedInterpretedRuntime {
@@ -533,6 +580,8 @@ private actor PinnedInterpretedRuntime {
     private let entryClassDescriptor: String
     private let sourceAPIWrapperDescriptor: String
     private let filterListValue: RVal?
+    private let pageURLImageHeaders: [String: String]
+    private let pageURLImageSourceBaseURL: String?
     private let imageClientValue: RVal?
     private let compatibilityRecorder: InterpretedCompatibilityRecorder
     private var retainedImageRequests: [UUID: RetainedImageRequest] = [:]
@@ -679,6 +728,28 @@ private actor PinnedInterpretedRuntime {
             throw PinnedInterpretedSourceError.invalidMetadata(profile: profile.identifier)
         }
 
+        let pageURLImageHeaders: [String: String]
+        let pageURLImageSourceBaseURL: String?
+        if case .pageURL = profile.imageRequestSupport {
+            guard let getHeaders = bridge.resolve(
+                class: "Leu/kanade/tachiyomi/source/online/HttpSource;",
+                "getHeaders",
+                prototype: "()Lokhttp3/Headers;",
+                isStatic: false
+            ) else {
+                throw PinnedInterpretedSourceError.invalidMetadata(profile: profile.identifier)
+            }
+            let value = try getHeaders(vm, [receiver])
+            guard let headers = HostBridge.imageHeaders(from: value) else {
+                throw PinnedInterpretedSourceError.invalidMetadata(profile: profile.identifier)
+            }
+            pageURLImageHeaders = headers
+            pageURLImageSourceBaseURL = baseURL
+        } else {
+            pageURLImageHeaders = [:]
+            pageURLImageSourceBaseURL = nil
+        }
+
         // Baozi's optional banner interceptor requires Android Bitmap pixel
         // operations that the portable bridge does not yet implement. Retain
         // its exact configured client only when that preference is explicitly
@@ -709,6 +780,8 @@ private actor PinnedInterpretedRuntime {
         self.entryClassDescriptor = entryClassDescriptor
         self.sourceAPIWrapperDescriptor = sourceAPIWrapperDescriptor
         self.filterListValue = filterListValue
+        self.pageURLImageHeaders = pageURLImageHeaders
+        self.pageURLImageSourceBaseURL = pageURLImageSourceBaseURL
         self.imageClientValue = imageClientValue
         self.compatibilityRecorder = compatibilityRecorder
         self.filters = filters
@@ -822,8 +895,16 @@ private actor PinnedInterpretedRuntime {
                 ]
             )
         }
-        guard let converted = HostBridge.mangaUpdateCompat(from: result) else {
+        guard var converted = HostBridge.mangaUpdateCompat(from: result) else {
             throw PinnedInterpretedSourceError.unexpectedResult(operation: "manga update")
+        }
+        // Mihon merges sparse detail objects into the requested manga. Some
+        // multisrc implementations (including PizzaReader) deliberately leave
+        // the returned SManga URL unset, so preserve the authenticated input
+        // identity at this adapter boundary instead of leaking an empty URL to
+        // callers that consume getMangaDetails directly.
+        if converted.manga.url.isEmpty {
+            converted.manga.url = manga.url
         }
         return converted
     }
@@ -856,7 +937,12 @@ private actor PinnedInterpretedRuntime {
               (page.imageURL?.utf8.count ?? 0) <= 8_192 else { return nil }
         switch profile.imageRequestSupport {
         case .pageURL:
-            return Self.pageURLImageRequest(page, policy: transportPolicy)
+            return Self.pageURLImageRequest(
+                page,
+                headers: pageURLImageHeaders,
+                sourceBaseURL: pageURLImageSourceBaseURL,
+                policy: transportPolicy
+            )
         case .interpreted:
             do {
                 try await acquire()
@@ -1030,10 +1116,21 @@ private actor PinnedInterpretedRuntime {
 
     private static func pageURLImageRequest(
         _ page: PageCompat,
+        headers: [String: String],
+        sourceBaseURL: String?,
         policy: CompatHTTPTransportPolicy
     ) -> ImageRequest? {
-        guard let rawURL = page.imageURL else { return nil }
-        return validatedImageRequest(ImageRequest(url: rawURL), policy: policy)
+        guard let rawURL = page.imageURL,
+              let sourceBaseURL,
+              let filteredHeaders = CompatHTTPHeaderPolicy.sourceImageHeaders(
+                headers,
+                sourceBaseURL: sourceBaseURL,
+                imageURL: rawURL
+              ) else { return nil }
+        return validatedImageRequest(
+            ImageRequest(url: rawURL, headers: filteredHeaders),
+            policy: policy
+        )
     }
 
     private static func validatedImageRequest(

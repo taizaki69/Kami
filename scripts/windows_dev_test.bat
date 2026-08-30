@@ -1,7 +1,7 @@
 @echo off
 rem Kami Windows development helper: runs SwiftPM tests for a package using
 rem the installed Visual Studio C++ environment + user-local Swift toolchain.
-rem Usage: windows_dev_test.bat <package-dir> [test|build|release|clean]
+rem Usage: windows_dev_test.bat <package-dir> [test|build|release|clean] [test-filter]
 setlocal enabledelayedexpansion
 
 if "%~1"=="" (
@@ -13,6 +13,7 @@ rem Resolve the package while still in the caller's working directory.
 for %%I in ("%~1") do set "PKG=%%~fI"
 set "ACTION=%~2"
 if "%ACTION%"=="" set "ACTION=test"
+set "TEST_FILTER=%~3"
 
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 set "VS_INSTALL="
@@ -81,6 +82,8 @@ if /i "%ACTION%"=="build" (
     "!SWIFT_BIN!swift-build.exe" --package-path "%PKG%" -c release
 ) else if /i "%ACTION%"=="clean" (
     "!SWIFT_BIN!swift-package.exe" --package-path "%PKG%" clean
+) else if defined TEST_FILTER (
+    "!SWIFT_BIN!swift-test.exe" --package-path "%PKG%" --filter "!TEST_FILTER!"
 ) else (
     "!SWIFT_BIN!swift-test.exe" --package-path "%PKG%"
 )

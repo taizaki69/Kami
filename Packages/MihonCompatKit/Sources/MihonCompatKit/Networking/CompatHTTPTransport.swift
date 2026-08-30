@@ -420,6 +420,57 @@ enum CompatHTTPRequestEncoder {
     }
 }
 
+enum CompatHTTPHeaderPolicy {
+    /// Request headers that must not cross an origin boundary. Keep this list
+    /// shared with redirects and source-derived reader image requests.
+    static let sensitiveHeaderNames = [
+        "Authorization",
+        "Proxy-Authorization",
+        "Cookie",
+        "Cookie2",
+        "Host",
+    ]
+
+    private static let sensitiveHeaderNameSet = Set(
+        sensitiveHeaderNames.map { $0.lowercased() }
+    )
+
+    static func isSensitiveHeader(_ name: String) -> Bool {
+        sensitiveHeaderNameSet.contains(name.lowercased())
+    }
+
+    static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+        lhs.scheme?.lowercased() == rhs.scheme?.lowercased()
+            && lhs.host?.lowercased() == rhs.host?.lowercased()
+            && effectivePort(lhs) == effectivePort(rhs)
+    }
+
+    private static func effectivePort(_ url: URL) -> Int? {
+        if let port = url.port { return port }
+        switch url.scheme?.lowercased() {
+        case "http": return 80
+        case "https": return 443
+        default: return nil
+        }
+    }
+
+    /// Source-derived page headers may cross to a CDN, but credentials must
+    /// remain bound to the source origin. Invalid URLs are rejected by the
+    /// caller's ordinary request policy after this filtering step.
+    static func sourceImageHeaders(
+        _ headers: [String: String],
+        sourceBaseURL: String,
+        imageURL: String
+    ) -> [String: String]? {
+        guard let sourceURL = URL(string: sourceBaseURL),
+              let destinationURL = URL(string: imageURL) else { return nil }
+        guard sameOrigin(sourceURL, destinationURL) else {
+            return headers.filter { !isSensitiveHeader($0.key) }
+        }
+        return headers
+    }
+}
+
 enum CompatHTTPRedirectPolicy {
     private static let redirectStatusCodes: Set<Int> = [300, 301, 302, 303, 307, 308]
 
@@ -453,9 +504,10 @@ enum CompatHTTPRedirectPolicy {
             throw CompatHTTPTransportError.insecureRedirect
         }
 
-        let sensitive = ["authorization", "proxy-authorization", "cookie", "host"]
-        let headers = sameOrigin(sourceURL, validated) ? request.headers : request.headers.filter {
-            !sensitive.contains($0.name.lowercased())
+        let headers = CompatHTTPHeaderPolicy.sameOrigin(sourceURL, validated)
+            ? request.headers
+            : request.headers.filter {
+            !CompatHTTPHeaderPolicy.isSensitiveHeader($0.name)
         }
         return CompatHTTPRequest(
             url: validated.absoluteString,
@@ -486,27 +538,12 @@ enum CompatHTTPRedirectPolicy {
 
         var request = proposed
         request.timeoutInterval = policy.requestTimeoutSeconds
-        if !sameOrigin(sourceURL, destination) {
-            for name in ["Authorization", "Proxy-Authorization", "Cookie", "Host"] {
+        if !CompatHTTPHeaderPolicy.sameOrigin(sourceURL, destination) {
+            for name in CompatHTTPHeaderPolicy.sensitiveHeaderNames {
                 request.setValue(nil, forHTTPHeaderField: name)
             }
         }
         return request
-    }
-
-    private static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
-        lhs.scheme?.lowercased() == rhs.scheme?.lowercased()
-            && lhs.host?.lowercased() == rhs.host?.lowercased()
-            && effectivePort(lhs) == effectivePort(rhs)
-    }
-
-    private static func effectivePort(_ url: URL) -> Int? {
-        if let port = url.port { return port }
-        switch url.scheme?.lowercased() {
-        case "http": return 80
-        case "https": return 443
-        default: return nil
-        }
     }
 }
 

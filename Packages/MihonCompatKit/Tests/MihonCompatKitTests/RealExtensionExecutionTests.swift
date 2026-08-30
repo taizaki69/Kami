@@ -735,6 +735,68 @@ final class RealExtensionExecutionTests: XCTestCase {
         XCTAssertEqual(requests.count, 1)
     }
 
+    func testTuttoAnimeMangaConstructorMetadataAndFiltersExecute() throws {
+        let apkBytes = try corpusAPK("tuttoanimemanga")
+        let signingIdentity = try APKSignatureVerifier().verify(apkBytes: apkBytes)
+        XCTAssertEqual(
+            signingIdentity.signers.first?.currentFingerprint,
+            "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
+        )
+        let (vm, manifest) = try loadVM("tuttoanimemanga")
+        let cls = "L" + (manifest.resolvedSourceClass ?? "")
+            .replacingOccurrences(of: ".", with: "/") + ";"
+        let receiver = try vm.instantiate(classDescriptor: cls)
+
+        let name = try vm.call(
+            classDescriptor: cls,
+            method: "getName",
+            prototype: "()Ljava/lang/String;",
+            args: [receiver]
+        )
+        let language = try vm.call(
+            classDescriptor: cls,
+            method: "getLang",
+            prototype: "()Ljava/lang/String;",
+            args: [receiver]
+        )
+        let baseURL = try vm.call(
+            classDescriptor: cls,
+            method: "getBaseUrl",
+            prototype: "()Ljava/lang/String;",
+            args: [receiver]
+        )
+        let sourceID = try vm.call(
+            classDescriptor: cls,
+            method: "getId",
+            prototype: "()J",
+            args: [receiver]
+        )
+        let supportsLatest = try vm.call(
+            classDescriptor: cls,
+            method: "getSupportsLatest",
+            prototype: "()Z",
+            args: [receiver]
+        )
+        let filterList = try vm.call(
+            classDescriptor: cls,
+            method: "getFilterList",
+            prototype: "()Leu/kanade/tachiyomi/source/model/FilterList;",
+            args: [receiver]
+        )
+
+        XCTAssertEqual(vmStringValue(name), "TuttoAnimeManga")
+        XCTAssertEqual(vmStringValue(language), "it")
+        XCTAssertEqual(vmStringValue(baseURL), "https://tuttoanimemanga.net")
+        guard case let .long(id) = sourceID,
+              case let .int(rawSupportsLatest) = supportsLatest else {
+            return XCTFail("expected long source ID")
+        }
+        XCTAssertEqual(id, 2_102_507_871_480_604_746)
+        XCTAssertEqual(rawSupportsLatest, 1)
+        let filters = try XCTUnwrap(HostBridge.sourceFilters(from: filterList))
+        XCTAssertTrue(filters.isEmpty)
+    }
+
     /// MangaDex 1.4.212: the factory entry class's REAL constructor executes
     /// (invoke-direct Object.<init> + return-void). Its getters are iget-based
     /// (instance state from the host HttpSource superclass) — that is the M2/M3

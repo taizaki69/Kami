@@ -166,6 +166,7 @@ final class CompatHTTPTransportTests: XCTestCase {
         var crossOrigin = URLRequest(url: try XCTUnwrap(URL(string: "https://two.example/next")))
         crossOrigin.setValue("Bearer secret", forHTTPHeaderField: "Authorization")
         crossOrigin.setValue("session=secret", forHTTPHeaderField: "Cookie")
+        crossOrigin.setValue("legacy=secret", forHTTPHeaderField: "Cookie2")
         crossOrigin.setValue("keep", forHTTPHeaderField: "X-Test")
 
         let sanitized = try CompatHTTPRedirectPolicy.sanitizedRequest(
@@ -176,6 +177,7 @@ final class CompatHTTPTransportTests: XCTestCase {
         )
         XCTAssertNil(sanitized.value(forHTTPHeaderField: "Authorization"))
         XCTAssertNil(sanitized.value(forHTTPHeaderField: "Cookie"))
+        XCTAssertNil(sanitized.value(forHTTPHeaderField: "Cookie2"))
         XCTAssertEqual(sanitized.value(forHTTPHeaderField: "X-Test"), "keep")
 
         XCTAssertThrowsError(try CompatHTTPRedirectPolicy.sanitizedRequest(
@@ -255,6 +257,37 @@ final class CompatHTTPTransportTests: XCTestCase {
             redirectCount: 1,
             policy: .init()
         )) { XCTAssertEqual($0 as? CompatHTTPTransportError, .insecureRedirect) }
+    }
+
+    func testSourceImageHeadersBindSecretsToSourceOriginButKeepCDNHeaders() throws {
+        let headers = [
+            "Authorization": "Bearer secret",
+            "Proxy-Authorization": "proxy secret",
+            "Cookie": "session=secret",
+            "Cookie2": "legacy=secret",
+            "Host": "source.example",
+            "Referer": "https://source.example/reader",
+            "Origin": "https://source.example",
+            "X-Reader": "keep",
+        ]
+
+        let sameOrigin = try XCTUnwrap(CompatHTTPHeaderPolicy.sourceImageHeaders(
+            headers,
+            sourceBaseURL: "https://source.example/reader",
+            imageURL: "https://source.example/images/page.jpg"
+        ))
+        XCTAssertEqual(sameOrigin, headers)
+
+        let crossOrigin = try XCTUnwrap(CompatHTTPHeaderPolicy.sourceImageHeaders(
+            headers,
+            sourceBaseURL: "https://source.example/reader",
+            imageURL: "https://cdn.example/images/page.jpg"
+        ))
+        XCTAssertEqual(crossOrigin, [
+            "Referer": "https://source.example/reader",
+            "Origin": "https://source.example",
+            "X-Reader": "keep",
+        ])
     }
 
     func testResponseBufferEnforcesHeaderDeclaredAndStreamedBodyLimits() throws {

@@ -229,7 +229,10 @@ final class PinnedInterpretedSourceTests: XCTestCase {
         let resolvedImageRequest = await source.getImageRequest(page: pages[0])
         let imageRequest = try XCTUnwrap(resolvedImageRequest)
         XCTAssertEqual(imageRequest.url, "https://batcave.biz/uploads/page-one.jpg")
-        XCTAssertTrue(imageRequest.headers.isEmpty)
+        XCTAssertEqual(imageRequest.headers, [
+            "Referer": "https://batcave.biz/",
+            "Origin": "https://batcave.biz",
+        ])
         let invalidImageRequest = await source.getImageRequest(page: PageCompat(
             index: 0,
             imageURL: "file:///private/reader-page.jpg"

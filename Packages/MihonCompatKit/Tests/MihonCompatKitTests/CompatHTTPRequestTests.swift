@@ -60,6 +60,243 @@ final class CompatHTTPRequestTests: XCTestCase {
         XCTAssertEqual(value, -1)
     }
 
+    func testKotlinStringComparisonUsesJavaUTF16Ordering() throws {
+        let (vm, bridge) = try makeVM()
+        let comparison = try invoke(
+            bridge, vm,
+            class: "Lkotlin/comparisons/ComparisonsKt;", "compareValues",
+            prototype: "(Ljava/lang/Comparable;Ljava/lang/Comparable;)I",
+            isStatic: true,
+            args: [HostBridge.string("😀"), HostBridge.string("\u{E000}")]
+        )
+        guard case let .int(value) = comparison else {
+            return XCTFail("expected ComparisonsKt.compareValues result")
+        }
+        XCTAssertLessThan(value, 0)
+    }
+
+    func testKotlinTakeAndFilterNotNullPreserveOrderAndRejectNegativeCounts() throws {
+        let (vm, bridge) = try makeVM()
+        let list = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "listOf",
+            prototype: "([Ljava/lang/Object;)Ljava/util/List;",
+            isStatic: true,
+            args: [.arr(ArrInstance(
+                elemDescriptor: "Ljava/lang/Object;",
+                elements: [
+                    HostBridge.string("one"),
+                    .null,
+                    HostBridge.string("two"),
+                    HostBridge.string("three"),
+                ]
+            ))]
+        )
+        let filtered = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "filterNotNull",
+            prototype: "(Ljava/lang/Iterable;)Ljava/util/List;",
+            isStatic: true,
+            args: [list]
+        )
+        let taken = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "take",
+            prototype: "(Ljava/lang/Iterable;I)Ljava/util/List;",
+            isStatic: true,
+            args: [filtered, .int(2)]
+        )
+        let size = try invoke(
+            bridge, vm,
+            class: "Ljava/util/List;", "size",
+            prototype: "()I",
+            args: [taken]
+        )
+        let first = try invoke(
+            bridge, vm,
+            class: "Ljava/util/List;", "get",
+            prototype: "(I)Ljava/lang/Object;",
+            args: [taken, .int(0)]
+        )
+        let second = try invoke(
+            bridge, vm,
+            class: "Ljava/util/List;", "get",
+            prototype: "(I)Ljava/lang/Object;",
+            args: [taken, .int(1)]
+        )
+        guard case let .int(rawSize) = size,
+              case let .obj(firstObject) = first,
+              case let .obj(secondObject) = second else {
+            return XCTFail("expected bounded list values")
+        }
+        XCTAssertEqual(rawSize, 2)
+        XCTAssertEqual(firstObject.payload as? String, "one")
+        XCTAssertEqual(secondObject.payload as? String, "two")
+
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "take",
+            prototype: "(Ljava/lang/Iterable;I)Ljava/util/List;",
+            isStatic: true,
+            args: [filtered, .int(-1)]
+        )) { error in
+            guard let throwable = error as? DEXThrowable,
+                  case let .obj(object) = throwable.value else {
+                return XCTFail("expected a DEX IllegalArgumentException")
+            }
+            XCTAssertEqual(object.dexType, "Ljava/lang/IllegalArgumentException;")
+        }
+    }
+
+    func testKotlinStatusAndChapterNumberHelpersMatchPizzaReader() throws {
+        let (vm, bridge) = try makeVM()
+        let prefix = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "take",
+            prototype: "(Ljava/lang/String;I)Ljava/lang/String;",
+            isStatic: true,
+            args: [HostBridge.string("In corso"), .int(7)]
+        )
+        let integerText = try invoke(
+            bridge, vm,
+            class: "Ljava/lang/String;", "valueOf",
+            prototype: "(I)Ljava/lang/String;",
+            isStatic: true,
+            args: [.int(5)]
+        )
+        let decimal = try invoke(
+            bridge, vm,
+            class: "Ljava/lang/Float;", "parseFloat",
+            prototype: "(Ljava/lang/String;)F",
+            isStatic: true,
+            args: [HostBridge.string("0.5")]
+        )
+        guard case let .obj(prefixObject) = prefix,
+              case let .obj(integerObject) = integerText,
+              case let .float(value) = decimal else {
+            return XCTFail("expected PizzaReader helper values")
+        }
+        XCTAssertEqual(prefixObject.payload as? String, "In cors")
+        XCTAssertEqual(integerObject.payload as? String, "5")
+        XCTAssertEqual(value, 0.5)
+    }
+
+    func testKotlinTakeNormalizesSplitUTF16SurrogatesAtTheVMBoundary() throws {
+        let (vm, bridge) = try makeVM()
+        let split = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "take",
+            prototype: "(Ljava/lang/String;I)Ljava/lang/String;",
+            isStatic: true,
+            args: [HostBridge.string("😀"), .int(1)]
+        )
+        let whole = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "take",
+            prototype: "(Ljava/lang/String;I)Ljava/lang/String;",
+            isStatic: true,
+            args: [HostBridge.string("😀"), .int(2)]
+        )
+        XCTAssertEqual(vmStringValue(split), "\u{FFFD}")
+        XCTAssertEqual(vmStringValue(whole), "😀")
+    }
+
+    func testNullableIntSerializerRoundTripsNullAndBoundedIntegers() throws {
+        let (vm, bridge) = try makeVM()
+        let intSerializer = try XCTUnwrap(
+            bridge.staticFields["Lkotlinx/serialization/internal/IntSerializer;->INSTANCE"]
+        )
+        let nullableSerializer = try invoke(
+            bridge, vm,
+            class: "Lkotlinx/serialization/builtins/BuiltinSerializersKt;", "getNullable",
+            prototype: "(Lkotlinx/serialization/KSerializer;)Lkotlinx/serialization/KSerializer;",
+            isStatic: true,
+            args: [intSerializer]
+        )
+        let json = RVal.obj(ObjInstance(
+            dexType: "Lkotlinx/serialization/json/Json;",
+            isHost: true
+        ))
+
+        let encodedNull = try invoke(
+            bridge, vm,
+            class: "Lkotlinx/serialization/json/Json;", "encodeToString",
+            prototype: "(Lkotlinx/serialization/SerializationStrategy;Ljava/lang/Object;)Ljava/lang/String;",
+            args: [json, nullableSerializer, .null]
+        )
+        let encodedMaximum = try invoke(
+            bridge, vm,
+            class: "Lkotlinx/serialization/json/Json;", "encodeToString",
+            prototype: "(Lkotlinx/serialization/SerializationStrategy;Ljava/lang/Object;)Ljava/lang/String;",
+            args: [json, nullableSerializer, .int(Int32.max)]
+        )
+        XCTAssertEqual(vmStringValue(encodedNull), "null")
+        XCTAssertEqual(vmStringValue(encodedMaximum), String(Int32.max))
+
+        let decodedNull = try invoke(
+            bridge, vm,
+            class: "Lkotlinx/serialization/json/Json;", "decodeFromString",
+            prototype: "(Lkotlinx/serialization/DeserializationStrategy;Ljava/lang/String;)Ljava/lang/Object;",
+            args: [json, nullableSerializer, HostBridge.string("null")]
+        )
+        let decodedMinimum = try invoke(
+            bridge, vm,
+            class: "Lkotlinx/serialization/json/Json;", "decodeFromString",
+            prototype: "(Lkotlinx/serialization/DeserializationStrategy;Ljava/lang/String;)Ljava/lang/Object;",
+            args: [json, nullableSerializer, HostBridge.string(String(Int32.min))]
+        )
+        XCTAssertTrue(decodedNull.isNull)
+        guard case let .obj(boxedMinimum) = decodedMinimum else {
+            return XCTFail("expected a boxed nullable Int")
+        }
+        XCTAssertEqual(boxedMinimum.payload as? Int32, Int32.min)
+
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Lkotlinx/serialization/json/Json;", "decodeFromString",
+            prototype: "(Lkotlinx/serialization/DeserializationStrategy;Ljava/lang/String;)Ljava/lang/Object;",
+            args: [json, nullableSerializer, HostBridge.string("2147483648")]
+        )) { error in
+            XCTAssertTrue(error is DEXThrowable)
+        }
+
+        for literal in ["1.0", "1e0", "-1.0"] {
+            XCTAssertThrowsError(try invoke(
+                bridge, vm,
+                class: "Lkotlinx/serialization/json/Json;", "decodeFromString",
+                prototype: "(Lkotlinx/serialization/DeserializationStrategy;Ljava/lang/String;)Ljava/lang/Object;",
+                args: [json, nullableSerializer, HostBridge.string(literal)]
+            )) { error in
+                XCTAssertTrue(error is DEXThrowable, "expected (literal) to be rejected")
+            }
+        }
+    }
+
+    func testChapterScanlatorBridgePreservesTheCombinedPizzaReaderCredit() throws {
+        let (vm, bridge) = try makeVM()
+        let chapter = HostBridge.chapterValue(from: SChapterCompat(
+            url: "/chapter/7",
+            name: "Chapter Seven"
+        ))
+        _ = try invoke(
+            bridge, vm,
+            class: "Leu/kanade/tachiyomi/source/model/SChapter;", "setScanlator",
+            prototype: "(Ljava/lang/String;)V",
+            args: [chapter, HostBridge.string("Team A & Team B")]
+        )
+        let scanlator = try invoke(
+            bridge, vm,
+            class: "Leu/kanade/tachiyomi/source/model/SChapter;", "getScanlator",
+            prototype: "()Ljava/lang/String;",
+            args: [chapter]
+        )
+        XCTAssertEqual(vmStringValue(scanlator), "Team A & Team B")
+        XCTAssertEqual(
+            HostBridge.chapterCompat(from: chapter)?.scanlators,
+            ["Team A & Team B"]
+        )
+    }
+
     func testHostBridgeBuildsTransportNeutralBoundedRequest() throws {
         let (vm, bridge) = try makeVM()
         let source = RVal.obj(ObjInstance(dexType: "LTestSource;"))

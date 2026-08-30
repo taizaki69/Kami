@@ -8,7 +8,7 @@
       "dexCount": 1,
       "codeMethodCount": 102,
       "instructionCount": 2470,
-      "uniqueUnregisteredExternalMethodCount": 78,
+      "uniqueUnregisteredExternalMethodCount": 77,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -19,7 +19,7 @@
       "dexCount": 1,
       "codeMethodCount": 287,
       "instructionCount": 8258,
-      "uniqueUnregisteredExternalMethodCount": 136,
+      "uniqueUnregisteredExternalMethodCount": 132,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -30,7 +30,7 @@
       "dexCount": 1,
       "codeMethodCount": 339,
       "instructionCount": 8142,
-      "uniqueUnregisteredExternalMethodCount": 117,
+      "uniqueUnregisteredExternalMethodCount": 113,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -41,7 +41,7 @@
       "dexCount": 1,
       "codeMethodCount": 141,
       "instructionCount": 4938,
-      "uniqueUnregisteredExternalMethodCount": 109,
+      "uniqueUnregisteredExternalMethodCount": 106,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -52,7 +52,7 @@
       "dexCount": 1,
       "codeMethodCount": 437,
       "instructionCount": 19350,
-      "uniqueUnregisteredExternalMethodCount": 138,
+      "uniqueUnregisteredExternalMethodCount": 134,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -63,7 +63,7 @@
       "dexCount": 1,
       "codeMethodCount": 244,
       "instructionCount": 5480,
-      "uniqueUnregisteredExternalMethodCount": 104,
+      "uniqueUnregisteredExternalMethodCount": 101,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -74,7 +74,7 @@
       "dexCount": 1,
       "codeMethodCount": 245,
       "instructionCount": 6291,
-      "uniqueUnregisteredExternalMethodCount": 95,
+      "uniqueUnregisteredExternalMethodCount": 91,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -85,7 +85,7 @@
       "dexCount": 1,
       "codeMethodCount": 106,
       "instructionCount": 3028,
-      "uniqueUnregisteredExternalMethodCount": 40,
+      "uniqueUnregisteredExternalMethodCount": 37,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -96,18 +96,7 @@
       "dexCount": 1,
       "codeMethodCount": 219,
       "instructionCount": 4830,
-      "uniqueUnregisteredExternalMethodCount": 45,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.it.tuttoanimemanga@1.6.10(10)",
-      "structuralCandidate": true,
-      "planBlockers": [],
-      "dexCount": 1,
-      "codeMethodCount": 138,
-      "instructionCount": 2875,
-      "uniqueUnregisteredExternalMethodCount": 23,
+      "uniqueUnregisteredExternalMethodCount": 42,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -118,7 +107,7 @@
       "dexCount": 1,
       "codeMethodCount": 452,
       "instructionCount": 13787,
-      "uniqueUnregisteredExternalMethodCount": 181,
+      "uniqueUnregisteredExternalMethodCount": 178,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -129,7 +118,7 @@
       "dexCount": 1,
       "codeMethodCount": 161,
       "instructionCount": 4954,
-      "uniqueUnregisteredExternalMethodCount": 107,
+      "uniqueUnregisteredExternalMethodCount": 104,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -140,7 +129,7 @@
       "dexCount": 1,
       "codeMethodCount": 190,
       "instructionCount": 7098,
-      "uniqueUnregisteredExternalMethodCount": 140,
+      "uniqueUnregisteredExternalMethodCount": 135,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -151,7 +140,7 @@
       "dexCount": 1,
       "codeMethodCount": 164,
       "instructionCount": 6027,
-      "uniqueUnregisteredExternalMethodCount": 151,
+      "uniqueUnregisteredExternalMethodCount": 148,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -162,49 +151,49 @@
       "dexCount": 1,
       "codeMethodCount": 127,
       "instructionCount": 3389,
-      "uniqueUnregisteredExternalMethodCount": 113,
+      "uniqueUnregisteredExternalMethodCount": 110,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     }
   ],
   "aggregate": {
-    "extensionCount": 15,
-    "structuralCandidateCount": 11,
+    "extensionCount": 14,
+    "structuralCandidateCount": 10,
     "planBlockers": [
       {
         "summary": "the source class chain is missing the required stable Mihon wrappers",
         "extensionCount": 4
       }
     ],
-    "uniqueUnregisteredExternalMethodCount": 540,
+    "uniqueUnregisteredExternalMethodCount": 532,
     "omittedExternalInvocationCount": 0,
     "unsupportedOpcodeCount": 0,
     "topLimit": 5,
     "topUnregisteredExternalInvocations": [
       {
         "surface": "direct Ljava/lang/IllegalStateException;-><init>(Ljava/lang/String;)V",
-        "extensionCount": 15,
-        "invocationCount": 297
+        "extensionCount": 14,
+        "invocationCount": 283
       },
       {
         "surface": "direct Ljava/lang/UnsupportedOperationException;-><init>()V",
-        "extensionCount": 15,
-        "invocationCount": 240
+        "extensionCount": 14,
+        "invocationCount": 224
       },
       {
         "surface": "virtual Leu/kanade/tachiyomi/source/online/HttpSource;->getBaseUrl()Ljava/lang/String;",
-        "extensionCount": 15,
-        "invocationCount": 134
+        "extensionCount": 14,
+        "invocationCount": 129
       },
       {
         "surface": "static Lkotlin/io/FilesKt;->resolve(Ljava/io/File;Ljava/lang/String;)Ljava/io/File;",
-        "extensionCount": 15,
-        "invocationCount": 30
+        "extensionCount": 14,
+        "invocationCount": 28
       },
       {
         "surface": "virtual Ljava/io/File;->mkdirs()Z",
-        "extensionCount": 15,
-        "invocationCount": 26
+        "extensionCount": 14,
+        "invocationCount": 25
       }
     ]
   }

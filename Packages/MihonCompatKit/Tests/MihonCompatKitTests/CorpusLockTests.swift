@@ -87,7 +87,7 @@ final class CorpusLockTests: XCTestCase {
     func testCorpusLockHasBoundedSeparatedRolesAndMatchesFetcher() throws {
         let lock = try loadLock()
         XCTAssertEqual(lock.schemaVersion, 2)
-        XCTAssertEqual(lock.locked, "2026-08-29")
+        XCTAssertEqual(lock.locked, "2026-08-30")
         XCTAssertEqual(lock.upstream.catalogRepository, "https://github.com/keiyoushi/extensions")
         XCTAssertEqual(lock.upstream.catalogBranch, "repo")
         XCTAssertEqual(
@@ -99,8 +99,8 @@ final class CorpusLockTests: XCTestCase {
         XCTAssertEqual(lock.upstream.catalogRevision.count, 40)
         XCTAssertEqual(lock.upstream.sourceRevision.count, 40)
         XCTAssertEqual(lock.artifacts.count, 27)
-        XCTAssertEqual(lock.selection.executionArtifactCount, 6)
-        XCTAssertEqual(lock.selection.measurementArtifactCount, 15)
+        XCTAssertEqual(lock.selection.executionArtifactCount, 7)
+        XCTAssertEqual(lock.selection.measurementArtifactCount, 14)
         XCTAssertEqual(lock.selection.conformanceArtifactCount, 6)
         XCTAssertEqual(
             lock.selection.currentLib16ArtifactCount,
@@ -116,20 +116,19 @@ final class CorpusLockTests: XCTestCase {
         )
 
         let byRole = Dictionary(grouping: lock.artifacts, by: \.role)
-        XCTAssertEqual(byRole["execution"]?.count, 6)
-        XCTAssertEqual(byRole["measurement"]?.count, 15)
+        XCTAssertEqual(byRole["execution"]?.count, 7)
+        XCTAssertEqual(byRole["measurement"]?.count, 14)
         XCTAssertEqual(byRole["conformance"]?.count, 6)
         XCTAssertEqual(Set(byRole.keys), ["execution", "measurement", "conformance"])
 
         XCTAssertEqual(Set(byRole["execution", default: []].map(\.name)), [
             "akuma", "mangadex", "batcave", "kawiimanga", "mangamelon",
-            "baozimanhua",
+            "baozimanhua", "tuttoanimemanga",
         ])
         XCTAssertEqual(Set(byRole["measurement", default: []].map(\.name)), [
             "doctruyen3q", "eternalmangas", "foolslidecustomizable", "hayalistic",
             "komga", "komikcast", "mangapandaonl", "mangaplus", "mangasoriginesfr",
-            "nhentaixxx", "pixivcomic", "readmanga", "sssscanlator",
-            "tuttoanimemanga", "xcomic",
+            "nhentaixxx", "pixivcomic", "readmanga", "sssscanlator", "xcomic",
         ])
 
         let fetcher = try String(

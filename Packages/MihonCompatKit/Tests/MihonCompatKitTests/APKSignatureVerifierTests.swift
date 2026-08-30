@@ -28,7 +28,7 @@ final class APKSignatureVerifierTests: XCTestCase {
         let verifier = APKSignatureVerifier()
         for name in [
             "akuma", "mangadex", "batcave", "kawiimanga", "mangamelon",
-            "baozimanhua",
+            "baozimanhua", "tuttoanimemanga",
         ] {
             let identity = try verifier.verify(apkBytes: corpus(name))
             XCTAssertEqual(identity.scheme, .v2, name)

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "source": "SHA-256-locked Keiyoushi release assets and AOSP apksig conformance fixtures",
-  "locked": "2026-08-29",
+  "locked": "2026-08-30",
   "upstream": {
     "catalogRepository": "https://github.com/keiyoushi/extensions",
     "catalogBranch": "repo",
@@ -12,8 +12,8 @@
   "selection": {
     "kind": "behavior-stratified measurement, not a statistical compatibility sample",
     "currentLib16ArtifactCount": 19,
-    "executionArtifactCount": 6,
-    "measurementArtifactCount": 15,
+    "executionArtifactCount": 7,
+    "measurementArtifactCount": 14,
     "conformanceArtifactCount": 6,
     "measurementPolicy": "Measurement artifacts are parsed, signature-verified for parser conformance, and statically audited only. Corpus membership never grants signer trust, admits, installs, or executes an extension."
   },
@@ -132,8 +132,8 @@
     },
     {
       "name": "tuttoanimemanga",
-      "path": "measurement/tuttoanimemanga.apk",
-      "role": "measurement",
+      "path": "tuttoanimemanga.apk",
+      "role": "execution",
       "package": "eu.kanade.tachiyomi.extension.it.tuttoanimemanga",
       "version": "1.6.10",
       "versionCode": 10,
