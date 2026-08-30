@@ -7,6 +7,10 @@ public final class HostBridge {
     private static let maximumSourceResults = 2_048
     private static let maximumChaptersPerManga = 20_000
     private static let maximumPageURLBytes = 8_192
+    private static let maximumInterceptorCount = 32
+    private static let maximumInterceptorChainSteps = 64
+    private static let maximumInterceptorChainDepth = 32
+    private static let maximumHostLockDepth = 32
 
     public typealias Method = (_ vm: DexInterpreter, _ args: [RVal]) throws -> RVal
     public typealias AsyncMethod = (_ vm: DexInterpreter, _ args: [RVal]) async throws -> RVal
@@ -228,12 +232,47 @@ public final class HostBridge {
 
     private final class CallBox {
         let request: CompatHTTPRequest
+        let requestValue: RVal
         let client: OkHttpClientBox
         var isCancelled = false
 
-        init(request: CompatHTTPRequest, client: OkHttpClientBox) {
+        init(request: CompatHTTPRequest, requestValue: RVal, client: OkHttpClientBox) {
             self.request = request
+            self.requestValue = requestValue
             self.client = client
+        }
+    }
+
+    private final class InterceptorExecutionBox {
+        let interceptors: [RVal]
+        let call: CallBox
+        let callValue: RVal
+        var steps = 0
+
+        init(interceptors: [RVal], call: CallBox, callValue: RVal) {
+            self.interceptors = interceptors
+            self.call = call
+            self.callValue = callValue
+        }
+    }
+
+    private final class InterceptorChainBox {
+        let execution: InterceptorExecutionBox
+        let requestValue: RVal
+        let nextIndex: Int
+        let depth: Int
+        var didProceed = false
+
+        init(
+            execution: InterceptorExecutionBox,
+            requestValue: RVal,
+            nextIndex: Int,
+            depth: Int
+        ) {
+            self.execution = execution
+            self.requestValue = requestValue
+            self.nextIndex = nextIndex
+            self.depth = depth
         }
     }
 
@@ -257,12 +296,37 @@ public final class HostBridge {
     private final class ResponseBox {
         let value: CompatHTTPResponse
         let request: CompatHTTPRequest
+        let requestValue: RVal
         let body: RVal
 
-        init(value: CompatHTTPResponse, request: CompatHTTPRequest, body: RVal) {
+        init(
+            value: CompatHTTPResponse,
+            request: CompatHTTPRequest,
+            requestValue: RVal,
+            body: RVal
+        ) {
             self.value = value
             self.request = request
+            self.requestValue = requestValue
             self.body = body
+        }
+    }
+
+    private final class ResponseBuilderBox {
+        var finalURL: String
+        var statusCode: Int
+        var headers: [CompatHTTPHeader]
+        var body: RVal
+        let request: CompatHTTPRequest
+        let requestValue: RVal
+
+        init(response: ResponseBox) {
+            finalURL = response.value.finalURL
+            statusCode = response.value.statusCode
+            headers = response.value.headers
+            body = response.body
+            request = response.request
+            requestValue = response.requestValue
         }
     }
 
@@ -464,6 +528,7 @@ public final class HostBridge {
     /// state and share only this bridge's explicitly injected transport.
     private var sourceNetworks: [ObjectIdentifier: RVal] = [:]
     private let transport: (any CompatHTTPTransport)?
+    private let transportPolicy: CompatHTTPTransportPolicy
     private let htmlPolicy: CompatHTMLPolicy
 
     /// Most recent request handed to OkHttpClient.newCall. This is an inert,
@@ -478,9 +543,11 @@ public final class HostBridge {
 
     public init(
         transport: (any CompatHTTPTransport)? = nil,
+        transportPolicy: CompatHTTPTransportPolicy = .init(),
         htmlPolicy: CompatHTMLPolicy = .init()
     ) {
         self.transport = transport
+        self.transportPolicy = transportPolicy
         self.htmlPolicy = htmlPolicy
     }
 
@@ -572,11 +639,16 @@ public final class HostBridge {
     /// object/String basics that real extension methods hit immediately.
     public static func minimal(
         transport: (any CompatHTTPTransport)? = nil,
+        transportPolicy: CompatHTTPTransportPolicy = .init(),
         htmlPolicy: CompatHTMLPolicy = .init(),
         extensionPackageName: String? = nil,
         preferences: InterpretedExtensionPreferences = .init()
     ) -> HostBridge {
-        let bridge = HostBridge(transport: transport, htmlPolicy: htmlPolicy)
+        let bridge = HostBridge(
+            transport: transport,
+            transportPolicy: transportPolicy,
+            htmlPolicy: htmlPolicy
+        )
 
         // Kotlin null checks are common in generated extension bytecode. They
         // return void for non-null values and surface a DEX exception for null.
@@ -3037,6 +3109,76 @@ public final class HostBridge {
         return Int(min(seconds, Int64(Int32.max)))
     }
 
+    private static let kotlinDurationMaximumNanoseconds: Int64 = 4_611_686_018_426_999_999
+    private static let kotlinDurationMaximumMilliseconds: Int64 = Int64.max >> 1
+
+    /// Kotlin's inline `Duration` stores either nanoseconds (low bit 0) or
+    /// milliseconds (low bit 1). This comparison avoids overflowing when an
+    /// untrusted value uses the wider millisecond representation.
+    private static func compareKotlinDurations(_ lhs: Int64, _ rhs: Int64) -> Int32 {
+        if lhs == rhs { return 0 }
+        let lhsMagnitude = lhs >> 1
+        let rhsMagnitude = rhs >> 1
+        let lhsIsMilliseconds = lhs & 1 != 0
+        let rhsIsMilliseconds = rhs & 1 != 0
+        if lhsIsMilliseconds == rhsIsMilliseconds {
+            return lhsMagnitude < rhsMagnitude ? -1 : 1
+        }
+
+        let nanoseconds = lhsIsMilliseconds ? rhsMagnitude : lhsMagnitude
+        let milliseconds = lhsIsMilliseconds ? lhsMagnitude : rhsMagnitude
+        let quotient = nanoseconds / 1_000_000
+        let remainder = nanoseconds % 1_000_000
+        let nanosecondsComparedToMilliseconds: Int32
+        if quotient == milliseconds {
+            nanosecondsComparedToMilliseconds = remainder == 0 ? 0 : (remainder < 0 ? -1 : 1)
+        } else {
+            nanosecondsComparedToMilliseconds = quotient < milliseconds ? -1 : 1
+        }
+        return lhsIsMilliseconds
+            ? -nanosecondsComparedToMilliseconds
+            : nanosecondsComparedToMilliseconds
+    }
+
+    private static func subtractKotlinDurations(_ lhs: Int64, _ rhs: Int64) throws -> Int64 {
+        let lhsMagnitude = lhs >> 1
+        let rhsMagnitude = rhs >> 1
+        if lhs & 1 == 0, rhs & 1 == 0 {
+            let difference = lhsMagnitude.subtractingReportingOverflow(rhsMagnitude)
+            if !difference.overflow,
+               difference.partialValue >= -kotlinDurationMaximumNanoseconds,
+               difference.partialValue <= kotlinDurationMaximumNanoseconds {
+                return difference.partialValue << 1
+            }
+        }
+
+        let lhsMilliseconds = lhs & 1 == 0 ? lhsMagnitude / 1_000_000 : lhsMagnitude
+        let rhsMilliseconds = rhs & 1 == 0 ? rhsMagnitude / 1_000_000 : rhsMagnitude
+        let difference = lhsMilliseconds.subtractingReportingOverflow(rhsMilliseconds)
+        let milliseconds: Int64
+        if difference.overflow {
+            milliseconds = lhsMilliseconds < rhsMilliseconds
+                ? -kotlinDurationMaximumMilliseconds
+                : kotlinDurationMaximumMilliseconds
+        } else {
+            milliseconds = min(
+                max(difference.partialValue, -kotlinDurationMaximumMilliseconds),
+                kotlinDurationMaximumMilliseconds
+            )
+        }
+        return (milliseconds << 1) | 1
+    }
+
+    private static func kotlinDurationNanoseconds(_ rawValue: Int64) -> Int64 {
+        let magnitude = rawValue >> 1
+        guard rawValue & 1 != 0 else { return magnitude }
+        let product = magnitude.multipliedReportingOverflow(by: 1_000_000)
+        if product.overflow {
+            return magnitude < 0 ? Int64.min : Int64.max
+        }
+        return product.partialValue
+    }
+
     private static func validMediaType(_ value: String) -> Bool {
         guard !value.isEmpty, value.utf8.count <= 1_024,
               !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
@@ -3474,6 +3616,8 @@ public final class HostBridge {
 
     private static func registerPrimitiveBoxes(_ bridge: HostBridge) {
         let ranges = "Lkotlin/ranges/RangesKt;"
+        bridge.staticFields["Ljava/lang/Boolean;->TRUE"] = boxedBoolean(true)
+        bridge.staticFields["Ljava/lang/Boolean;->FALSE"] = boxedBoolean(false)
         bridge.register(
             class: ranges,
             "coerceIn",
@@ -4020,6 +4164,94 @@ public final class HostBridge {
             }
             return .long(rawValue & 1 == 0 ? (rawValue >> 1) / 1_000_000 : rawValue >> 1)
         }
+        bridge.register(
+            class: duration,
+            "getInWholeNanoseconds-impl",
+            prototype: "(J)J",
+            isStatic: true
+        ) { _, args in
+            guard case let .long(rawValue) = try argument(
+                args, 0, "Duration.getInWholeNanoseconds"
+            ) else {
+                throw VMError.verify("Duration.getInWholeNanoseconds value")
+            }
+            return .long(kotlinDurationNanoseconds(rawValue))
+        }
+        bridge.register(
+            class: duration,
+            "box-impl",
+            prototype: "(J)Lkotlin/time/Duration;",
+            isStatic: true
+        ) { _, args in
+            guard case let .long(rawValue) = try argument(args, 0, "Duration.box") else {
+                throw VMError.verify("Duration.box value")
+            }
+            return .obj(ObjInstance(
+                dexType: duration,
+                payload: rawValue,
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: duration,
+            "unbox-impl",
+            prototype: "()J"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Duration.unbox"),
+                  object.dexType == duration,
+                  let rawValue = object.payload as? Int64 else {
+                throw VMError.verify("Duration.unbox receiver")
+            }
+            return .long(rawValue)
+        }
+        bridge.register(
+            class: duration,
+            "minus-LRDsOJo",
+            prototype: "(JJ)J",
+            isStatic: true
+        ) { _, args in
+            guard case let .long(lhs) = try argument(args, 0, "Duration.minus"),
+                  case let .long(rhs) = try argument(args, 1, "Duration.minus") else {
+                throw VMError.verify("Duration.minus values")
+            }
+            return .long(try subtractKotlinDurations(lhs, rhs))
+        }
+        bridge.register(
+            class: duration,
+            "compareTo-LRDsOJo",
+            prototype: "(JJ)I",
+            isStatic: true
+        ) { _, args in
+            guard case let .long(lhs) = try argument(args, 0, "Duration.compareTo"),
+                  case let .long(rhs) = try argument(args, 1, "Duration.compareTo") else {
+                throw VMError.verify("Duration.compareTo values")
+            }
+            return .int(compareKotlinDurations(lhs, rhs))
+        }
+        bridge.register(
+            class: duration,
+            "equals-impl0",
+            prototype: "(JJ)Z",
+            isStatic: true
+        ) { _, args in
+            guard case let .long(lhs) = try argument(args, 0, "Duration.equals"),
+                  case let .long(rhs) = try argument(args, 1, "Duration.equals") else {
+                throw VMError.verify("Duration.equals values")
+            }
+            return .int(compareKotlinDurations(lhs, rhs) == 0 ? 1 : 0)
+        }
+        bridge.register(
+            class: "Landroid/os/SystemClock;",
+            "elapsedRealtime",
+            prototype: "()J",
+            isStatic: true
+        ) { _, _ in
+            let milliseconds = ProcessInfo.processInfo.systemUptime * 1_000
+            guard milliseconds.isFinite, milliseconds >= 0 else {
+                throw VMError.verify("SystemClock.elapsedRealtime unavailable")
+            }
+            return .long(Int64(min(milliseconds, Double(Int64.max))))
+        }
     }
 
     private static func registerCollectionSurface(_ bridge: HostBridge) {
@@ -4117,6 +4349,21 @@ public final class HostBridge {
             return .int(defaultValue)
         }
         bridge.register(
+            class: collections,
+            "first",
+            prototype: "(Ljava/lang/Iterable;)Ljava/lang/Object;",
+            isStatic: true
+        ) { _, args in
+            let values = try listBox(args, "CollectionsKt.first").elements
+            guard let first = values.first else {
+                throw hostThrowable(
+                    "Ljava/util/NoSuchElementException;",
+                    "Collection is empty"
+                )
+            }
+            return first
+        }
+        bridge.register(
             class: "Lkotlin/comparisons/ComparisonsKt;",
             "compareValues",
             prototype: "(Ljava/lang/Comparable;Ljava/lang/Comparable;)I",
@@ -4133,6 +4380,35 @@ public final class HostBridge {
                 throw VMError.verify("ComparisonsKt.compareValues supports boxed Int values only")
             }
             return .int(lhsValue == rhsValue ? 0 : (lhsValue < rhsValue ? -1 : 1))
+        }
+        bridge.register(
+            class: "Lkotlin/comparisons/ComparisonsKt;",
+            "maxOf",
+            prototype: "(Ljava/lang/Comparable;Ljava/lang/Comparable;Ljava/lang/Comparable;)Ljava/lang/Comparable;",
+            isStatic: true
+        ) { _, args in
+            let values = [
+                try argument(args, 0, "ComparisonsKt.maxOf"),
+                try argument(args, 1, "ComparisonsKt.maxOf"),
+                try argument(args, 2, "ComparisonsKt.maxOf"),
+            ]
+            guard values.allSatisfy({ value in
+                guard case let .obj(object) = value else { return false }
+                return object.dexType == "Lkotlin/time/Duration;" && object.payload is Int64
+            }) else {
+                throw VMError.verify("ComparisonsKt.maxOf supports boxed Duration values only")
+            }
+            return values.dropFirst().reduce(values[0]) { current, candidate in
+                guard case let .obj(currentObject) = current,
+                      let currentValue = currentObject.payload as? Int64,
+                      case let .obj(candidateObject) = candidate,
+                      let candidateValue = candidateObject.payload as? Int64 else {
+                    return current
+                }
+                return compareKotlinDurations(candidateValue, currentValue) > 0
+                    ? candidate
+                    : current
+            }
         }
         bridge.register(
             class: collections,
@@ -4415,6 +4691,72 @@ public final class HostBridge {
                 payload: HostConditionBox(lock: lock),
                 isHost: true
             ))
+        }
+        bridge.register(class: reentrantLock, "lock", prototype: "()V") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "ReentrantLock.lock"),
+                  let lock = object.payload as? HostReentrantLockBox else {
+                throw VMError.verify("ReentrantLock.lock receiver")
+            }
+            guard lock.depth < maximumHostLockDepth else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalStateException;",
+                    "ReentrantLock exceeds bounded reentrant depth"
+                )
+            }
+            lock.depth += 1
+            return .null
+        }
+        bridge.register(class: reentrantLock, "unlock", prototype: "()V") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "ReentrantLock.unlock"),
+                  let lock = object.payload as? HostReentrantLockBox else {
+                throw VMError.verify("ReentrantLock.unlock receiver")
+            }
+            guard lock.depth > 0 else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalMonitorStateException;",
+                    "ReentrantLock is not held"
+                )
+            }
+            lock.depth -= 1
+            return .null
+        }
+        bridge.registerAsync(
+            class: "Ljava/util/concurrent/locks/Condition;",
+            "awaitNanos",
+            prototype: "(J)J"
+        ) { vm, args in
+            guard case let .obj(object) = try argument(args, 0, "Condition.awaitNanos"),
+                  let condition = object.payload as? HostConditionBox,
+                  case let .long(nanoseconds) = try argument(args, 1, "Condition.awaitNanos") else {
+                throw VMError.verify("Condition.awaitNanos arguments")
+            }
+            guard condition.lock.depth > 0 else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalMonitorStateException;",
+                    "Condition lock is not held"
+                )
+            }
+            guard nanoseconds > 0 else { return .long(nanoseconds) }
+            let maximumWait = Int64(
+                min(bridge.transportPolicy.requestTimeoutSeconds, 30) * 1_000_000_000
+            )
+            guard nanoseconds <= maximumWait else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalStateException;",
+                    "Condition wait exceeds bounded source timeout"
+                )
+            }
+            if Task.isCancelled || vm.cancelled() { throw VMError.cancelled }
+            let heldDepth = condition.lock.depth
+            condition.lock.depth = 0
+            defer { condition.lock.depth = heldDepth }
+            do {
+                try await Task.sleep(nanoseconds: UInt64(nanoseconds))
+            } catch is CancellationError {
+                throw VMError.cancelled
+            }
+            if Task.isCancelled || vm.cancelled() { throw VMError.cancelled }
+            return .long(0)
         }
 
         let addClasses = [
@@ -4916,6 +5258,28 @@ public final class HostBridge {
     }
 
     private static func registerOkHttpRequestSurface(_ bridge: HostBridge) {
+        let kotlinClass = "Lkotlin/reflect/KClass;"
+        bridge.register(
+            class: "Lkotlin/jvm/internal/Reflection;",
+            "getOrCreateKotlinClass",
+            prototype: "(Ljava/lang/Class;)Lkotlin/reflect/KClass;",
+            isStatic: true
+        ) { _, args in
+            guard case let .obj(classObject) = try argument(
+                args,
+                0,
+                "Reflection.getOrCreateKotlinClass"
+            ), let descriptor = classObject.payload as? String,
+               descriptor.utf8.count <= 1_024 else {
+                throw VMError.verify("Reflection.getOrCreateKotlinClass argument")
+            }
+            return .obj(ObjInstance(
+                dexType: kotlinClass,
+                payload: descriptor,
+                isHost: true
+            ))
+        }
+
         let javaURI = "Ljava/net/URI;"
         bridge.objectFactories[javaURI] = { _ in
             .obj(ObjInstance(dexType: javaURI, isHost: true))
@@ -5047,10 +5411,22 @@ public final class HostBridge {
                   let request = requestObject.payload as? CompatHTTPRequest else {
                 throw VMError.verify("OkHttpClient.newCall arguments")
             }
+            guard client.interceptors.count + client.networkInterceptors.count
+                    <= maximumInterceptorCount else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalStateException;",
+                    "OkHttpClient exceeds \(maximumInterceptorCount) interceptors"
+                )
+            }
+            let requestValue = RVal.obj(requestObject)
             bridge?.lastPreparedRequest = request
             return .obj(ObjInstance(
                 dexType: "Lokhttp3/Call;",
-                payload: CallBox(request: request, client: client),
+                payload: CallBox(
+                    request: request,
+                    requestValue: requestValue,
+                    client: client
+                ),
                 isHost: true
             ))
         }
@@ -5058,11 +5434,12 @@ public final class HostBridge {
             class: "Lokhttp3/Call;",
             "isCanceled",
             prototype: "()Z"
-        ) { _, args in
+        ) { vm, args in
             guard case let .obj(object) = try argument(args, 0, "Call.isCanceled"),
                   let call = object.payload as? CallBox else {
                 throw VMError.verify("Call.isCanceled receiver")
             }
+            if Task.isCancelled || vm.cancelled() { call.isCancelled = true }
             return .int(call.isCancelled ? 1 : 0)
         }
         bridge.register(class: "Lokhttp3/Call;", "cancel", prototype: "()V") { _, args in
@@ -5073,14 +5450,14 @@ public final class HostBridge {
             call.isCancelled = true
             return .null
         }
-        if let transport = bridge.transport {
+        do {
             for (name, requiresSuccess) in [("await", false), ("awaitSuccess", true)] {
                 bridge.registerAsync(
                     class: "Leu/kanade/tachiyomi/network/OkHttpExtensionsKt;",
                     name,
                     prototype: "(Lokhttp3/Call;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;",
                     isStatic: true
-                ) { _, args in
+                ) { vm, args in
                     guard case let .obj(object) = try argument(
                         args,
                         0,
@@ -5088,12 +5465,75 @@ public final class HostBridge {
                     ), let call = object.payload as? CallBox else {
                         throw VMError.verify("OkHttpExtensions.\(name) call argument")
                     }
+                    guard let transport = bridge.transport else {
+                        throw VMError.verify("OkHttpExtensions.\(name) requires an HTTP transport")
+                    }
                     return try await execute(
+                        callValue: .obj(object),
                         call,
+                        vm: vm,
                         transport: transport,
+                        policy: bridge.transportPolicy,
                         requiresSuccess: requiresSuccess
                     )
                 }
+            }
+
+            let interceptorChain = "Lokhttp3/Interceptor$Chain;"
+            bridge.register(
+                class: interceptorChain,
+                "request",
+                prototype: "()Lokhttp3/Request;"
+            ) { _, args in
+                guard case let .obj(object) = try argument(args, 0, "Interceptor.Chain.request"),
+                      let chain = object.payload as? InterceptorChainBox else {
+                    throw VMError.verify("Interceptor.Chain.request receiver")
+                }
+                return chain.requestValue
+            }
+            bridge.register(
+                class: interceptorChain,
+                "call",
+                prototype: "()Lokhttp3/Call;"
+            ) { _, args in
+                guard case let .obj(object) = try argument(args, 0, "Interceptor.Chain.call"),
+                      let chain = object.payload as? InterceptorChainBox else {
+                    throw VMError.verify("Interceptor.Chain.call receiver")
+                }
+                return chain.execution.callValue
+            }
+            bridge.registerAsync(
+                class: interceptorChain,
+                "proceed",
+                prototype: "(Lokhttp3/Request;)Lokhttp3/Response;"
+            ) { vm, args in
+                guard case let .obj(object) = try argument(args, 0, "Interceptor.Chain.proceed"),
+                      let chain = object.payload as? InterceptorChainBox else {
+                    throw VMError.verify("Interceptor.Chain.proceed receiver")
+                }
+                guard !chain.didProceed else {
+                    throw hostThrowable(
+                        "Ljava/lang/IllegalStateException;",
+                        "Interceptor.Chain.proceed may be called only once"
+                    )
+                }
+                chain.didProceed = true
+                let requestValue = try argument(args, 1, "Interceptor.Chain.proceed")
+                guard requestProjection(from: requestValue) != nil else {
+                    throw VMError.verify("Interceptor.Chain.proceed request")
+                }
+                guard let transport = bridge.transport else {
+                    throw VMError.verify("Interceptor.Chain.proceed requires an HTTP transport")
+                }
+                return try await executeInterceptorChain(
+                    vm: vm,
+                    execution: chain.execution,
+                    requestValue: requestValue,
+                    index: chain.nextIndex,
+                    depth: chain.depth,
+                    transport: transport,
+                    policy: bridge.transportPolicy
+                )
             }
         }
         bridge.register(
@@ -5141,6 +5581,14 @@ public final class HostBridge {
                     throw VMError.verify("OkHttpClient.Builder.\(name) receiver")
                 }
                 let list = builder[keyPath: keyPath]
+                guard builder.interceptors.elements.count
+                        + builder.networkInterceptors.elements.count
+                        < maximumInterceptorCount else {
+                    throw hostThrowable(
+                        "Ljava/lang/IllegalStateException;",
+                        "OkHttpClient.Builder exceeds \(maximumInterceptorCount) interceptors"
+                    )
+                }
                 try requireCollectionCapacity(list.elements.count + 1, "OkHttpClient.Builder.\(name)")
                 list.elements.append(try argument(args, 1, "OkHttpClient.Builder.\(name)"))
                 return .obj(object)
@@ -5154,6 +5602,14 @@ public final class HostBridge {
             guard case let .obj(object) = try argument(args, 0, "OkHttpClient.Builder.build"),
                   let builder = object.payload as? OkHttpClientBuilderBox else {
                 throw VMError.verify("OkHttpClient.Builder.build receiver")
+            }
+            guard builder.interceptors.elements.count
+                    + builder.networkInterceptors.elements.count
+                    <= maximumInterceptorCount else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalStateException;",
+                    "OkHttpClient.Builder exceeds \(maximumInterceptorCount) interceptors"
+                )
             }
             return .obj(ObjInstance(
                 dexType: okHttpClient,
@@ -5603,6 +6059,15 @@ public final class HostBridge {
                 isHost: true
             ))
         }
+        bridge.register(class: mediaType, "type", prototype: "()Ljava/lang/String;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "MediaType.type"),
+                  let value = object.payload as? MediaTypeBox,
+                  let type = value.value.split(separator: "/", maxSplits: 1).first,
+                  !type.isEmpty else {
+                throw VMError.verify("MediaType.type receiver")
+            }
+            return string(String(type).lowercased())
+        }
 
         let requestBody = "Lokhttp3/RequestBody;"
         let requestBodyCompanion = "Lokhttp3/RequestBody$Companion;"
@@ -5807,6 +6272,31 @@ public final class HostBridge {
         }
         bridge.register(
             class: requestBuilder,
+            "tag",
+            prototype: "(Lkotlin/reflect/KClass;Ljava/lang/Object;)Lokhttp3/Request$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.Builder.tag"),
+                  let builder = object.payload as? RequestBuilderBox,
+                  case let .obj(classObject) = try argument(args, 1, "Request.Builder.tag"),
+                  classObject.dexType == kotlinClass,
+                  let descriptor = classObject.payload as? String,
+                  descriptor.utf8.count <= 1_024 else {
+                throw VMError.verify("Request.Builder.tag arguments")
+            }
+            let value = try argument(args, 2, "Request.Builder.tag")
+            let key = "tag:" + descriptor
+            if value.isNull {
+                builder.tags.removeValue(forKey: key)
+            } else {
+                guard builder.tags.count < 64 || builder.tags[key] != nil else {
+                    throw VMError.verify("Request.Builder.tag exceeds 64 tags")
+                }
+                builder.tags[key] = value
+            }
+            return .obj(object)
+        }
+        bridge.register(
+            class: requestBuilder,
             "build",
             prototype: "()Lokhttp3/Request;"
         ) { _, args in
@@ -5897,6 +6387,20 @@ public final class HostBridge {
             }
             return object.fields["tag:" + descriptor] ?? .null
         }
+        bridge.register(
+            class: request,
+            "tag",
+            prototype: "(Lkotlin/reflect/KClass;)Ljava/lang/Object;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.tag"),
+                  object.payload is CompatHTTPRequest,
+                  case let .obj(classObject) = try argument(args, 1, "Request.tag"),
+                  classObject.dexType == kotlinClass,
+                  let descriptor = classObject.payload as? String else {
+                throw VMError.verify("Request.tag arguments")
+            }
+            return object.fields["tag:" + descriptor] ?? .null
+        }
 
         let formBuilder = "Lokhttp3/FormBody$Builder;"
         bridge.objectFactories[formBuilder] = { _ in
@@ -5963,9 +6467,13 @@ public final class HostBridge {
 
     private static func registerOkHttpResponseSurface(_ bridge: HostBridge) {
         let response = "Lokhttp3/Response;"
+        let responseBuilder = "Lokhttp3/Response$Builder;"
         let responseBody = "Lokhttp3/ResponseBody;"
+        let responseBodyCompanion = "Lokhttp3/ResponseBody$Companion;"
         let bufferedSource = "Lokio/BufferedSource;"
         let httpException = "Leu/kanade/tachiyomi/network/HttpException;"
+        let maximumResponseBodyBytes = bridge.transportPolicy.maximumResponseBodyBytes
+        let maximumResponseHeaderBytes = bridge.transportPolicy.maximumResponseHeaderBytes
 
         func responseBox(_ args: [RVal], _ method: String) throws -> ResponseBox {
             guard case let .obj(object) = try argument(args, 0, method),
@@ -5978,6 +6486,14 @@ public final class HostBridge {
         func bodyBox(_ args: [RVal], _ method: String) throws -> ResponseBodyBox {
             guard case let .obj(object) = try argument(args, 0, method),
                   let box = object.payload as? ResponseBodyBox else {
+                throw VMError.verify("\(method) receiver")
+            }
+            return box
+        }
+
+        func builderBox(_ args: [RVal], _ method: String) throws -> ResponseBuilderBox {
+            guard case let .obj(object) = try argument(args, 0, method),
+                  let box = object.payload as? ResponseBuilderBox else {
                 throw VMError.verify("\(method) receiver")
             }
             return box
@@ -6007,6 +6523,10 @@ public final class HostBridge {
             let code = try responseBox(args, "Response.isSuccessful").value.statusCode
             return .int((200..<300).contains(code) ? 1 : 0)
         }
+        bridge.register(class: response, "isRedirect", prototype: "()Z") { _, args in
+            let code = try responseBox(args, "Response.isRedirect").value.statusCode
+            return .int([300, 301, 302, 303, 307, 308].contains(code) ? 1 : 0)
+        }
         bridge.register(class: response, "body", prototype: "()Lokhttp3/ResponseBody;") { _, args in
             try responseBox(args, "Response.body").body
         }
@@ -6019,12 +6539,7 @@ public final class HostBridge {
             ))
         }
         bridge.register(class: response, "request", prototype: "()Lokhttp3/Request;") { _, args in
-            let request = try responseBox(args, "Response.request").request
-            return .obj(ObjInstance(
-                dexType: "Lokhttp3/Request;",
-                payload: request,
-                isHost: true
-            ))
+            try responseBox(args, "Response.request").requestValue
         }
         bridge.register(
             class: response,
@@ -6037,6 +6552,144 @@ public final class HostBridge {
                 $0.name.caseInsensitiveCompare(name) == .orderedSame
             }) else { return .null }
             return string(value.value)
+        }
+        bridge.register(
+            class: response,
+            "header$default",
+            prototype: "(Lokhttp3/Response;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Ljava/lang/String;",
+            isStatic: true
+        ) { _, args in
+            guard case let .obj(responseObject) = try argument(args, 0, "Response.header$default"),
+                  let box = responseObject.payload as? ResponseBox,
+                  case let .int(mask) = try argument(args, 3, "Response.header$default"),
+                  mask & ~2 == 0,
+                  try argument(args, 4, "Response.header$default").isNull else {
+                throw VMError.verify("Response.header$default arguments")
+            }
+            let name = try requiredString(args, 1, "Response.header$default")
+            if let value = box.value.headers.reversed().first(where: {
+                $0.name.caseInsensitiveCompare(name) == .orderedSame
+            }) {
+                return string(value.value)
+            }
+            return mask & 2 != 0
+                ? .null
+                : try argument(args, 2, "Response.header$default")
+        }
+        bridge.register(
+            class: response,
+            "newBuilder",
+            prototype: "()Lokhttp3/Response$Builder;"
+        ) { _, args in
+            .obj(ObjInstance(
+                dexType: responseBuilder,
+                payload: ResponseBuilderBox(response: try responseBox(args, "Response.newBuilder")),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: responseBuilder,
+            "code",
+            prototype: "(I)Lokhttp3/Response$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Response.Builder.code"),
+                  let builder = object.payload as? ResponseBuilderBox,
+                  case let .int(rawCode) = try argument(args, 1, "Response.Builder.code"),
+                  (100...999).contains(Int(rawCode)) else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "Response.Builder.code requires an HTTP status code"
+                )
+            }
+            builder.statusCode = Int(rawCode)
+            return .obj(object)
+        }
+        bridge.register(
+            class: responseBuilder,
+            "header",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Lokhttp3/Response$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Response.Builder.header"),
+                  let builder = object.payload as? ResponseBuilderBox else {
+                throw VMError.verify("Response.Builder.header receiver")
+            }
+            let name = try requiredString(args, 1, "Response.Builder.header")
+            let value = try requiredString(args, 2, "Response.Builder.header")
+            try validateHTTPHeader(name: name, value: value, method: "Response.Builder.header")
+            var headers = builder.headers.filter {
+                $0.name.caseInsensitiveCompare(name) != .orderedSame
+            }
+            guard headers.count < 128 else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalStateException;",
+                    "Response.Builder exceeds 128 headers"
+                )
+            }
+            headers.append(CompatHTTPHeader(name: name, value: value))
+            let headerBytes = headers.reduce(0) {
+                $0 + $1.name.utf8.count + $1.value.utf8.count
+            }
+            guard headerBytes <= maximumResponseHeaderBytes else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalStateException;",
+                    "Response.Builder headers exceed the transport limit"
+                )
+            }
+            builder.headers = headers
+            return .obj(object)
+        }
+        bridge.register(
+            class: responseBuilder,
+            "body",
+            prototype: "(Lokhttp3/ResponseBody;)Lokhttp3/Response$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Response.Builder.body"),
+                  let builder = object.payload as? ResponseBuilderBox,
+                  case let .obj(bodyObject) = try argument(args, 1, "Response.Builder.body"),
+                  let body = bodyObject.payload as? ResponseBodyBox else {
+                throw VMError.verify("Response.Builder.body arguments")
+            }
+            guard body.bytes.count <= maximumResponseBodyBytes else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalStateException;",
+                    "Response.Builder body exceeds the transport limit"
+                )
+            }
+            builder.body = .obj(bodyObject)
+            return .obj(object)
+        }
+        bridge.register(
+            class: responseBuilder,
+            "build",
+            prototype: "()Lokhttp3/Response;"
+        ) { _, args in
+            let builder = try builderBox(args, "Response.Builder.build")
+            guard parsedHTTPURL(builder.finalURL) != nil,
+                  (100...999).contains(builder.statusCode),
+                  case let .obj(bodyObject) = builder.body,
+                  let body = bodyObject.payload as? ResponseBodyBox,
+                  body.bytes.count <= maximumResponseBodyBytes else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalStateException;",
+                    "Response.Builder contains an invalid bounded response"
+                )
+            }
+            let value = CompatHTTPResponse(
+                finalURL: builder.finalURL,
+                statusCode: builder.statusCode,
+                headers: builder.headers,
+                body: body.bytes
+            )
+            return .obj(ObjInstance(
+                dexType: response,
+                payload: ResponseBox(
+                    value: value,
+                    request: builder.request,
+                    requestValue: builder.requestValue,
+                    body: builder.body
+                ),
+                isHost: true
+            ))
         }
         bridge.register(class: response, "close", prototype: "()V") { _, args in
             let box = try responseBox(args, "Response.close")
@@ -6112,6 +6765,52 @@ public final class HostBridge {
             let box = try bodyBox(args, "ResponseBody.close")
             box.isClosed = true
             return .null
+        }
+
+        bridge.staticFields["\(responseBody)->Companion"] = .obj(ObjInstance(
+            dexType: responseBodyCompanion,
+            isHost: true
+        ))
+        bridge.register(
+            class: responseBodyCompanion,
+            "create",
+            prototype: "([BLokhttp3/MediaType;)Lokhttp3/ResponseBody;"
+        ) { _, args in
+            guard case let .obj(companion) = try argument(
+                    args, 0, "ResponseBody.Companion.create"
+                  ),
+                  companion.dexType == responseBodyCompanion,
+                  case let .arr(array) = try argument(args, 1, "ResponseBody.Companion.create"),
+                  array.elemDescriptor == "B",
+                  array.elements.count <= maximumResponseBodyBytes else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "ResponseBody.Companion.create exceeds the transport limit"
+                )
+            }
+            let contentType: String?
+            switch try argument(args, 2, "ResponseBody.Companion.create") {
+            case .null:
+                contentType = nil
+            case let .obj(object):
+                guard let mediaType = object.payload as? MediaTypeBox else {
+                    throw VMError.verify("ResponseBody.Companion.create media type")
+                }
+                contentType = mediaType.value
+            default:
+                throw VMError.verify("ResponseBody.Companion.create media type")
+            }
+            var bytes: [UInt8] = []
+            bytes.reserveCapacity(array.elements.count)
+            for value in array.elements {
+                guard case let .int(rawByte) = value,
+                      rawByte >= Int32(Int8.min),
+                      rawByte <= Int32(UInt8.max) else {
+                    throw VMError.verify("ResponseBody.Companion.create byte array contents")
+                }
+                bytes.append(UInt8(truncatingIfNeeded: rawByte))
+            }
+            return responseBodyValue(bytes, contentType: contentType)
         }
 
         bridge.register(class: bufferedSource, "readUtf8", prototype: "()Ljava/lang/String;") { _, args in
@@ -7320,29 +8019,55 @@ public final class HostBridge {
     }
 
     private static func execute(
+        callValue: RVal,
         _ call: CallBox,
+        vm: DexInterpreter,
         transport: any CompatHTTPTransport,
+        policy: CompatHTTPTransportPolicy,
         requiresSuccess: Bool
     ) async throws -> RVal {
-        guard !call.isCancelled else { throw VMError.cancelled }
         do {
-            try Task.checkCancellation()
-            let response = try await transport.execute(call.request)
-            try Task.checkCancellation()
-            guard !call.isCancelled else { throw VMError.cancelled }
-            if requiresSuccess, !(200..<300).contains(response.statusCode) {
+            try checkInterceptorCancellation(call: call, vm: vm)
+            let interceptors = call.client.interceptors + call.client.networkInterceptors
+            guard interceptors.count <= maximumInterceptorCount else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalStateException;",
+                    "OkHttpClient exceeds \(maximumInterceptorCount) interceptors"
+                )
+            }
+            let execution = InterceptorExecutionBox(
+                interceptors: interceptors,
+                call: call,
+                callValue: callValue
+            )
+            let responseValue = try await executeInterceptorChain(
+                vm: vm,
+                execution: execution,
+                requestValue: call.requestValue,
+                index: 0,
+                depth: 0,
+                transport: transport,
+                policy: policy
+            )
+            try checkInterceptorCancellation(call: call, vm: vm)
+            guard let response = responseProjection(from: responseValue) else {
+                throw VMError.verify("OkHttp interceptor chain returned a non-Response value")
+            }
+            try validateInterpretedResponse(response, policy: policy)
+            if requiresSuccess, !(200..<300).contains(response.value.statusCode) {
                 throw DEXThrowable(.obj(ObjInstance(
                     dexType: "Leu/kanade/tachiyomi/network/HttpException;",
-                    fields: ["code": .int(Int32(clamping: response.statusCode))],
-                    payload: "HTTP error \(response.statusCode)",
+                    fields: ["code": .int(Int32(clamping: response.value.statusCode))],
+                    payload: "HTTP error \(response.value.statusCode)",
                     isHost: true
                 )))
             }
-            return responseValue(response, request: call.request)
+            return responseValue
         } catch is CancellationError {
             call.isCancelled = true
             throw VMError.cancelled
         } catch let error as VMError {
+            if case .cancelled = error { call.isCancelled = true }
             throw error
         } catch let thrown as DEXThrowable {
             throw thrown
@@ -7365,9 +8090,212 @@ public final class HostBridge {
         }
     }
 
+    private static func executeInterceptorChain(
+        vm: DexInterpreter,
+        execution: InterceptorExecutionBox,
+        requestValue: RVal,
+        index: Int,
+        depth: Int,
+        transport: any CompatHTTPTransport,
+        policy: CompatHTTPTransportPolicy
+    ) async throws -> RVal {
+        try checkInterceptorCancellation(call: execution.call, vm: vm)
+        guard index >= 0, index <= execution.interceptors.count,
+              depth >= 0, depth <= maximumInterceptorChainDepth else {
+            throw hostThrowable(
+                "Ljava/lang/IllegalStateException;",
+                "OkHttp interceptor chain depth is invalid"
+            )
+        }
+        guard execution.steps < maximumInterceptorChainSteps else {
+            throw hostThrowable(
+                "Ljava/lang/IllegalStateException;",
+                "OkHttp interceptor chain exceeds \(maximumInterceptorChainSteps) steps"
+            )
+        }
+        execution.steps += 1
+
+        guard index < execution.interceptors.count else {
+            guard let request = requestProjection(from: requestValue) else {
+                throw VMError.verify("OkHttp interceptor terminal request")
+            }
+            try policy.validate(request: request)
+            let response = try await transport.execute(request)
+            try checkInterceptorCancellation(call: execution.call, vm: vm)
+            try validateTransportResponse(
+                response,
+                request: request,
+                policy: policy
+            )
+            return responseValue(
+                response,
+                request: request,
+                requestValue: requestValue
+            )
+        }
+
+        let interceptor = execution.interceptors[index]
+        if isAllowlistedNoOpInterceptor(interceptor) {
+            return try await executeInterceptorChain(
+                vm: vm,
+                execution: execution,
+                requestValue: requestValue,
+                index: index + 1,
+                depth: depth + 1,
+                transport: transport,
+                policy: policy
+            )
+        }
+        guard case let .obj(interceptorObject) = interceptor,
+              !interceptorObject.isHost else {
+            let descriptor: String
+            if case let .obj(object) = interceptor {
+                descriptor = object.dexType
+            } else {
+                descriptor = "non-object"
+            }
+            throw VMError.verify("unsupported host OkHttp interceptor \(descriptor)")
+        }
+
+        let chain = RVal.obj(ObjInstance(
+            dexType: "Lokhttp3/Interceptor$Chain;",
+            payload: InterceptorChainBox(
+                execution: execution,
+                requestValue: requestValue,
+                nextIndex: index + 1,
+                depth: depth + 1
+            ),
+            isHost: true
+        ))
+        let result = try await vm.callNestedAsync(
+            classDescriptor: interceptorObject.dexType,
+            method: "intercept",
+            prototype: "(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;",
+            args: [interceptor, chain]
+        )
+        try checkInterceptorCancellation(call: execution.call, vm: vm)
+        guard let response = responseProjection(from: result) else {
+            throw VMError.verify("OkHttp interceptor returned a non-Response value")
+        }
+        try validateInterpretedResponse(response, policy: policy)
+        return result
+    }
+
+    private static func checkInterceptorCancellation(
+        call: CallBox,
+        vm: DexInterpreter
+    ) throws {
+        if Task.isCancelled || call.isCancelled || vm.cancelled() {
+            call.isCancelled = true
+            throw VMError.cancelled
+        }
+    }
+
+    private static func requestProjection(from value: RVal) -> CompatHTTPRequest? {
+        guard case let .obj(object) = value,
+              object.dexType == "Lokhttp3/Request;" else { return nil }
+        return object.payload as? CompatHTTPRequest
+    }
+
+    private static func responseProjection(from value: RVal) -> ResponseBox? {
+        guard case let .obj(object) = value,
+              object.dexType == "Lokhttp3/Response;" else { return nil }
+        return object.payload as? ResponseBox
+    }
+
+    private static func isAllowlistedNoOpInterceptor(_ value: RVal) -> Bool {
+        guard case let .obj(object) = value,
+              object.isHost else { return false }
+        if [
+            "Leu/kanade/tachiyomi/network/interceptor/UncaughtExceptionInterceptor;",
+            "Leu/kanade/tachiyomi/network/interceptor/UserAgentInterceptor;",
+            "Leu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor;",
+        ].contains(object.dexType) {
+            return object.payload == nil
+        }
+        if object.dexType == "Lokhttp3/CompressionInterceptor;" {
+            return object.payload is CompressionInterceptorBox
+        }
+        return false
+    }
+
+    private static func validateTransportResponse(
+        _ response: CompatHTTPResponse,
+        request: CompatHTTPRequest,
+        policy: CompatHTTPTransportPolicy
+    ) throws {
+        guard let final = parsedHTTPURL(response.finalURL),
+              (100...999).contains(response.statusCode) else {
+            throw CompatHTTPTransportError.invalidResponse
+        }
+        if !policy.allowsInsecureHTTP,
+           URLComponents(string: final.value)?.scheme?.lowercased() != "https" {
+            throw CompatHTTPTransportError.disallowedScheme
+        }
+        let originalScheme = URLComponents(string: request.url)?.scheme?.lowercased()
+        let finalScheme = URLComponents(string: final.value)?.scheme?.lowercased()
+        if originalScheme == "https", finalScheme == "http", !policy.allowsHTTPSDowngrade {
+            throw CompatHTTPTransportError.insecureRedirect
+        }
+
+        var headerBytes = 0
+        for header in response.headers {
+            let validName = !header.name.isEmpty && header.name.utf8.count <= 8_192
+                && header.name.unicodeScalars.allSatisfy {
+                    $0.value >= 0x21 && $0.value <= 0x7e && $0.value != 0x3a
+                }
+            guard validName,
+                  header.value.utf8.count <= 65_536,
+                  !header.value.unicodeScalars.contains(where: {
+                      $0.value == 0 || $0.value == 0x0a || $0.value == 0x0d
+                  }) else {
+                throw CompatHTTPTransportError.invalidResponse
+            }
+            let added = header.name.utf8.count + header.value.utf8.count
+            guard added <= policy.maximumResponseHeaderBytes - headerBytes else {
+                throw CompatHTTPTransportError.responseHeadersTooLarge(
+                    limit: policy.maximumResponseHeaderBytes
+                )
+            }
+            headerBytes += added
+        }
+        guard response.body.count <= policy.maximumResponseBodyBytes else {
+            throw CompatHTTPTransportError.responseBodyTooLarge(
+                limit: policy.maximumResponseBodyBytes
+            )
+        }
+    }
+
+    private static func validateInterpretedResponse(
+        _ response: ResponseBox,
+        policy: CompatHTTPTransportPolicy
+    ) throws {
+        guard requestProjection(from: response.requestValue) != nil,
+              parsedHTTPURL(response.value.finalURL) != nil,
+              (100...999).contains(response.value.statusCode),
+              case let .obj(bodyObject) = response.body,
+              let body = bodyObject.payload as? ResponseBodyBox,
+              body.bytes.count <= policy.maximumResponseBodyBytes else {
+            throw hostThrowable(
+                "Ljava/lang/IllegalStateException;",
+                "OkHttp interceptor returned an invalid bounded response"
+            )
+        }
+        let headerBytes = response.value.headers.reduce(0) {
+            $0 + $1.name.utf8.count + $1.value.utf8.count
+        }
+        guard headerBytes <= policy.maximumResponseHeaderBytes else {
+            throw hostThrowable(
+                "Ljava/lang/IllegalStateException;",
+                "OkHttp interceptor response headers exceed the transport limit"
+            )
+        }
+    }
+
     private static func responseValue(
         _ response: CompatHTTPResponse,
-        request: CompatHTTPRequest
+        request: CompatHTTPRequest,
+        requestValue: RVal
     ) -> RVal {
         let contentType = response.headers.reversed().first {
             $0.name.caseInsensitiveCompare("Content-Type") == .orderedSame
@@ -7375,7 +8303,12 @@ public final class HostBridge {
         let body = responseBodyValue(response.body, contentType: contentType)
         return .obj(ObjInstance(
             dexType: "Lokhttp3/Response;",
-            payload: ResponseBox(value: response, request: request, body: body),
+            payload: ResponseBox(
+                value: response,
+                request: request,
+                requestValue: requestValue,
+                body: body
+            ),
             isHost: true
         ))
     }

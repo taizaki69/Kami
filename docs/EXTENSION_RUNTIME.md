@@ -138,7 +138,7 @@ Measured real-APK behavior today:
 
 The measurement-only static audit analyzes the remaining 15 current lib 1.6
 artifacts with zero errors. It finds 11 structural candidates and four
-stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), plus 563
+stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), plus 540
 unique unregistered external method surfaces and zero unsupported opcodes. These
 are prioritization results, not a compatibility rate and not runtime evidence;
 the measurement APKs remain outside the exact profile catalog and are never
@@ -296,18 +296,29 @@ synthetic and pinned-corpus tests:
   measured `LocalDate`/system-zone/start-of-day/epoch-millisecond path used by
   chapter dates. This is an exact tested subset, not full `java.time` parity.
 - Transport-neutral, bounded OkHttp URL/header/form/text-body/cache/request,
-  client-builder, interceptor-list, and call values. `newCall` records a
-  `CompatHTTPRequest`; `await` and `awaitSuccess` use only the bridge's
-  explicitly injected async transport. The measured `HttpUrl.Builder`
+  client-builder, interceptor-list, and call values. `newCall` retains both the
+  exact DEX `Request` object/tags and its validated `CompatHTTPRequest`
+  projection. `await` and `awaitSuccess` snapshot application interceptors then
+  network interceptors in registration order, invoke them through an async
+  `Chain.request`/one-shot `proceed` seam, and unwind responses in reverse order
+  before applying `awaitSuccess`'s 2xx check. The chain shares the outer VM
+  instruction budget, checks task/call/VM cancellation at every edge, caps a
+  client at 32 interceptors, each call at 64 interceptor/terminal steps and
+  depth 32, and charges replacement response bodies/headers to the existing
+  transport policy. The measured `HttpUrl.Builder`
   `newBuilder`/`addQueryParameter`/`build` slice percent-encodes query
   components under the final 8 KiB URL budget, and `HttpSource.getHeaders`
   executes a source's exact `headersBuilder` override.
 - A per-source URLSession transport enforces request/response limits, redirect
   policy, timeouts, cancellation, streaming response-body limits, and an
   isolated in-memory cookie jar. Tests use an actor-backed fake transport.
-- Bounded `Response`, `ResponseBody`, `Headers`, and `okio.BufferedSource`
-  models cover status/header access, common charsets, one-shot bytes/text reads,
-  close state, and Mihon's non-2xx `HttpException` behavior.
+- Bounded `Response`, `Response.Builder`, `ResponseBody`, `Headers`, and
+  `okio.BufferedSource` models cover exact Request retention, redirect
+  classification, status/header/body replacement, common charsets, one-shot
+  bytes/text reads, close state, and Mihon's non-2xx `HttpException` behavior.
+  Baozi's real core-operation regressions traverse its configured interceptor
+  chain and finite one-second rate limiter. Android Bitmap/pixel/JPEG banner
+  transformation is not implemented.
 - SwiftSoup 2.9.6 supplies HTML5 parsing and CSS semantics behind an exact
   Jsoup-compatible document/element/elements slice. Kami caps input bytes, DOM
   nodes/depth/attributes, selector length/results/cumulative work, and extracted
@@ -355,11 +366,11 @@ and plan blockers. The static method list is deliberately a priority signal,
 not runtime proof: virtual/interface dispatch may resolve through a different
 receiver class. The broader current corpus is now locked and measured: all 15
 remaining measurement APKs analyzed without errors, with 11 structural
-candidates, four stable-wrapper blockers, 563 unique unregistered external
+candidates, four stable-wrapper blockers, 540 unique unregistered external
 method surfaces, and zero unsupported opcodes. The next layer is first-gap
 capture below extension catch handlers and regression-promotion tooling.
 Dynamic/network-backed filter lists, production preference UI/persistence, and
-source-defined interceptor execution also remain open. The longer tail remains
+reader-image interceptor execution remain open. The longer tail remains
 additional Jsoup DOM behavior, string/collection overloads, broader
 serialization, and Android context/UI shims. A class appearing in the
 analyzer's `implementedClasses` set is only a coarse prioritization signal; it
@@ -384,14 +395,17 @@ end-to-end adapter is tracked in
 
 Baozi's scalar preferences and DEX `imageRequest(Page)` rewrite are measured
 capabilities of that exact APK profile. The production app currently passes
-default preferences because preference UI and persistence are not wired. The
-current OkHttp model records client/interceptor values, but `await` sends the
-transport request directly; it does not execute the source interceptor chain.
-The reader image pipeline receives only the URL/headers projection, so it drops
-DEX `Request` identity/tags. Baozi banner cropping, redirect-domain rewriting,
-and missing-image behavior are therefore not executed or proven through reader
-image loads. URLSession's internal redirect handling does not substitute for
-those interceptor semantics.
+default preferences because preference UI and persistence are not wired.
+Source-operation `await`/`awaitSuccess` execute the configured bounded
+application/network interceptor chain while preserving exact Request tags and
+the parent VM budget; Baozi's real core operations therefore exercise its
+finite rate limiter. The reader image pipeline still receives only the
+URL/headers projection, drops DEX `Request` identity/tags, and bypasses that
+chain. Baozi banner cropping, redirect-domain rewriting, and missing-image
+behavior are therefore not executed or proven through reader image loads.
+URLSession follows redirects inside the terminal transport and exposes only the
+final response, so its redirect behavior does not substitute for a bounded
+intermediate-response seam.
 
 Reader chapter retry is driven by a structured `.task(id: reloadID)`; changing
 the reload identity restarts the cancellable chapter load. Reader dismissal
@@ -399,11 +413,10 @@ runs disappearance cleanup and increments the load generation, so stale page
 lists or image-request resolutions cannot publish after teardown. Per-page
 image retry currently reuses the resolved `ImageRequest`; regenerating and
 revalidating that request, including expiry and credential-refresh semantics,
-is explicitly deferred. The reader transport currently permits an initial
-`http://` image URL for every source (`allowsInsecureHTTP` is enabled) while
-rejecting HTTPS-to-HTTP redirects. It does not yet receive each source's
-explicit insecure-image policy, so policy-compliant reader fetching is an
-unresolved blocker rather than a current behavior claim.
+is explicitly deferred. Reader image fetching inherits each source's admitted
+transport policy, defaults to HTTPS-only, validates the initial URL/headers
+before injected or production transport, permits HTTP only through explicit
+source opt-in, and applies the same policy to redirects.
 
 ## M4 — WebView/Cloudflare bridge
 
@@ -456,7 +469,7 @@ compatibility.
 
 ## Verification
 
-`MihonCompatKit` currently has 207 passing tests locally on Windows/Swift 6.3.3.
+`MihonCompatKit` currently has 214 passing tests locally on Windows/Swift 6.3.3.
 The three new `CorpusLockTests` regressions cover separated corpus roles,
 SHA/URL/fetcher and manifest/signature checks, and the deterministic static
 measurement baseline. The suite also includes 6 focused signer regressions
@@ -468,7 +481,8 @@ including Baozi), along with 3 deterministic structural-plan regressions,
 4 privacy-safe runtime/static diagnostics regressions, 7 focused
 HTML/parser-limit regressions, Java URL-encoding and bounded Kotlin
 string/collection-helper regressions, generated chapter/page JSON success/
-failure paths, 4 focused async interpreter/transport regressions, 4 BatCave
+failure paths, 4 focused async interpreter/transport regressions, 7 bounded
+OkHttp interceptor-chain regressions, 4 BatCave
 adapter/tamper/concurrency/policy regressions, 8 Baozi profile regressions, and complete Kawii/MangaMelon profile
 regressions, alongside the existing parser, bytecode verifier, request-model,
 repository, and compression coverage. KamiCore currently passes 14/14 portable

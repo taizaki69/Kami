@@ -143,7 +143,7 @@ entry-class placement, and stable public wrappers. The four current profiles
 produce the same plans on repeated inspection; the two legacy lib 1.4 corpus
 artifacts are reported unsupported instead of guessed. The remaining 15
 measurement APKs produce 11 structural candidates and four stable-wrapper
-blockers, with 563 unique unregistered external method surfaces and zero
+blockers, with 540 unique unregistered external method surfaces and zero
 unsupported opcodes. A structural plan is
 only a description: it is not signer authentication, catalog admission, or
 proof that an extension's operations will execute.
@@ -191,6 +191,17 @@ headers. The pipeline currently drops DEX `Request` identity/tags and does not
 run source OkHttp interceptors, so source-defined banner cropping,
 redirect-domain rewriting, and missing-image handling are not proven through
 reader image loads.
+
+Source operations do execute each configured OkHttp application interceptor
+followed by each network interceptor before reaching transport, then unwind in
+reverse response order. The bounded chain preserves exact DEX `Request`
+identity/tags and the outer VM instruction budget, permits at most 32
+interceptors, 64 interceptor/terminal steps, depth 32, and one `proceed` per
+chain object, and revalidates replacement bodies/headers against the transport
+policy. Baozi's real core-operation regressions now traverse that chain and its
+finite rate limiter. This source-operation result does not make the separate
+reader image path interceptor-aware.
+
 Reader image fetching now inherits the source's admitted transport policy. It
 is HTTPS-only by default, validates the initial URL and headers before even an
 injected transport sees them, and permits plain HTTP only when that source was
@@ -203,10 +214,11 @@ corpus is a non-executing measurement set, not an admitted profile catalog.
 Automatic profile admission beyond that exact catalog, dynamic/network-backed
 filter lists, and much of the Kotlin/Java surface remain open
 (`docs/EXTENSION_RUNTIME.md`). Baozi's bounded preferences are accepted by the
-profile, but production preference UI/persistence is not wired. The APK's
-OkHttp source interceptors and DEX `Request` tags are not executed by the
-current await/reader path, so banner cropping, redirect-domain rewriting, and
-missing-image behavior are not proven through reader image loads. Kami starts
+profile, but production preference UI/persistence is not wired. Its bounded
+source-operation interceptor chain is executed; the reader image projection
+still discards DEX `Request` identity/tags, so banner cropping,
+redirect-domain rewriting, and missing-image behavior are not proven through
+reader image loads. Kami starts
 with native MangaDex and can additionally restore a supported, authenticated
 downloaded source.
 
@@ -243,7 +255,7 @@ security boundaries, and the recommended next implementation sequence.
 The compatibility kit runs locally on Windows with Swift 6.3 through
 `scripts/windows_dev_test.bat`, including the Baozi real-APK regressions and
 portable KamiCore coverage; the current local `MihonCompatKit` suite passes
-207/207 with the corpus present, and the current portable KamiCore suite passes
+214/214 with the corpus present, and the current portable KamiCore suite passes
 14/14. The preceding exact corpus head `a376064` passes
 [Swift CI](https://github.com/taizaki69/Kami/actions/runs/33279595763) with all
 27 fixtures, the prior 192 MihonCompatKit tests, 23 KamiCore tests, and the optimized CLI;

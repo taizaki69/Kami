@@ -266,7 +266,7 @@ conformance, and statically audited only. Corpus membership never grants signer
 trust, admission, installation, or execution. The deterministic audit analyzed
 15/15 measurement APKs with zero errors, found 11 structural candidates and
 four stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), and
-reported 563 unique unregistered external method surfaces with zero unsupported
+reported 540 unique unregistered external method surfaces with zero unsupported
 opcodes. These are prioritization results, not runtime compatibility proof.
 
 Baozi Manhua 1.6.29 is now the fourth exact execution profile. Its admission is
@@ -282,13 +282,17 @@ rewrite from `static.baozicdn.com` to `static.baozimh.com` without network I/O.
 
 The current proof stops at the source `ImageRequest` projection. `ReaderView`
 resolves that request asynchronously and the image pipeline honors its URL and
-headers, but the pipeline does not retain DEX `Request` identity or tags. The
-current await path also sends the transport request directly instead of
-executing source-defined OkHttp interceptors. Baozi banner cropping,
+headers, but the pipeline does not retain DEX `Request` identity or tags.
+Source-operation `await`/`awaitSuccess` now execute a bounded, registration-
+ordered application/network interceptor chain that preserves Request identity,
+tags, cancellation, response bounds, and the parent VM instruction budget;
+Baozi's real core-operation regressions traverse its finite rate limiter. The
+reader image pipeline still bypasses that chain. Baozi banner cropping,
 redirect-domain rewriting, and missing-image handling are consequently not
 executed or proven through reader image loads; URLSession's own redirect
-handling is not a substitute for those interceptor semantics. The production
-app likewise has no UI/persistence path for the injected Baozi preference values.
+handling is not a substitute for observable intermediate-response interceptor
+semantics. The production app likewise has no UI/persistence path for the
+injected Baozi preference values.
 
 ## 7. Prior art (iOS)
 
@@ -310,9 +314,9 @@ feasibility problem**. The blockers, honestly categorized:
 | DEX parsing/analysis | **Done** (this repo, pure Swift) |
 | APK/manifest parsing | **Done** (pure Swift, incl. binary AXML) |
 | Repo index compatibility | **Done** (JSON + proto) |
-| Compatibility diagnostics | **Partial**: exact sources expose bounded typed stage-counted VM gap reports, and `compat-audit gaps` emits a deterministic non-executing static/corpus priority report without paths or request data. The current 15-artifact measurement run analyzed 15/15 with 0 errors, 11 structural candidates, four stable-wrapper blockers, 563 unique unregistered external method surfaces, and 0 unsupported opcodes; app export UX, below-catch first-gap/field coverage, and regression promotion remain open |
+| Compatibility diagnostics | **Partial**: exact sources expose bounded typed stage-counted VM gap reports, and `compat-audit gaps` emits a deterministic non-executing static/corpus priority report without paths or request data. The current 15-artifact measurement run analyzed 15/15 with 0 errors, 11 structural candidates, four stable-wrapper blockers, 540 unique unregistered external method surfaces, and 0 unsupported opcodes; app export UX, below-catch first-gap/field coverage, and regression promotion remain open |
 | DEX execution | **Partial M1/M2 plus four pinned app-facing profiles work**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual selection, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, stable public source-wrapper routing across measured R8 layouts, pinned constructors/getters, and BatCave, Kawii Manga, MangaMelon, and Baozi popular/search/latest/details/chapters/pages execute through bounded async response delivery and exact compatibility models; MangaMelon and Baozi additionally prove exact static filters, while general downloaded-extension compatibility remains open |
-| Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI including query trimming/form encoding and bounded string/collection helpers, bounded collections and comparator sorting, structured coroutine lambdas, atomics/reflection, source filters with validated app-state reapplication, source-base constructors, bounded scalar preferences for Baozi, bounded OkHttp requests, source-scoped async transport, response/body/Okio values including UTF-8/ByteString/Base64 request encoding, bounded Jsoup HTML/CSS including direct-child and `:containsData` semantics, generated-serializer JSON encoding/decoding including defaults/longs/string memo objects, a measured Java-time subset, and reached `SManga`/`MangasPage`/`SChapter`/`SMangaUpdate`/`Page` models; dynamic filters, production preference UI/persistence, source interceptor execution, additional DOM APIs, and the long tail remain open |
+| Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI including query trimming/form encoding and bounded string/collection helpers, bounded collections and comparator sorting, structured coroutine lambdas, atomics/reflection, source filters with validated app-state reapplication, source-base constructors, bounded scalar preferences for Baozi, bounded OkHttp requests, a bounded application/network interceptor chain for source operations, source-scoped async transport, response/body/Okio values including UTF-8/ByteString/Base64 request encoding, bounded Jsoup HTML/CSS including direct-child and `:containsData` semantics, generated-serializer JSON encoding/decoding including defaults/longs/string memo objects, a measured Java-time subset, and reached `SManga`/`MangasPage`/`SChapter`/`SMangaUpdate`/`Page` models; dynamic filters, production preference UI/persistence, reader-image interceptor execution, additional DOM APIs, and the long tail remain open |
 | Cloudflare/WebView | Native WKWebView bridge design (see NETWORKING.md) |
 | Backup import | Proto decoding done; zstd decompression pending |
 

@@ -601,6 +601,7 @@ private actor PinnedInterpretedRuntime {
             dex: dex,
             bridge: HostBridge.minimal(
                 transport: transport,
+                transportPolicy: transportPolicy,
                 extensionPackageName: extensionPackageName,
                 preferences: preferences
             ),

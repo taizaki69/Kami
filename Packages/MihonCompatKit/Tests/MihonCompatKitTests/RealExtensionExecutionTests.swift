@@ -212,7 +212,7 @@ final class RealExtensionExecutionTests: XCTestCase {
             prototype: "(ILkotlin/coroutines/Continuation;)Ljava/lang/Object;",
             args: [receiver, .int(1), .null]
         )) { error in
-            guard case let VMError.unresolvedMethod(classDescriptor, signature) = error else {
+            guard case let VMError.asyncExecutionRequired(classDescriptor, signature) = error else {
                 return XCTFail("expected exact OkHttp frontier, got \(error)")
             }
             XCTAssertEqual(classDescriptor, "Leu/kanade/tachiyomi/network/OkHttpExtensionsKt;")

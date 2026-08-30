@@ -25,11 +25,11 @@ is no compatibility claim.
 | DEX structural parse | Working on 21 locked real-extension APKs | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
 | Structural execution-plan inspection | Working for the bounded single-source lib 1.6 shape | Non-executing inspection deterministically finds the entry and stable public wrapper for the four execution profiles and 11 of 15 remaining measurement APKs; the four measurement blockers are Komga, MangaPlus, NHentai.xxx, and XCOMIC. Legacy lib 1.4, factories, multidex, native `.so`, ambiguous/missing DEX, invalid identity, and missing wrapper shapes are explicit blockers. A plan establishes no signer trust, catalog admission, or execution proof |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| Static measurement corpus | Working, non-executing | Fifteen current lib 1.6 measurement-only APKs under `Tests/corpus/measurement/` are SHA/URL locked and analyzed 15/15 with 0 errors; 11 are structural candidates and four have stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, XCOMIC). The report contains 563 unique unregistered external method surfaces and 0 unsupported opcodes. The behavior-stratified set is prioritization evidence, not a statistical sample or execution/admission proof |
-| Compatibility diagnostics | Partial, privacy-safe local/runtime and static corpus seams working | Pinned sources deduplicate propagated typed VM gaps by operation stage and ignore arbitrary errors; `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths. The current measurement run reports 15/15 analyzed, 0 errors, 563 unique surfaces, and 0 unsupported opcodes. Static invocations are prioritization only, not runtime failure or admission proof. App export UI, below-catch first-gap capture, broader field/bridge instrumentation, and regression promotion remain open |
-| DEX execution | Partial M1/M2 working | The current local 207-test suite includes exact source/execution paths against six execution fixtures; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, scalar preferences, interpreted image requests, and serialized adapter ownership are checked |
+| Static measurement corpus | Working, non-executing | Fifteen current lib 1.6 measurement-only APKs under `Tests/corpus/measurement/` are SHA/URL locked and analyzed 15/15 with 0 errors; 11 are structural candidates and four have stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, XCOMIC). The report contains 540 unique unregistered external method surfaces and 0 unsupported opcodes. The behavior-stratified set is prioritization evidence, not a statistical sample or execution/admission proof |
+| Compatibility diagnostics | Partial, privacy-safe local/runtime and static corpus seams working | Pinned sources deduplicate propagated typed VM gaps by operation stage and ignore arbitrary errors; `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths. The current measurement run reports 15/15 analyzed, 0 errors, 540 unique surfaces, and 0 unsupported opcodes. Static invocations are prioritization only, not runtime failure or admission proof. App export UI, below-catch first-gap capture, broader field/bridge instrumentation, and regression promotion remain open |
+| DEX execution | Partial M1/M2 working | The current local 214-test suite includes exact source/execution paths against six execution fixtures; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded source-operation interceptor execution, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, scalar preferences, interpreted image requests, and serialized adapter ownership are checked |
 | Admission restoration and source factory | Working for exact measured profiles | Startup re-reads the enabled installed APK, rechecks hash/signature/signer history/user trust/manifest, and gives the sole factory a fresh capability; before DEX construction the factory preflights the exact profile source-ID set, then postvalidates every constructed ID against that set and the admission, rejects undeclared IDs, and refuses unmeasured profiles; registry removal is scoped to the recorded package owner |
-| End-to-end source operations | Working for four exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, and Baozi Manhua 1.6.29 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon and Baozi add exact static `Select` filter paths. Baozi additionally proves bounded scalar preferences and an interpreted `imageRequest` rewrite. BatCave additionally proves the installed-source registry path. The 15 measurement APKs remain outside the executable catalog. Automatic catalog expansion, dynamic filters, production preference UI/persistence, source interceptor execution, and live-site availability remain open |
+| End-to-end source operations | Working for four exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, and Baozi Manhua 1.6.29 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon and Baozi add exact static `Select` filter paths. Source-operation `await`/`awaitSuccess` execute a bounded application/network interceptor chain, and Baozi's core regressions traverse its finite rate limiter. Baozi additionally proves bounded scalar preferences and an interpreted `imageRequest` rewrite. BatCave additionally proves the installed-source registry path. The 15 measurement APKs remain outside the executable catalog. Automatic catalog expansion, dynamic filters, production preference UI/persistence, reader-image interceptor execution, and live-site availability remain open |
 
 ## Per-extension execution
 
@@ -64,7 +64,7 @@ statically audited only. Membership never grants signer trust, admission,
 installation, or execution. The deterministic `compat-audit gaps
 Tests/corpus/measurement` baseline analyzed 15/15 artifacts with 0 errors,
 found 11 structural candidates and four stable-wrapper blockers (Komga,
-MangaPlus, NHentai.xxx, and XCOMIC), and reported 563 unique unregistered
+MangaPlus, NHentai.xxx, and XCOMIC), and reported 540 unique unregistered
 external method surfaces with 0 unsupported opcodes. These results are
 prioritization signals, not a compatibility percentage or runtime proof.
 
@@ -189,11 +189,11 @@ extension and invocation count:
 | Artifact analysis errors | 0 |
 | Structural candidates | 11 |
 | Stable-wrapper blockers | 4 |
-| Unique unregistered external method surfaces | 563 |
+| Unique unregistered external method surfaces | 540 |
 | Unsupported opcodes | 0 |
 
 The four stable-wrapper blockers are Komga, MangaPlus, NHentai.xxx, and XCOMIC.
-The 563-surface list is a prioritization signal, not a compatibility rate:
+The 540-surface list is a prioritization signal, not a compatibility rate:
 virtual/interface dispatch may resolve through a different receiver class, and
 dead code may never execute. The measurement artifacts are not admitted or
 executed, and their membership does not establish signer trust.
@@ -212,7 +212,7 @@ report above for current prioritization.
 
 ## Test evidence
 
-- 207/207 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+- 214/214 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present. Three new `CorpusLockTests` cover separated roles,
   SHA/URL/fetcher and manifest/signature checks, and the deterministic static
   measurement baseline.
@@ -239,8 +239,12 @@ report above for current prioritization.
   local/corpus path, APK filename, URL, authorization or proxy-authorization
   header, `Set-Cookie`, `Bearer`, `token=`, or `password=` markers. Safe DEX API
   identities containing `Cookie` are expected. The current baseline is 15/15
-  artifacts, 11 structural candidates, 563 unique unregistered surfaces, and
+  artifacts, 11 structural candidates, 540 unique unregistered surfaces, and
   zero unsupported opcodes.
+- Seven focused interceptor-chain regressions cover application/network order,
+  exact Request/tag identity, bounded response rebuilding, one-shot `proceed`,
+  client limits, shared VM budget, `await` versus `awaitSuccess`, and
+  cancellation.
 - Six verifier regressions cover the six real Keiyoushi v2 APKs (Akuma, MangaDex,
   BatCave, Kawii Manga, MangaMelon, and Baozi Manhua), AOSP v1 and v3,
   verified certificate rotation, signed-content and signer-signature tampering,
@@ -328,10 +332,11 @@ the broader 15-artifact current-lib-1.6 measurement corpus is now locked and
 fully analyzed, so corpus expansion is no longer open. App export UX, deeper
 first-gap/field instrumentation, and regression promotion remain open. Automatic
 catalog expansion, dynamic filter sources, production preference UI/persistence,
-and arbitrary custom image-request overrides remain open. The current source
-interceptor/reader seam also drops DEX `Request` tags and does not execute
-OkHttp interceptors, so Baozi banner cropping, redirect-domain rewriting, and
-missing-image behavior are not proven through reader image loads. Remaining
+and arbitrary custom image-request overrides remain open. Source operations now
+execute the bounded OkHttp interceptor chain, but the reader image seam still
+drops DEX `Request` identity/tags and bypasses it. Baozi banner cropping,
+redirect-domain rewriting, and missing-image behavior are therefore not proven
+through reader image loads. Remaining
 reader chapter retry uses a structured `.task(id: reloadID)` and dismissal
 invalidates the load generation; per-page retry still reuses its resolved
 `ImageRequest`, so retry-time request regeneration/expiry remains deferred.

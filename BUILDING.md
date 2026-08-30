@@ -4,7 +4,7 @@
 
 | Component | Verified how |
 |---|---|
-| MihonCompatKit (parsers, VM, repo client, backup reader) | Current local `swift test` on Windows/Swift 6.3.3 passes **207/207**; the suite includes corpus-lock and APK-signature regressions, real-APK constructor/source-path coverage across six execution fixtures, deterministic structural-plan and privacy-safe diagnostics regressions, adapter/admission tests, and the end-to-end Baozi profile |
+| MihonCompatKit (parsers, VM, repo client, backup reader) | Current local `swift test` on Windows/Swift 6.3.3 passes **214/214**; the suite includes corpus-lock and APK-signature regressions, real-APK constructor/source-path coverage across six execution fixtures, deterministic structural-plan and privacy-safe diagnostics regressions, seven bounded OkHttp interceptor-chain regressions, adapter/admission tests, and the end-to-end Baozi profile |
 | compat-audit CLI | optimized build plus deterministic directory-level `plan` and `gaps` behavior verified on Windows; the locked corpus reports current candidates, legacy blockers, ranked unregistered external invocations, and unsupported opcodes, continues past malformed files, omits local paths/filenames/request secrets, and returns failure after all artifacts; exact-head Swift CI uploaded the optimized CLI |
 | KamiCore (models, SQLite store, install/admission/factory, source registry, reader image pipeline) | Current portable Windows `swift test` passes **14/14**, including exact Baozi factory admission; the pre-Baozi exact-head macOS Swift CI passed all 23 tests covering bounded reader settings/prefetch, exact image headers, in-flight deduplication/cache, response rejection, Browse routing, SQLite migration, extension installation/restoration/factory, and registry lifecycle coverage |
 | App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |
@@ -63,12 +63,12 @@ installation, execution, or compatibility proof. Run the non-executing audit
 with `compat-audit gaps Tests/corpus/measurement`.
 
 The current locked measurement baseline is 15/15 analyzed artifacts, 11
-structural candidates, 563 unique unregistered external method surfaces, and
+structural candidates, 540 unique unregistered external method surfaces, and
 zero unsupported opcodes. These are static prioritization results, not a
 compatibility percentage or runtime proof.
 
 With the corpus present, the current local Windows/Swift 6.3.3
-`MihonCompatKit` suite passes 207/207 tests, including the Baozi real-APK
+`MihonCompatKit` suite passes 214/214 tests, including the Baozi real-APK
 regressions. The exact-head GitHub workflows listed below still refer to the
 previous pre-promotion checkpoint; new workflow results belong to the integrated
 Baozi milestone.

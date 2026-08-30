@@ -9,12 +9,16 @@ stays host-testable on Windows/Linux).
 
 The extension runtime models bounded OkHttp URLs, headers, form/text bodies,
 cache policy, requests, isolated client identities, interceptor lists, and
-calls. `OkHttpClient.newCall` produces a transport-neutral
-`CompatHTTPRequest`; `OkHttpExtensionsKt.await` and `awaitSuccess` cross an
-explicitly injected async transport without blocking an interpreter thread.
-The current await path sends that request projection directly. It does not yet
-execute source-defined OkHttp interceptors or preserve DEX `Request` identity
-and tags across the transport boundary.
+calls. `OkHttpClient.newCall` retains both the exact DEX `Request`/tags and its
+transport-neutral `CompatHTTPRequest` projection. `OkHttpExtensionsKt.await`
+and `awaitSuccess` snapshot application then network interceptors in
+registration order, execute them asynchronously without blocking an
+interpreter thread, reach the explicitly injected transport at the terminal,
+and unwind responses in reverse order. The bounded chain preserves the outer
+VM instruction budget, checks cancellation at every edge, allows at most 32
+interceptors, 64 interceptor/terminal steps, depth 32, and one `proceed` per
+chain object, and validates replacement bodies/headers against the transport
+policy.
 
 `URLSessionCompatHTTPTransport` is an actor owned by one source identity. It
 applies request, redirect, timeout, header, and body limits; rejects insecure
@@ -27,8 +31,10 @@ Async DEX frames resume after transport completion. Swift Task or OkHttp-call
 cancellation maps to a typed VM cancellation, transport failures become
 redacted `java.io.IOException` values, and `awaitSuccess` rejects non-2xx
 responses with Mihon's `HttpException`. The exact host allow-list exposes
-bounded `Response`, `ResponseBody`, `Headers`, and `okio.BufferedSource` values,
-including one-shot body reads and common response charsets.
+bounded `Response`, `Response.Builder`, `ResponseBody`, `Headers`, and
+`okio.BufferedSource` values, including exact request retention, redirect/
+header/code/body rebuilding, one-shot body reads, and common response charsets.
+`awaitSuccess` applies its 2xx check after the complete response unwind.
 
 The pinned BatCave popular path now crosses the fake transport, consumes the
 bounded response, parses it through `JsoupExtensionsKt.asJsoup$default`, and
@@ -58,6 +64,8 @@ tests assert the decoded JSON for every request and remain fully offline.
 
 The pinned Baozi Manhua 1.6.29 path uses the same source-scoped fake transport
 for deterministic popular, latest, search, details, chapters, and pages tests.
+Those core operations traverse the APK's configured interceptor chain and its
+finite one-second rate limiter.
 Its exact DEX `imageRequest(Page)` method is executed before the request reaches
 the app-facing image seam; the regression proves the fixture's CDN-host rewrite
 without network I/O. The image request is projected to URL/headers only.
@@ -73,27 +81,24 @@ transport sees the URL/headers, HTTPS is the default, HTTP requires explicit
 source opt-in, and redirects use the same source-scoped policy. Reader-specific
 image response limits remain independent of the source response-body limit.
 
-## Source interceptor and reader boundary
+## Reader interceptor boundary
 
-The Baozi APK contains source interceptors, but their behavior is not part of
-the current runtime proof. `ReaderImagePipeline` converts `ImageRequest` to a
-`CompatHTTPRequest` and calls the transport directly, so it drops DEX request
-tags and does not run the APK's application/network interceptor chain. Banner
-cropping, redirect-domain rewriting, and missing-image handling are therefore
-not executed or proven through reader image loads. `URLSessionCompatHTTPTransport`
-also follows redirects inside its delegate path; that final-response behavior
-does not prove an interceptor can observe or rewrite intermediate redirects.
+Baozi source operations execute its bounded application/network interceptor
+chain, but `ReaderImagePipeline` converts `ImageRequest` to a
+`CompatHTTPRequest` and calls the transport directly. The reader path therefore
+drops DEX request identity/tags and does not run the chain. Banner cropping,
+redirect-domain rewriting, and missing-image handling are not executed or
+proven through reader image loads. `URLSessionCompatHTTPTransport` also follows
+redirects inside its delegate path; that final-response behavior does not prove
+an interceptor can observe or rewrite intermediate redirects.
 
-The next networking milestone is a bounded, source-scoped interceptor seam with
-immutable interceptor snapshots, preserved request identity/tags, one-use
-`proceed`, cancellation, and explicit budgets. The measured Baozi defaults are
-at most 32 interceptors, 64 interceptor/terminal steps per call, depth at most
-32, and one forward `proceed` per chain object. Over-budget or reentrant paths
-must fail through a typed `IllegalStateException`/verification path; response-
-body replacements count against the existing transport maximum, and nested
-async execution must share the parent VM instruction budget. These constraints
-are proposed for the next seam, not implemented behavior. It must be integrated
-into the reader path before any source-defined image transform is claimed.
+The next networking milestone is a source-scoped reader image execution seam
+that retains the exact DEX Request/tags and deliberately invokes the completed
+bounded chain. Intermediate redirect mutation needs an explicit bounded
+no-follow/response-sequence seam because URLSession currently returns only the
+final response. Baozi banner cropping must remain unsupported until a bounded
+portable pixel/JPEG implementation exists; a metadata-only Bitmap shim would
+not be compatibility.
 Reader retry must also regenerate and revalidate the source `ImageRequest` and
 define expiry/credential-refresh behavior; the current per-page retry reuses the
 request resolved during page loading.
@@ -112,11 +117,13 @@ compatibility:
   is source-isolated but in memory only. Baozi scalar preferences are accepted
   by the exact profile when injected, but production preference UI/persistence
   is not wired.
-- Rate limiting: `RateLimitInterceptor` semantics (permits per interval).
+- General rate-limiter parity beyond the exact finite Baozi path (permits per
+  interval, retry behavior, and other time representations).
 - Cloudflare: challenge detection → WKWebView solve → cookie/UA sync → retry
   (see EXTENSION_RUNTIME.md M4). No bypass pretense.
-- Additional retry/interceptor semantics as real corpus paths require them;
-  source interceptor execution remains open as described above.
+- Additional retry/interceptor semantics as real corpus paths require them,
+  plus deliberate integration of the completed source-operation chain into the
+  reader image path as described above.
 
 ## Diagnostics
 

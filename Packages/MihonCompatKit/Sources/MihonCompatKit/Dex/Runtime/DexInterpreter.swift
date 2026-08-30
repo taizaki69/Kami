@@ -69,6 +69,12 @@ public final class DexInterpreter {
     /// `call` reports a typed error instead of leaking internal suspension
     /// control flow when it reaches an async host capability.
     private var allowsAsyncHostInvocation = false
+    /// Number of async VM entries whose continuations are still live. Host
+    /// capabilities such as OkHttp's interceptor chain may re-enter DEX while
+    /// an outer frame is suspended, but those nested entries must consume the
+    /// outer entry's remaining instruction budget instead of starting a fresh
+    /// budget session.
+    private var activeAsyncEntryDepth = 0
     /// Conservative default: interpreted frames are large in debug builds and
     /// unbounded recursion (obfuscated/mis-resolved super calls) must not
     /// overflow the host stack. The production runtime raises this by
@@ -165,7 +171,9 @@ public final class DexInterpreter {
     /// every suspension; no worker thread is blocked.
     @discardableResult
     public func callAsync(classDescriptor: String, method: String,
-                          args: [RVal] = []) async throws -> RVal {
+                           args: [RVal] = []) async throws -> RVal {
+        activeAsyncEntryDepth += 1
+        defer { activeAsyncEntryDepth -= 1 }
         do {
             return try allowingAsyncHostInvocation {
                 try call(classDescriptor: classDescriptor, method: method, args: args)
@@ -178,7 +186,9 @@ public final class DexInterpreter {
     /// Async counterpart of the exact-overload entry point.
     @discardableResult
     public func callAsync(classDescriptor: String, method: String, prototype: String,
-                          args: [RVal] = []) async throws -> RVal {
+                           args: [RVal] = []) async throws -> RVal {
+        activeAsyncEntryDepth += 1
+        defer { activeAsyncEntryDepth -= 1 }
         do {
             return try allowingAsyncHostInvocation {
                 try call(
@@ -187,6 +197,35 @@ public final class DexInterpreter {
                     prototype: prototype,
                     args: args
                 )
+            }
+        } catch let suspension as DexAsyncSuspension {
+            return try await resolve(suspension)
+        }
+    }
+
+    /// Re-enters one exact DEX method from an async host capability while an
+    /// outer interpreted call is suspended. This is deliberately internal:
+    /// only bounded host protocols may preserve the existing budget session.
+    /// Calling the public `callAsync` here would reset `remainingInstructions`
+    /// after the outer frame has unwound to depth zero.
+    @discardableResult
+    func callNestedAsync(classDescriptor: String, method: String, prototype: String,
+                         args: [RVal] = []) async throws -> RVal {
+        guard activeAsyncEntryDepth > 0 else {
+            throw VMError.verify("nested async DEX entry requires an active async VM session")
+        }
+        activeAsyncEntryDepth += 1
+        defer { activeAsyncEntryDepth -= 1 }
+        do {
+            return try preservingInstructionBudget {
+                try allowingAsyncHostInvocation {
+                    try call(
+                        classDescriptor: classDescriptor,
+                        method: method,
+                        prototype: prototype,
+                        args: args
+                    )
+                }
             }
         } catch let suspension as DexAsyncSuspension {
             return try await resolve(suspension)
@@ -226,6 +265,12 @@ public final class DexInterpreter {
     private func withInstructionBudget<T>(_ operation: () throws -> T) throws -> T {
         let startsSession = entryDepth == 0 && depth == 0
         if startsSession { remainingInstructions = maxInstructions }
+        entryDepth += 1
+        defer { entryDepth -= 1 }
+        return try operation()
+    }
+
+    private func preservingInstructionBudget<T>(_ operation: () throws -> T) throws -> T {
         entryDepth += 1
         defer { entryDepth -= 1 }
         return try operation()

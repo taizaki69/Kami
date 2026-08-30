@@ -22,10 +22,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       15 measurement-only Keiyoushi APKs under `Tests/corpus/measurement/`,
       alongside 6 execution and 6 AOSP conformance fixtures (27 total; 19
       current lib 1.6 artifacts). The remaining 15 measurement APKs analyze as
-      11 structural candidates with 563 unique unregistered external method
+      11 structural candidates with 540 unique unregistered external method
       surfaces and zero unsupported opcodes. This is prioritization evidence,
       not a statistical sample or execution/admission proof. The local suite
-      passes 207/207 with the corpus present.
+      passes 214/214 with the corpus present.
 
 ## P0 — App foundation
 
@@ -76,7 +76,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       public wrappers; static
       `Sort`/`Select` filters, Baozi's bounded scalar preferences, and Baozi's
       interpreted custom image request are proven; dynamic/network-backed
-      filters, production preference UI/persistence, source interceptor
+      filters, production preference UI/persistence, reader-image interceptor
       execution, and broader runtime coverage remain open
 - [x] First pinned real extension executing
       popular→search→details→chapters→pages — BatCave's unmodified locked APK
@@ -119,7 +119,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       and single-DEX shape, absence of native `.so` entries, entry placement,
       and stable public wrappers without executing or admitting unknown APKs;
       the four execution profiles and all 15 remaining measurement APKs produce
-      deterministic results: 11 measurement candidates, 563 unique
+      deterministic results: 11 measurement candidates, 540 unique
       unregistered surfaces, zero unsupported opcodes, and four stable-wrapper
       blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC); legacy lib 1.4
       specimens remain explicit blockers
@@ -129,14 +129,21 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       popular/latest/search/details/chapters/pages path, exact static filters,
       bounded scalar preferences, a valid non-default filter state, and DEX
       `imageRequest` URL rewrite.
-- [ ] Execute source-defined OkHttp interceptors through a bounded, source-scoped
-      chain that preserves DEX `Request` identity/tags and is usable by the
-      reader image path. Initial measured limits: 32 interceptors, 64 total
-      interceptor/terminal steps per call, depth 32, and one `proceed` per chain
-      object, with replacement bytes charged to the transport limit and nested
-      async work sharing the parent VM instruction budget. Baozi banner
-      cropping, redirect-domain rewriting, and missing-image behavior are not
-      yet executed or proven.
+- [x] Execute source-defined OkHttp application and network interceptors for
+      source operations through a bounded source-scoped chain. It preserves
+      exact DEX `Request` identity/tags and registration/unwind order, enforces
+      32 interceptors, 64 interceptor/terminal steps, depth 32, and one
+      `proceed` per chain object, charges replacement bytes/headers to the
+      transport policy, checks cancellation at every edge, and shares the
+      parent VM instruction budget. Baozi's real core operations traverse the
+      chain and its finite rate limiter.
+- [ ] Add a source-scoped reader-image execution seam that retains DEX
+      `Request` identity/tags and deliberately invokes the interceptor chain.
+      Add bounded intermediate-redirect handling because URLSession currently
+      follows redirects before returning a response. Baozi banner cropping
+      remains unsupported until a bounded portable pixel/JPEG implementation
+      exists; redirect-domain and missing-image behavior are still unproven in
+      reader image loads.
 - [x] Carry each source's explicit insecure-HTTP policy into reader image
       fetching: pinned sources retain the factory policy, `ReaderView` passes
       it into `ReaderImagePipeline`, initial URL/headers are validated before
