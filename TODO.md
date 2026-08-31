@@ -19,13 +19,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 - [x] `compat-audit` CLI (inspect/missing/index/methods/disasm/opcodes/plan/gaps) —
       deterministic file and directory inspection, run on the locked corpus
 - [x] SHA/URL-locked behavior-stratified current lib 1.6 measurement corpus —
-      15 measurement-only Keiyoushi APKs under `Tests/corpus/measurement/`,
-      alongside 6 execution and 6 AOSP conformance fixtures (27 total; 19
-      current lib 1.6 artifacts). The remaining 15 measurement APKs analyze as
-      11 structural candidates with 540 unique unregistered external method
+      14 measurement-only Keiyoushi APKs under `Tests/corpus/measurement/`,
+      alongside 7 execution and 6 AOSP conformance fixtures (27 total; 19
+      current lib 1.6 artifacts). The remaining 14 measurement APKs analyze as
+      10 structural candidates with 532 unique unregistered external method
       surfaces and zero unsupported opcodes. This is prioritization evidence,
       not a statistical sample or execution/admission proof. The local suite
-      passes 214/214 with the corpus present.
+      passes 234/234 with the corpus present.
 
 ## P0 — App foundation
 
@@ -55,7 +55,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       [#1](https://github.com/taizaki69/Kami/issues/1)
 - [~] Kotlin/Java class library M2 — Object/String/StringBuilder, core Kotlin
       ABI, bounded collections, atomics, reflection, and Mihon filters cover
-      the pinned BatCave, Kawii, MangaMelon, and Baozi request paths; bounded form/header/URL/cache/request/
+      the pinned BatCave, Kawii, MangaMelon, Baozi, and TuttoAnimeManga request paths; bounded form/header/URL/cache/request/
       call models, Kotlin duration shims, async frame resumption, source-scoped
       transport, response/body/Okio values, bounded Jsoup document/element/CSS
       selectors (including modern direct-child and `:containsData` semantics),
@@ -71,8 +71,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       image-request path; measured long
       tail remains a static prioritization target in the locked measurement set
 - [~] tachiyomix API bridge M3 (`HttpSource` → `KamiSource`) — the exact pinned
-      BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, and Baozi Manhua
-      1.6.29 profiles implement the measured app-facing contract through stable
+      BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, Baozi Manhua
+      1.6.29, and TuttoAnimeManga 1.6.10 profiles implement the measured app-facing contract through stable
       public wrappers; static
       `Sort`/`Select` filters, Baozi's bounded scalar preferences, and Baozi's
       interpreted custom image request are proven; dynamic/network-backed
@@ -118,8 +118,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       discovery checks manifest identity, supported lib version, single-source
       and single-DEX shape, absence of native `.so` entries, entry placement,
       and stable public wrappers without executing or admitting unknown APKs;
-      the four execution profiles and all 15 remaining measurement APKs produce
-      deterministic results: 11 measurement candidates, 540 unique
+      the five exact profiles and all 14 remaining measurement APKs produce
+      deterministic results: 10 measurement candidates, 532 unique
       unregistered surfaces, zero unsupported opcodes, and four stable-wrapper
       blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC); legacy lib 1.4
       specimens remain explicit blockers
@@ -129,6 +129,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       popular/latest/search/details/chapters/pages path, exact static filters,
       bounded scalar preferences, a valid non-default filter state, and DEX
       `imageRequest` URL rewrite.
+- [x] Expand the exact catalog with a fifth current extension — TuttoAnimeManga
+      1.6.10 is admitted by exact SHA-256, signer, manifest, source-ID, and
+      structural gates. Deterministic real-APK tests prove its metadata,
+      popular/latest/search/details/chapters/pages path, empty filter schema,
+      inherited request headers, latest sorting/ten-result cap, default image
+      request, and rejection of unsupported filters/preferences before transport.
 - [x] Execute source-defined OkHttp application and network interceptors for
       source operations through a bounded source-scoped chain. It preserves
       exact DEX `Request` identity/tags and registration/unwind order, enforces
@@ -137,13 +143,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       transport policy, checks cancellation at every edge, and shares the
       parent VM instruction budget. Baozi's real core operations traverse the
       chain and its finite rate limiter.
-- [ ] Add a source-scoped reader-image execution seam that retains DEX
+- [x] Add a source-scoped reader-image execution seam that retains DEX
       `Request` identity/tags and deliberately invokes the interceptor chain.
-      Add bounded intermediate-redirect handling because URLSession currently
-      follows redirects before returning a response. Baozi banner cropping
-      remains unsupported until a bounded portable pixel/JPEG implementation
-      exists; redirect-domain and missing-image behavior are still unproven in
-      reader image loads.
+      Supported GET reader images observe bounded intermediate redirects and
+      follow sanitized locations; Baozi's real fixture proves redirect-domain
+      rewriting to final bytes. Banner cropping remains unsupported until a
+      bounded portable pixel/JPEG implementation exists; missing-image behavior
+      is still unproven in reader image loads.
 - [x] Carry each source's explicit insecure-HTTP policy into reader image
       fetching: pinned sources retain the factory policy, `ReaderView` passes
       it into `ReaderImagePipeline`, initial URL/headers are validated before

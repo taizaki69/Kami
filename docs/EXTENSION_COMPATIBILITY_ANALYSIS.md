@@ -1,11 +1,11 @@
 # Extension Compatibility Analysis
 
-**Date:** Ecosystem research verified 2026-08-21; local corpus measurement updated 2026-08-29
+**Date:** Ecosystem research verified 2026-08-21; local corpus measurement updated 2026-08-30
 **Scope:** Current (2025–2026) Mihon extension ecosystem, verified against primary sources.
 
 The ecosystem research was verified on 2026-08-21 against the repositories
 listed in [Sources](#sources); the local corpus evidence in section 6.1 was
-remeasured on 2026-08-29. Where a claim could not be verified, it is marked
+remeasured on 2026-08-30. Where a claim could not be verified, it is marked
 **unverified**.
 
 ---
@@ -252,21 +252,21 @@ simplest `ParsedHttpSource` shapes; cannot be the general strategy.
 5. **Backup import** (.tachibk protobuf+zstd) independent of the runtime, so users
    can migrate libraries before extension compat reaches their sources.
 
-### 6.1 Current local corpus measurement (2026-08-29)
+### 6.1 Current local corpus measurement (2026-08-30)
 
-The local Kami corpus now locks 27 APK artifacts: six real Keiyoushi execution
-fixtures, 15 current lib 1.6 Keiyoushi measurement-only fixtures under
+The local Kami corpus now locks 27 APK artifacts: seven real Keiyoushi execution
+fixtures, 14 current lib 1.6 Keiyoushi measurement-only fixtures under
 `Tests/corpus/measurement/`, and six AOSP apksig conformance fixtures. The
-current lib 1.6 total is 19 (four execution fixtures plus the 15 measurement
+current lib 1.6 total is 19 (five execution fixtures plus the 14 measurement
 fixtures). The artifacts were selected by behavior family and shape, not as a
 statistical sample.
 
 The measurement artifacts are parsed, signature-verified for parser
 conformance, and statically audited only. Corpus membership never grants signer
 trust, admission, installation, or execution. The deterministic audit analyzed
-15/15 measurement APKs with zero errors, found 11 structural candidates and
+14/14 measurement APKs with zero errors, found 10 structural candidates and
 four stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), and
-reported 540 unique unregistered external method surfaces with zero unsupported
+reported 532 unique unregistered external method surfaces with zero unsupported
 opcodes. These are prioritization results, not runtime compatibility proof.
 
 Baozi Manhua 1.6.29 is now the fourth exact execution profile. Its admission is
@@ -280,23 +280,41 @@ details/chapters, and pages. They also assert one header plus four static
 `Select` filters, bounded scalar preferences, and the DEX `imageRequest(Page)`
 rewrite from `static.baozicdn.com` to `static.baozimh.com` without network I/O.
 
+TuttoAnimeManga 1.6.10 is now the fifth exact execution profile. Its admission
+is pinned to SHA-256
+`e50f1bac6e30121b6eb3461e2ce7297de431d98fc0ed1bab510a30ce784edae3`, the same
+authenticated Keiyoushi signer fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, the
+manifest identity, and source ID `2102507871480604746`. Deterministic
+fake-transport regressions execute popular, latest, text search,
+details/chapters, and pages from the unmodified APK, including PizzaReader's
+chapter-number, scanlator, pagination, and date conversions. The profile
+exposes no filters or preferences; its page-URL image path preserves the
+inherited `Referer`/`Origin` headers while source-derived credentials remain
+origin-bound. These are offline assertions and do not
+claim live-site availability or general PizzaReader compatibility.
+
 `ReaderView` resolves each source `ImageRequest` asynchronously. Supported
 interpreted requests now carry an opaque UUID capability while the source actor
 retains the exact DEX Request/tags and configured client in a bounded table.
-Both source-operation `await`/`awaitSuccess` and those reader requests execute
-bounded, registration-ordered application/network interceptor surfaces that
-preserve Request identity, tags, cancellation, response bounds, and one VM
-instruction budget. KamiCore validates the public URL/header projection,
-separates hidden execution identities in its cache, and receives only the
-bounded response. The GET-only reader path can now observe one URLSession
-exchange at a time: application interceptors run once, network interceptors run
-per response, and sanitized follow-ups share the five-redirect and 64-step
-budgets. Baozi's direct-302 fixture proves its redirect-domain tag rewrite, and
-the exact APK follows that rewritten source-host URL to final image bytes. Its
-optional Bitmap banner crop remains unsupported, so the production factory
-explicitly defaults `BAOZI_BANNER=0`. General source-operation response
-sequences and non-GET redirect semantics remain unproven. The production app
-has no UI/persistence path for the remaining injected Baozi preference values.
+Source-operation `await`/`awaitSuccess` and supported interpreted reader
+requests (currently Baozi with its banner transform disabled) execute bounded,
+registration-ordered application/network interceptor surfaces that preserve
+Request identity, tags, cancellation, response bounds, and one VM instruction
+budget. Page-URL profiles, including TuttoAnimeManga, expose only a validated
+URL/header projection to the ordinary reader image pipeline; they do not claim
+retained DEX Request/client or source-interceptor execution. KamiCore validates
+the public URL/header projection, separates hidden execution identities in its
+cache, and receives only the bounded response. The GET-only interpreted reader
+path can now observe one URLSession exchange at a time: application interceptors
+run once, network interceptors run per response, and sanitized follow-ups share
+the five-redirect and 64-step budgets. Baozi's direct-302 fixture proves its
+redirect-domain tag rewrite, and the exact APK follows that rewritten
+source-host URL to final image bytes. Its optional Bitmap banner crop remains
+unsupported, so the production factory explicitly defaults `BAOZI_BANNER=0`.
+General source-operation response sequences and non-GET redirect semantics
+remain unproven. The production app has no UI/persistence path for the
+remaining injected Baozi preference values.
 
 ## 7. Prior art (iOS)
 
@@ -318,8 +336,8 @@ feasibility problem**. The blockers, honestly categorized:
 | DEX parsing/analysis | **Done** (this repo, pure Swift) |
 | APK/manifest parsing | **Done** (pure Swift, incl. binary AXML) |
 | Repo index compatibility | **Done** (JSON + proto) |
-| Compatibility diagnostics | **Partial product surface**: exact sources capture the first typed stage-counted VM gap at the public VM boundary even when a nested host bridge catches/replaces it; unknown external fields fail closed unless explicitly modeled. `compat-audit gaps` emits a deterministic non-executing static/corpus priority report without paths or request data, and `compat-audit promote-gap` strictly converts the first canonical redacted runtime finding into a deterministic XCTest assertion seed. The current 15-artifact measurement run analyzed 15/15 with 0 errors, 11 structural candidates, four stable-wrapper blockers, 540 unique unregistered external method surfaces, and 0 unsupported opcodes; app-facing export/share UX remains open |
-| DEX execution | **Partial M1/M2 plus four pinned app-facing profiles work**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual selection, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, stable public source-wrapper routing across measured R8 layouts, pinned constructors/getters, and BatCave, Kawii Manga, MangaMelon, and Baozi popular/search/latest/details/chapters/pages execute through bounded async response delivery and exact compatibility models; MangaMelon and Baozi additionally prove exact static filters, while general downloaded-extension compatibility remains open |
+| Compatibility diagnostics | **Partial product surface**: exact sources capture the first typed stage-counted VM gap at the public VM boundary even when a nested host bridge catches/replaces it; unknown external fields fail closed unless explicitly modeled. `compat-audit gaps` emits a deterministic non-executing static/corpus priority report without paths or request data, and `compat-audit promote-gap` strictly converts the first canonical redacted runtime finding into a deterministic XCTest assertion seed. The current 14-artifact measurement run analyzed 14/14 with 0 errors, 10 structural candidates, four stable-wrapper blockers, 532 unique unregistered external method surfaces, and 0 unsupported opcodes; app-facing export/share UX remains open |
+| DEX execution | **Partial M1/M2 plus five pinned app-facing profiles work**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual selection, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, stable public source-wrapper routing across measured R8 layouts, pinned constructors/getters, and BatCave, Kawii Manga, MangaMelon, Baozi, and TuttoAnimeManga popular/search/latest/details/chapters/pages execute through bounded async response delivery and exact compatibility models; MangaMelon and Baozi additionally prove exact static filters, while general downloaded-extension compatibility remains open |
 | Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI including query trimming/form encoding and bounded string/collection helpers, bounded collections and comparator sorting, structured coroutine lambdas, atomics/reflection, source filters with validated app-state reapplication, source-base constructors, bounded scalar preferences for Baozi, bounded OkHttp requests, a bounded application/network interceptor chain for source operations and source-scoped reader images, source-scoped async transport, response/body/Okio values including UTF-8/ByteString/Base64 request encoding, bounded Jsoup HTML/CSS including direct-child and `:containsData` semantics, generated-serializer JSON encoding/decoding including defaults/longs/string memo objects, a measured Java-time subset, and reached `SManga`/`MangasPage`/`SChapter`/`SMangaUpdate`/`Page` models; dynamic filters, production preference UI/persistence, Android bitmap banner transforms, additional DOM APIs, and the long tail remain open |
 | Cloudflare/WebView | Native WKWebView bridge design (see NETWORKING.md) |
 | Backup import | Proto decoding done; zstd decompression pending |

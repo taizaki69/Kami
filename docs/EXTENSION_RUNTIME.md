@@ -1,14 +1,15 @@
 # Extension Runtime — Measured Status and Staged Plan
 
-**Last updated:** 2026-08-29
+**Last updated:** 2026-08-30
 
 ## Where we are
 
 Kami has crossed from DEX analysis into controlled execution. The partial M1
 interpreter runs synthetic conformance fixtures and progressively deeper paths
-from six pinned execution-fixture APKs. Exact BatCave, Kawii Manga, MangaMelon,
-and Baozi Manhua profiles now cross the app-facing `KamiSource` boundary end to
-end under deterministic offline fixtures. A separate set of 15 current lib 1.6
+from seven pinned execution-fixture APKs. Exact BatCave, Kawii Manga, MangaMelon,
+Baozi Manhua, and TuttoAnimeManga profiles now cross the app-facing `KamiSource`
+boundary end to end under deterministic offline fixtures. A separate set of 14
+current lib 1.6
 APKs is locked for non-executing measurement only. This is not yet a complete verifier,
 Java or Kotlin runtime, general tachiyomix source bridge, or arbitrary-extension
 implementation.
@@ -30,7 +31,8 @@ the full signing identity and manifest, preflights the profile's exact source-ID
 set before DEX construction, selects an exact measured profile, and
 postvalidates every source ID returned by construction against that set and the
 persisted admission. The current catalog contains exact BatCave 1.6.9, Kawii
-Manga 1.6.1, MangaMelon 1.6.1, and Baozi Manhua 1.6.29 profiles; an
+Manga 1.6.1, MangaMelon 1.6.1, Baozi Manhua 1.6.29, and TuttoAnimeManga 1.6.10
+profiles; an
 authenticated but unmeasured extension is stored securely and left disabled
 rather than executed heuristically. `SourceRegistry` removal is package-owner
 scoped, so disabling one downloaded package cannot remove another package's
@@ -41,10 +43,10 @@ not a downloaded-app bypass. They still reverify the exact profile hash and
 signer (as well as manifest/plan identity); downloaded execution requires the
 persisted admission capability and `ExtensionSourceFactory`.
 
-The corpus lock additionally contains 15 current lib 1.6 Keiyoushi APKs under
-`Tests/corpus/measurement/`. Alongside the six execution fixtures and six AOSP
+The corpus lock additionally contains 14 current lib 1.6 Keiyoushi APKs under
+`Tests/corpus/measurement/`. Alongside the seven execution fixtures and six AOSP
 apksig conformance fixtures, this is 27 artifacts total, including 19 current
-lib 1.6 artifacts (four execution plus 15 measurement). The measurement set is
+lib 1.6 artifacts (five execution plus 14 measurement). The measurement set is
 behavior-stratified, not statistical. The earlier 16-artifact measurement run
 occupied 1.24 MB (1,242,086 bytes) before Baozi moved into the execution role.
 Its artifacts are parsed, signature-verified for parser conformance, and
@@ -67,7 +69,8 @@ validated before any constructed source is returned.
 Measured real-APK behavior today:
 
 - Akuma 1.4.10, MangaDex 1.4.212, BatCave 1.6.9, Kawii Manga 1.6.1,
-  MangaMelon 1.6.1, and Baozi Manhua 1.6.29 entry constructors return
+  MangaMelon 1.6.1, Baozi Manhua 1.6.29, and TuttoAnimeManga 1.6.10 entry
+  constructors return
   real DEX objects.
 - BatCave 1.6.9 returns its real base URL, language, name, and 64-bit source ID.
 - BatCave's real `getPopularManga` path executes class initialization, Kotlin
@@ -128,6 +131,18 @@ Measured real-APK behavior today:
   the filtered request, reject mutated filter schemas before transport, assert
   its bounded scalar preference keys, and execute its DEX `imageRequest(Page)`
   rewrite from the fixture CDN host to the image host.
+- TuttoAnimeManga 1.6.10 is admitted as the fifth exact profile. Its locked APK
+  is identified by SHA-256
+  `e50f1bac6e30121b6eb3461e2ce7297de431d98fc0ed1bab510a30ce784edae3`, signer
+  fingerprint
+  `9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, and
+  declared source ID `2102507871480604746`. Deterministic fake-transport
+  regressions execute popular, latest, text search, combined details/chapters,
+  and pages from the unmodified DEX, including PizzaReader's chapter-number,
+  scanlator, pagination, and date conversions. The profile exposes no filters
+  or preferences; its page-URL image path preserves the inherited
+  `Referer`/`Origin` headers, strips source-derived credentials for cross-origin
+  image URLs, and does not claim source-scoped reader-interceptor execution.
 - These source-result paths are proven only with deterministic offline response
   fixtures. `PinnedInterpretedSource` maps them through the complete app-facing
   contract and the iOS reader resolves one source `ImageRequest` per page
@@ -136,9 +151,9 @@ Measured real-APK behavior today:
   values can be injected into the exact profile, but the app UI/storage path is
   not wired. The pinned suite never performs live network I/O.
 
-The measurement-only static audit analyzes the remaining 15 current lib 1.6
-artifacts with zero errors. It finds 11 structural candidates and four
-stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), plus 540
+The measurement-only static audit analyzes the remaining 14 current lib 1.6
+artifacts with zero errors. It finds 10 structural candidates and four
+stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), plus 532
 unique unregistered external method surfaces and zero unsupported opcodes. These
 are prioritization results, not a compatibility rate and not runtime evidence;
 the measurement APKs remain outside the exact profile catalog and are never
@@ -158,7 +173,7 @@ stale results, and failed next-page requests no longer advance the page counter.
 Extension APK                       (untrusted)
    ↓ install + signature trust      durable, capability-gated
 content-addressed APK               persisted; re-authenticated on restore
-   ↓ exact profile catalog          BatCave + Kawii + MangaMelon + Baozi; measurement APKs fail closed
+   ↓ exact profile catalog          BatCave + Kawii + MangaMelon + Baozi + TuttoAnimeManga; measurement APKs fail closed
    ↓ bounded ZIP/DEFLATE + CRC      working
 AndroidManifest.xml (AXML)          working
 classes*.dex                        validated structural parse
@@ -166,8 +181,8 @@ classes*.dex                        validated structural parse
    ↓ DexInterpreter                 partial M1; async frame resume works
    ↓ Java/Kotlin HostBridge         partial exact-signature M2 surface
    ↓ source-scoped HTTP transport   bounded async request/response slice works
-   ↓ bounded HTML/JSON bridges      all four measured core source paths work
-   ↓ tachiyomix API bridge          four exact pinned profiles work
+   ↓ bounded HTML/JSON bridges      all five measured core source paths work
+   ↓ tachiyomix API bridge          five exact pinned profiles work
 KamiSource (Swift protocol)         native + admitted measured adapters work
    ↓ SourceRegistry / app / DB      restore, enable/disable, filtered Browse work
 ```
@@ -328,9 +343,12 @@ synthetic and pinned-corpus tests:
   projection first, includes the hidden UUID in deduplication/cache identity,
   invokes the same bounded chain, and then enforces 2xx, non-empty, and
   compressed-image size checks. Capability deallocation asynchronously releases
-  the retained handle. Supported GET reader requests execute application
-  interceptors once and network interceptors per observable exchange, retain
-  tags across sanitized follow-ups, and share the redirect and chain budgets.
+  the retained handle. Supported interpreted GET reader requests (currently
+  Baozi with its banner transform disabled) execute application interceptors
+  once and network interceptors per observable exchange, retain tags across
+  sanitized follow-ups, and share the redirect and chain budgets. Page-URL
+  reader requests, including TuttoAnimeManga, expose only validated URL/header
+  projections and do not claim this retained execution capability.
 - SwiftSoup 2.9.6 supplies HTML5 parsing and CSS semantics behind an exact
   Jsoup-compatible document/element/elements slice. Kami caps input bytes, DOM
   nodes/depth/attributes, selector length/results/cumulative work, and extracted
@@ -369,7 +387,7 @@ Signer-authenticated admission, durable installation/selection, exact-byte
 restoration, and capability-consuming source construction are now measured.
 Stable public `KeiSource` wrapper routing now works whether a wrapper remains on
 a local superclass or is vertically merged by R8 into the generated entry, and
-the second, third, and fourth current extensions are proven end to end. Bounded
+the second through fifth current extensions are proven end to end. Bounded
 shared plan generation now replaces duplicated structural discovery, but it does not
 expand admission. A privacy-safe diagnostics layer now records the first typed
 VM linkage/opcode failure at the public VM boundary by app-facing stage, before
@@ -380,15 +398,17 @@ runtime finding into a deterministic XCTest assertion seed, while the separate
 non-executing static corpus audit ranks unregistered external invocations,
 unsupported opcodes, and plan blockers. The static method list is deliberately a priority signal,
 not runtime proof: virtual/interface dispatch may resolve through a different
-receiver class. The broader current corpus is now locked and measured: all 15
-remaining measurement APKs analyzed without errors, with 11 structural
-candidates, four stable-wrapper blockers, 540 unique unregistered external
+receiver class. The broader current corpus is now locked and measured: all 14
+remaining measurement APKs analyzed without errors, with 10 structural
+candidates, four stable-wrapper blockers, 532 unique unregistered external
 method surfaces, and zero unsupported opcodes. App-facing local report export
 remains open; the next compatibility step is evidence-driven promotion of the
 next locked structural candidate.
 Dynamic/network-backed filter lists and production preference UI/persistence
-remain open. Reader-image execution now reaches the bounded source chain and
-observes/follows bounded GET redirects; Android bitmap transforms and general
+remain open. Interpreted reader-image execution, currently proven for Baozi with
+its banner transform disabled, reaches the bounded source chain and
+observes/follows bounded GET redirects; page-URL profiles only expose validated
+URL/header projections. Android bitmap transforms and general
 source-operation/non-GET follow-up semantics remain open. The longer tail
 remains additional Jsoup DOM behavior, string/collection overloads, broader
 serialization, and Android context/UI shims. A class appearing in the
@@ -399,11 +419,12 @@ does not mean every method on that class is callable.
 
 The target is a signature-aware bridge from `HttpSource`, `SManga`, `SChapter`,
 `MangasPage`, filters, network helpers, and Jsoup helpers onto `KamiSource`.
-The exact BatCave, Kawii Manga, MangaMelon, and Baozi Manhua profiles implement
+The exact BatCave, Kawii Manga, MangaMelon, Baozi Manhua, and TuttoAnimeManga
+profiles implement
 their respective measured subsets with one actor per source owning its mutable
-interpreter and source-scoped transport. The app can construct any of the four
+interpreter and source-scoped transport. The app can construct any of the five
 profiles from a restored admission. Their shared structural plan is derived
-from the authenticated APK instead of copied into each profile. The 15
+from the authenticated APK instead of copied into each profile. The 14
 measurement APKs remain non-executing. Automatic profile admission beyond the
 exact catalog and the remaining APIs are still M3 work. Per-source network
 clients must own rate limits, cookies, and redacted tracing. The first pinned
@@ -422,15 +443,18 @@ preference set still overrides it. If banner mode `1` or `2` is explicitly
 selected, Kami keeps the safe URL/header reader path instead of invoking a
 known-incomplete transform.
 
-Source-operation `await`/`awaitSuccess` and supported reader images execute the
-configured bounded application/network interceptor surfaces while preserving
-the exact Request/tags and a single VM instruction budget. Reader capabilities
-retain the Request and configured client only inside the source actor, share
-the source transport/cookie jar, and expose only a bounded response. On the
-supported GET reader path, application interceptors run once around the call,
-network interceptors run per single exchange, and the rewritten response
-`Location` drives a sanitized follow-up under the same five-redirect and
-64-step budgets. The real Baozi fixtures prove its
+Source-operation `await`/`awaitSuccess` and supported interpreted reader images
+(currently Baozi with its banner transform disabled) execute the configured
+bounded application/network interceptor surfaces while preserving the exact
+Request/tags and a single VM instruction budget. Page-URL reader image paths,
+including TuttoAnimeManga, expose only a validated URL/header projection and do
+not claim retained DEX Request/client or source-interceptor execution. Reader
+capabilities retain the Request and configured client only inside the source
+actor, share the source transport/cookie jar, and expose only a bounded
+response. On the supported interpreted GET reader path, application interceptors
+run once around the call, network interceptors run per single exchange, and the
+rewritten response `Location` drives a sanitized follow-up under the same
+five-redirect and 64-step budgets. The real Baozi fixtures prove its
 `RedirectDomainInterceptor` tag both rewrites a direct injected 302 while
 preserving response state and drives a second request to final image bytes.
 Android banner cropping is still unsupported. Ordinary source operations and
@@ -502,35 +526,44 @@ compatibility.
 
 ## Verification
 
-`MihonCompatKit` currently has 223 passing tests locally on Windows/Swift 6.3.3.
-The three new `CorpusLockTests` regressions cover separated corpus roles,
+`MihonCompatKit` currently has 234 passing tests locally on Windows/Swift 6.3.3.
+The three `CorpusLockTests` regressions cover separated corpus roles,
 SHA/URL/fetcher and manifest/signature checks, and the deterministic static
 measurement baseline. The suite also includes 6 focused signer regressions
-explicitly exercising all six real Keiyoushi execution APKs—Akuma, MangaDex,
-BatCave, Kawii Manga, MangaMelon, and Baozi Manhua—while the AOSP fixtures are
-separate signature-conformance inputs. All six execution fixtures receive
-coverage (legacy constructor coverage plus four exact current source paths,
-including Baozi), along with 3 deterministic structural-plan regressions,
+explicitly exercising all seven real Keiyoushi execution APKs—Akuma, MangaDex,
+BatCave, Kawii Manga, MangaMelon, Baozi Manhua, and TuttoAnimeManga—while the
+AOSP fixtures are separate signature-conformance inputs. All seven execution
+fixtures receive coverage (legacy constructor coverage plus five exact current
+source paths, including Baozi and TuttoAnimeManga), along with 3 deterministic structural-plan regressions,
 7 privacy-safe runtime/static diagnostics regressions, 7 focused
 HTML/parser-limit regressions, Java URL-encoding and bounded Kotlin
 string/collection-helper regressions, generated chapter/page JSON success/
-failure paths, 4 focused async interpreter/transport regressions, 10 HTTP
+failure paths, 4 focused async interpreter/transport regressions, 11 HTTP
 transport regressions, 9 bounded OkHttp interceptor-chain regressions, 4 BatCave
-adapter/tamper/concurrency/policy regressions, 10 Baozi profile regressions, and
-complete Kawii/MangaMelon profile regressions, alongside the existing parser,
+adapter/tamper/concurrency/policy regressions, 10 Baozi profile regressions, 3
+TuttoAnimeManga profile regressions, and complete Kawii/MangaMelon profile
+regressions, alongside the existing parser,
 bytecode verifier, request-model, repository, and compression coverage.
-KamiCore currently passes 15/15 portable Windows tests, including exact Baozi
-factory admission. The exact current macOS CI run passes all 26, including
+KamiCore currently passes 16/16 portable Windows tests, including exact Baozi
+and TuttoAnimeManga factory admission. Exact Tutto implementation head
+`cf02c77` passes all 27 macOS KamiCore tests, including
 reader settings and image-pipeline boundaries, Browse feed/search routing,
 SQLite signer persistence, repository-key pinning, install/update and legacy
 confirmation, exact-byte restore/factory rejection, enabled-state preservation,
 and downloaded registry replacement/removal.
 
-Exact first-gap diagnostics implementation commit `b1cd246` passes
+Exact Tutto implementation commit `cf02c77` passes
+[Swift CI 33342887303](https://github.com/taizaki69/Kami/actions/runs/33342887303),
+[iOS Build 33342887315](https://github.com/taizaki69/Kami/actions/runs/33342887315),
+and [IPA Package 33342887323](https://github.com/taizaki69/Kami/actions/runs/33342887323).
+Swift CI verified all 27 locked fixtures without fallback download, passed 234
+MihonCompatKit and 27 KamiCore tests, built and uploaded the optimized CLI, and
+the iOS/IPA workflows passed both build targets and unsigned packaging.
+Historical first-gap diagnostics commit `b1cd246` passes
 [Swift CI 33289953550](https://github.com/taizaki69/Kami/actions/runs/33289953550),
 [iOS Build 33289953526](https://github.com/taizaki69/Kami/actions/runs/33289953526),
 and [IPA Package 33289953529](https://github.com/taizaki69/Kami/actions/runs/33289953529).
-Swift CI verified all 27 locked fixtures without fallback download, passed 223
+Its Swift CI verified all 27 locked fixtures without fallback download, passed 223
 MihonCompatKit and 26 KamiCore tests, built the optimized CLI, and uploaded it.
 The iOS and IPA workflows passed simulator/device compilation and unsigned IPA
 packaging respectively. Older implementation evidence remains in the handoff.

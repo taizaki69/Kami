@@ -3,9 +3,9 @@
 `manifest.json` is the authoritative lock for three deliberately separate
 roles:
 
-- `execution` fixtures are the six real APKs used by constructor,
+- `execution` fixtures are the seven real APKs used by constructor,
   signature, and interpreted-operation tests.
-- `measurement` fixtures are the remaining 15 current lib 1.6 release APKs used
+- `measurement` fixtures are the remaining 14 current lib 1.6 release APKs used
   only for bounded parsing, structural planning, and static compatibility-gap
   ranking.
 - `conformance` fixtures are small AOSP apksig inputs, including intentionally
@@ -34,6 +34,20 @@ selection and observes a distinct filtered request, while mutated filter schemas
 fail closed before transport. It uses fake transport and does not contact a
 manga site.
 
+The fifth exact current-lib executable profile is TuttoAnimeManga 1.6.10
+(`eu.kanade.tachiyomi.extension.it.tuttoanimemanga`, version code 10). Its exact
+fixture is `tuttoanimemanga.apk`, admitted only for SHA-256
+`e50f1bac6e30121b6eb3461e2ce7297de431d98fc0ed1bab510a30ce784edae3`, signer
+fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, matching
+manifest identity, and declared source ID `2102507871480604746`. Deterministic
+real-APK regressions cover metadata, popular/latest/search, combined
+details/chapters, pages, default image requests, inherited `Referer`/`Origin`
+headers, latest sorting with a ten-result cap, and rejection of unsupported
+filters/preferences before transport. This uses fake transport and does not
+contact a manga site; it proves only this exact APK, not arbitrary PizzaReader-
+family compatibility.
+
 On the downloaded-app path, the source factory preflights the exact profile
 source-ID set before DEX construction and postvalidates the IDs returned by the
 constructed source. Raw exact-profile constructors are intentionally limited to
@@ -43,23 +57,28 @@ The host bridge bounds source-model outputs before conversion: manga-page and
 page-list collections at 2,048 entries, manga updates at 20,000 chapters, and
 each `Page` URL/image URL at 8 KiB.
 
-The app resolves Baozi's per-page `ImageRequest` asynchronously and forwards
-its URL/headers to the reader image pipeline. It does not yet persist the
-profile's preference values, execute the APK's OkHttp interceptors, retain DEX
-`Request` tags, or prove banner cropping, redirect-domain rewriting, or
-missing-image behavior through reader image loads. Reader chapter retry uses a
-structured `.task(id: reloadID)` restart, and dismissal cleanup invalidates the
-load generation. Retry-time request regeneration/expiry is deferred. Reader
-image fetching now inherits the source's admitted transport policy, defaults to
-HTTPS-only, validates URL/headers before transport, and allows HTTP only through
-explicit source opt-in; redirects remain governed by the same policy.
+The app resolves Baozi's per-page `ImageRequest` asynchronously. Supported
+interpreted reader requests retain the exact DEX `Request`/tags and configured
+client inside the source actor, execute the bounded source-scoped
+application/network interceptor chain, and reuse its cookie jar and VM budget.
+The supported GET reader path observes redirects and follows sanitized rewritten
+locations; the real Baozi fixture proves redirect-domain rewriting to final
+image bytes. The app does not yet persist the profile's preference values, and
+banner cropping or missing-image behavior remain unproven through reader image
+loads. Reader chapter retry uses a structured `.task(id: reloadID)` restart, and
+dismissal cleanup invalidates the load generation. Retry-time request
+regeneration/expiry is deferred. Reader image fetching inherits the source's
+admitted transport policy, defaults to HTTPS-only, validates URL/headers before
+transport, and allows HTTP only through explicit source opt-in; redirects remain
+governed by the same policy.
 
 All 27 exact APK fixtures are vendored so clean clones and CI remain
 deterministic even when upstream rotates release objects. The 21 Keiyoushi APKs
 are Apache-2.0 test inputs with attribution in
 `KEIYOUSHI-EXTENSIONS-NOTICE.md`; they are not linked into or shipped by the
-iOS app. The signer regression covers all six real Keiyoushi execution APKs:
-Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, and Baozi Manhua.
+iOS app. The signer regression covers all seven real Keiyoushi execution APKs:
+Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, Baozi Manhua, and
+TuttoAnimeManga.
 Verify every pinned byte sequence with:
 
 ```sh

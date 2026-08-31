@@ -40,8 +40,8 @@ MihonCompatKit, never in the app.
 ## Key decisions
 
 - **`KamiSource` is the seam.** Native sources and the pinned BatCave, Kawii,
-  MangaMelon, and Baozi Manhua Manga DEX-backed sources implement the same
-  protocol; the registry hides which is which. Future profiles must preserve
+  MangaMelon, Baozi Manhua, and TuttoAnimeManga DEX-backed sources implement
+  the same protocol; the registry hides which is which. Future profiles must preserve
   this boundary.
   The protocol mirrors tachiyomix semantics (popular/latest/search/details/
   chapters/pages + image requests with headers) so the bridge is 1:1.
@@ -58,16 +58,21 @@ MihonCompatKit, never in the app.
   a bounded compressed LRU. Apple-specific ImageIO downsampling and decoded-
   image viewport retention stay in the app layer; UIKit never enters KamiCore.
   Baozi's exact DEX `imageRequest(Page)` URL rewrite is therefore visible to
-  the reader, but the current seam carries only the URL/headers projection: DEX
-  `Request` identity/tags and source OkHttp interceptor execution are not
-  retained or run. Banner cropping, redirect-domain rewriting, and missing-image
-  behavior are not proven through reader loads. `ReaderView` retries chapter
+  the reader. Supported interpreted reader requests retain DEX `Request`
+  identity/tags and the configured client inside the source actor, execute the
+  bounded source-scoped interceptor chain, and share its cookie jar and VM
+  budget. The GET-only reader seam observes redirects and follows sanitized
+  rewritten locations; Baozi's real fixture proves the redirect-domain rewrite
+  to final image bytes. Banner cropping and missing-image behavior are not
+  proven through reader loads. `ReaderView` retries chapter
   loading through a structured `.task(id: reloadID)`; its disappearance cleanup
   increments the load generation so dismissal invalidates stale completions.
   Reader image fetching inherits the source's admitted transport policy,
   defaults to HTTPS-only, validates initial URL/headers before injected or
   production transport, and permits HTTP only through explicit source opt-in;
-  redirect handling uses the same source-scoped policy.
+  redirect handling uses the same source-scoped policy. Ordinary page-URL
+  profiles retain safe cross-origin CDN headers but strip source-derived
+  credentials unless the image URL is same-origin.
 - **Source-model values stay bounded at the bridge.** Manga-page and page-list
   outputs are capped at 2,048 entries, manga updates at 20,000 chapters, and
   `Page` URL/image-URL fields at 8 KiB. Metadata and source inputs have their
@@ -124,8 +129,9 @@ MihonCompatKit, never in the app.
 ## Exact interpreted profile boundary
 
 The executable catalog is deliberately exact rather than heuristic. It
-currently contains BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, and
-Baozi Manhua 1.6.29. Baozi is admitted only when the APK's SHA-256
+currently contains BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1,
+Baozi Manhua 1.6.29, and TuttoAnimeManga 1.6.10. Baozi is admitted only when
+the APK's SHA-256
 (`7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec`), signer
 fingerprint
 (`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`),
@@ -133,7 +139,14 @@ manifest identity, and declared source ID (`5724751873601868259`) match the
 profile and persisted admission capability. Its tested core scope is
 popular/latest/search/details/chapters/pages, one static header plus four
 static `Select` filters, bounded scalar preferences, and its interpreted
-`imageRequest(Page)` URL rewrite. The remaining corpus is measurement evidence,
+`imageRequest(Page)` URL rewrite. TuttoAnimeManga is admitted only when its
+exact SHA-256 (`e50f1bac6e30121b6eb3461e2ce7297de431d98fc0ed1bab510a30ce784edae3`),
+signer fingerprint
+(`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`),
+authenticated manifest, and source ID (`2102507871480604746`) match. Its
+tested scope is metadata, popular/latest/text search, combined
+details/chapters, pages, empty filters, inherited request headers, and the
+default page image request. The remaining corpus is measurement evidence,
 not automatic admission or a compatibility percentage. For the downloaded
 path, the exact source-ID set is checked before DEX construction and again after
 profile construction; `SourceRegistry` removal is package-owner scoped, so

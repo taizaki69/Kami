@@ -84,6 +84,11 @@ reader pipeline. Reader requests are validated before even an injected
 transport sees the URL/headers, HTTPS is the default, HTTP requires explicit
 source opt-in, and redirects use the same source-scoped policy. Reader-specific
 image response limits remain independent of the source response-body limit.
+For ordinary page-URL profiles, source-derived `Authorization`,
+`Proxy-Authorization`, `Cookie`, `Cookie2`, and `Host` headers are retained only
+when the image URL has the source's exact scheme, host, and effective port.
+Non-secret CDN headers such as `Referer` and `Origin` remain available across
+origins.
 
 ## Reader interceptor boundary
 
@@ -97,8 +102,9 @@ application interceptors run once, network interceptors run for each response,
 and a rewritten `Location` selects the next bounded GET. Every hop shares the
 source redirect limit, HTTPS-downgrade policy, cancellation checks, retained
 Request tags, and the call's 64-step/one-VM-session budget. Cross-origin
-follow-ups strip `Authorization`, `Proxy-Authorization`, explicit `Cookie`, and
-`Host`; the source cookie jar then applies only cookies valid for the new URL.
+follow-ups strip `Authorization`, `Proxy-Authorization`, explicit `Cookie`,
+`Cookie2`, and `Host`; the source cookie jar then applies only cookies valid for
+the new URL.
 The real Baozi regression proves its retained redirect-domain tag rewrites a raw
 302 and the rewritten source-host URL is fetched to final image bytes.
 
