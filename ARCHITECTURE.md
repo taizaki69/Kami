@@ -40,9 +40,9 @@ MihonCompatKit, never in the app.
 ## Key decisions
 
 - **`KamiSource` is the seam.** Native sources and the pinned BatCave, Kawii,
-  MangaMelon, Baozi Manhua, and TuttoAnimeManga DEX-backed sources implement
-  the same protocol; the registry hides which is which. Future profiles must preserve
-  this boundary.
+  MangaMelon, Baozi Manhua, TuttoAnimeManga, and Mangas-Origines.fr DEX-backed
+  sources implement the same protocol; the registry hides which is which.
+  Future profiles must preserve this boundary.
   The protocol mirrors tachiyomix semantics (popular/latest/search/details/
   chapters/pages + image requests with headers) so the bridge is 1:1.
 - **Compat kit stays host-portable.** No UIKit/Combine/URLSession-only APIs
@@ -58,7 +58,9 @@ MihonCompatKit, never in the app.
   a bounded compressed LRU. Apple-specific ImageIO downsampling and decoded-
   image viewport retention stay in the app layer; UIKit never enters KamiCore.
   Baozi's exact DEX `imageRequest(Page)` URL rewrite is therefore visible to
-  the reader. Supported interpreted reader requests retain DEX `Request`
+  the reader. Mangas-Origines.fr uses validated page-URL image requests with
+  `Referer`/`Origin` headers and has no source-executed image-interceptor
+  capability. Supported interpreted reader requests retain DEX `Request`
   identity/tags and the configured client inside the source actor, execute the
   bounded source-scoped interceptor chain, and share its cookie jar and VM
   budget. The GET-only reader seam observes redirects and follows sanitized
@@ -130,7 +132,8 @@ MihonCompatKit, never in the app.
 
 The executable catalog is deliberately exact rather than heuristic. It
 currently contains BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1,
-Baozi Manhua 1.6.29, and TuttoAnimeManga 1.6.10. Baozi is admitted only when
+Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10, and Mangas-Origines.fr 1.6.58.
+Baozi is admitted only when
 the APK's SHA-256
 (`7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec`), signer
 fingerprint
@@ -146,11 +149,32 @@ signer fingerprint
 authenticated manifest, and source ID (`2102507871480604746`) match. Its
 tested scope is metadata, popular/latest/text search, combined
 details/chapters, pages, empty filters, inherited request headers, and the
-default page image request. The remaining corpus is measurement evidence,
-not automatic admission or a compatibility percentage. For the downloaded
-path, the exact source-ID set is checked before DEX construction and again after
+default page image request. Mangas-Origines.fr exposes metadata identity
+`Mangas-Origines.fr` / `fr` / `https://mangas-origines.fr` and is admitted only
+when its package (`eu.kanade.tachiyomi.extension.fr.mangasoriginesfr`), version
+`1.6.58` (code `58`), SHA-256
+(`b6922bbc5ddc376b50cdcd71123410af96cfddb0d0d6a493a1b50a9363cc718b`),
+signer fingerprint
+(`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`),
+authenticated manifest, and source ID (`4803238581797687746`) match. Its
+tested scope is metadata, seven static filters, ordered POST popular/latest/
+search, details, chapters, pages, and page-URL image requests carrying
+`Referer`/`Origin`; it has no source-executed image-interceptor capability.
+The remaining 13 current lib 1.6 measurement artifacts are measurement
+evidence, not automatic admission or a compatibility percentage. For the
+downloaded path, the exact source-ID set is checked before DEX construction
+and again after
 profile construction; `SourceRegistry` removal is package-owner scoped, so
 disabling one extension cannot remove another package's source ID.
+
+The locked corpus currently contains 27 artifacts: 8 execution, 13 measurement,
+and 6 AOSP conformance fixtures; 19 are current lib 1.6 artifacts. The current
+measurement audit covers 13/13 artifacts and reports 9 structural candidates,
+4 stable-wrapper blockers, 511 unique unregistered external method surfaces,
+0 omitted invocations, and 0 unsupported opcodes. Komikcast (42 unresolved
+surfaces) is only a prioritization signal for the next measured candidate.
+Current Windows verification is 254/254 MihonCompatKit tests and 17/17 KamiCore
+tests.
 
 ## Concurrency model
 - UI: SwiftUI + `@MainActor` observable models.
@@ -161,6 +185,8 @@ disabling one extension cannot remove another package's source ID.
   bounded prefetch, and lifecycle cancellation. ImageIO decoding runs in a
   detached user-initiated task before returning a bounded `UIImage`.
 - Interpreter: the M1 runtime has a shared instruction budget and call-depth
-  guard. Each app-facing interpreted source actor owns one mutable VM and uses
-  a bounded cancellation-aware queue to prevent overlapping entry across
-  suspend-method continuations.
+  guard. Hierarchy-aware direct virtual source entry validates exact receiver
+  identity, and one instruction budget remains shared across synchronous or
+  async DEX re-entry from suspended host callbacks. Each app-facing interpreted
+  source actor owns one mutable VM and uses a bounded cancellation-aware queue
+  to prevent overlapping entry across suspend-method continuations.

@@ -1,6 +1,6 @@
 # Extension Compatibility Matrix
 
-**Last updated:** 2026-08-30
+**Last updated:** 2026-09-03
 
 **Corpus:** Keiyoushi release assets vendored from recorded release URLs and
 pinned by SHA-256 via `scripts/fetch_corpus.sh`, then verified against
@@ -23,13 +23,13 @@ is no compatibility claim.
 | ZIP + DEFLATE | Working | STORE/DEFLATE real APK entries parse with size limits, exact decoded size, and CRC-32 verification |
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
 | DEX structural parse | Working on 21 locked real-extension APKs | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
-| Structural execution-plan inspection | Working for the bounded single-source lib 1.6 shape | Non-executing inspection deterministically finds the entry and stable public wrapper for the five exact current profiles and 10 of 14 remaining measurement APKs; the four measurement blockers are Komga, MangaPlus, NHentai.xxx, and XCOMIC. Legacy lib 1.4, factories, multidex, native `.so`, ambiguous/missing DEX, invalid identity, and missing wrapper shapes are explicit blockers. A plan establishes no signer trust, catalog admission, or execution proof |
+| Structural execution-plan inspection | Working for the bounded single-source lib 1.6 shape | Non-executing inspection deterministically finds the entry and stable public wrapper for the six exact current profiles and nine of 13 remaining measurement APKs; the four measurement blockers are Komga, MangaPlus, NHentai.xxx, and XCOMIC. Legacy lib 1.4, factories, multidex, native `.so`, ambiguous/missing DEX, invalid identity, and missing wrapper shapes are explicit blockers. A plan establishes no signer trust, catalog admission, or execution proof |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| Static measurement corpus | Working, non-executing | Fourteen current lib 1.6 measurement-only APKs under `Tests/corpus/measurement/` are SHA/URL locked and analyzed 14/14 with 0 errors; 10 are structural candidates and four have stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, XCOMIC). The report contains 532 unique unregistered external method surfaces and 0 unsupported opcodes. The behavior-stratified set is prioritization evidence, not a statistical sample or execution/admission proof |
-| Compatibility diagnostics | Partial product surface; privacy-safe runtime/static/promotion seams working | Pinned sources retain the first typed VM gap by operation stage at the public VM boundary even when a nested host bridge catches or transforms it; unknown external fields fail closed unless explicitly modeled, and arbitrary errors remain ignored. `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths; `compat-audit promote-gap` strictly turns the first canonical redacted runtime finding into a deterministic XCTest assertion seed. The current measurement run reports 14/14 analyzed, 0 errors, 532 unique surfaces, and 0 unsupported opcodes. Static invocations are prioritization only, not runtime failure or admission proof. App-facing export/share UI remains open |
-| DEX execution | Partial M1/M2 working | The current local 234-test suite includes exact source/execution paths against seven execution fixtures; verified dispatch/dataflow semantics plus async nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded source-operation interceptor execution, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, scalar preferences, interpreted image requests, and serialized adapter ownership are checked |
+| Static measurement corpus | Working, non-executing | Thirteen current lib 1.6 measurement-only APKs under `Tests/corpus/measurement/` are SHA/URL locked and analyzed 13/13 with 0 errors; nine are structural candidates and four have stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, XCOMIC). The report contains 511 unique unregistered external method surfaces, 0 omitted invocations, and 0 unsupported opcodes. The behavior-stratified set is prioritization evidence, not a statistical sample or execution/admission proof |
+| Compatibility diagnostics | Partial product surface; privacy-safe runtime/static/promotion seams working | Pinned sources retain the first typed VM gap by operation stage at the public VM boundary even when a nested host bridge catches or transforms it; unknown external fields fail closed unless explicitly modeled, and arbitrary errors remain ignored. `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths; `compat-audit promote-gap` strictly turns the first canonical redacted runtime finding into a deterministic XCTest assertion seed. The current measurement run reports 13/13 analyzed, 0 errors, 511 unique surfaces, 0 omitted invocations, and 0 unsupported opcodes. Static invocations are prioritization only, not runtime failure or admission proof. App-facing export/share UI remains open |
+| DEX execution | Partial M1/M2 working | The current local 254-test suite includes exact source/execution paths against eight execution fixtures; verified dispatch/dataflow semantics plus receiver-directed virtual entry under a shared async instruction budget, nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded source-operation interceptor execution, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, scalar preferences, interpreted image requests, and serialized adapter ownership are checked |
 | Admission restoration and source factory | Working for exact measured profiles | Startup re-reads the enabled installed APK, rechecks hash/signature/signer history/user trust/manifest, and gives the sole factory a fresh capability; before DEX construction the factory preflights the exact profile source-ID set, then postvalidates every constructed ID against that set and the admission, rejects undeclared IDs, and refuses unmeasured profiles; registry removal is scoped to the recorded package owner |
-| End-to-end source operations | Working for five exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, Baozi Manhua 1.6.29, and TuttoAnimeManga 1.6.10 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon and Baozi add exact static `Select` filter paths, while Tutto's profile intentionally exposes no filters or preferences. Source-operation `await`/`awaitSuccess` execute a bounded application/network interceptor chain, and Baozi's core regressions traverse its finite rate limiter. Baozi additionally proves bounded scalar preferences, an interpreted `imageRequest` rewrite, and source-scoped reader-image interceptor execution with bounded observable GET redirects. BatCave and Tutto additionally prove their inherited `headersBuilder` behavior (`Referer`/`Origin` on every request); Tutto's page-URL image path does not claim source-scoped reader-interceptor execution. The 14 measurement APKs remain outside the executable catalog. Automatic catalog expansion, dynamic filters, production preference UI/persistence, Android bitmap banner transforms, and live-site availability remain open |
+| End-to-end source operations | Working for six exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10, and Mangas-Origines.fr 1.6.58 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon, Baozi, and Mangas-Origines.fr add exact static filter paths, while Tutto's profile intentionally exposes no filters or preferences. Source-operation `await`/`awaitSuccess` execute a bounded application/network interceptor chain, and Baozi's core regressions traverse its finite rate limiter. Baozi additionally proves bounded scalar preferences, an interpreted `imageRequest` rewrite, and source-scoped reader-image interceptor execution with bounded observable GET redirects. BatCave, Tutto, and Mangas-Origines.fr prove their inherited `headersBuilder` behavior (`Referer`/`Origin` on every request); the latter two page-URL image paths do not claim source-scoped reader-interceptor execution. The 13 measurement APKs remain outside the executable catalog. Automatic catalog expansion, dynamic filters, production preference UI/persistence, Android bitmap banner transforms, and live-site availability remain open |
 
 ## Per-extension execution
 
@@ -42,9 +42,10 @@ is no compatibility claim.
 | MangaMelon (`en.mangamelon`) | 1.6.1 | `aedbd5ba…0d9aa` | candidate | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ text + `Sort`/`Select` filters | ✅ core fields | ✅ combined update + memo | ✅ exact Base64 form POST + ordered URLs |
 | Baozi Manhua (`zh.baozimanhua`) | 1.6.29 | `7e8c99fb…79cbec` | candidate | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ text + exact static filters | ✅ core fields | ✅ combined update | ✅ exact HTML image URLs + interpreted image request |
 | TuttoAnimeManga (`it.tuttoanimemanga`) | 1.6.10 | `e50f1bac…edae3` | candidate | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ text query | ✅ core fields | ✅ combined update | ✅ JSON GET + ordered URLs |
+| Mangas-Origines.fr (`fr.mangasoriginesfr`) | 1.6.58 | `b6922bbc…c718b` | candidate | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ text + exact static filters | ✅ core fields | ✅ combined update | ✅ HTML image URLs + inherited image headers |
 
 “Candidate” in this table is intentionally weaker than every execution column.
-For the five exact rows it means bounded inspection found the supported lib 1.6
+For the six exact rows it means bounded inspection found the supported lib 1.6
 single-source structure before the independent hash/signer/admission checks;
 the execution columns are backed by deterministic real-APK regressions. The
 legacy constructors below remain useful shallow VM fixtures, but the plan
@@ -53,9 +54,9 @@ contract.
 
 ## Measurement-only current lib 1.6 corpus
 
-The lock has 14 SHA/URL-locked current lib 1.6 Keiyoushi APKs under
-`Tests/corpus/measurement/`. They are separate from the seven execution fixtures
-(five current lib 1.6 and two legacy lib 1.4) and six AOSP apksig conformance
+The lock has 13 SHA/URL-locked current lib 1.6 Keiyoushi APKs under
+`Tests/corpus/measurement/`. They are separate from the eight execution fixtures
+(six current lib 1.6 and two legacy lib 1.4) and six AOSP apksig conformance
 fixtures: 27 artifacts total, including 19 current lib 1.6 artifacts. This is a
 behavior-stratified, not statistical, selection covering distinct extension
 families and shapes.
@@ -63,22 +64,23 @@ families and shapes.
 The measurement APKs are parsed, signature-verified for parser conformance, and
 statically audited only. Membership never grants signer trust, admission,
 installation, or execution. The deterministic `compat-audit gaps
-Tests/corpus/measurement` baseline analyzed 14/14 artifacts with 0 errors,
-found 10 structural candidates and four stable-wrapper blockers (Komga,
-MangaPlus, NHentai.xxx, and XCOMIC), and reported 532 unique unregistered
-external method surfaces with 0 unsupported opcodes. These results are
+Tests/corpus/measurement` baseline analyzed 13/13 artifacts with 0 errors,
+found nine structural candidates and four stable-wrapper blockers (Komga,
+MangaPlus, NHentai.xxx, and XCOMIC), and reported 511 unique unregistered
+external method surfaces with 0 omitted invocations and 0 unsupported opcodes. These results are
 prioritization signals, not a compatibility percentage or runtime proof.
 
-The 10 remaining structural candidates are Doctruyen3q, EternalMangas,
-FoolSlide Customizable, Hayalistic, Komikcast, MangaPandaOnl, Mangas Origines
-FR, PixivComic, ReadManga, and SSSCanlator. Baozi Manhua 1.6.29 is no longer
+The nine remaining structural candidates are Doctruyen3q, EternalMangas,
+FoolSlide Customizable, Hayalistic, Komikcast, MangaPandaOnl, PixivComic,
+ReadManga, and SSSCanlator. Baozi Manhua 1.6.29 is no longer
 in this measurement role: it is the fourth exact execution profile, and
-TuttoAnimeManga 1.6.10 is the fifth, both independently authenticated and
-tested below.
+TuttoAnimeManga 1.6.10 is the fifth. Mangas-Origines.fr 1.6.58 has now moved
+from measurement into the sixth exact execution role; all three are
+independently authenticated and tested below.
 
 ## Exact execution-profile evidence
 
-All seven constructors execute their real no-argument DEX paths and return
+All eight constructors execute their real no-argument DEX paths and return
 objects of the declared entry type. BatCave's popular path additionally proves
 class initialization, filter construction and iteration, its Kotlin ABI, and
 bounded OkHttp request construction. It asserts the exact POST URL and ordered
@@ -164,8 +166,22 @@ and date conversions. It exposes no filters or preferences; its page-URL image
 path preserves the inherited `Referer`/`Origin` headers without claiming a
 retained DEX client or source-interceptor execution.
 
-`PinnedInterpretedSource` accepts only the locked BatCave, Kawii, MangaMelon, or
-Baozi, or TuttoAnimeManga bytes after exact SHA-256, APK signer fingerprint, manifest
+Mangas-Origines.fr 1.6.58 is the sixth exact execution profile. Admission checks
+its package/version
+(`eu.kanade.tachiyomi.extension.fr.mangasoriginesfr`, 1.6.58/code 58), SHA-256
+`b6922bbc5ddc376b50cdcd71123410af96cfddb0d0d6a493a1b50a9363cc718b`, signer
+fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, manifest,
+and source ID `4803238581797687746`. Its fake-transport regression executes
+popular, latest, text and filtered search, details, chapters, and pages from the
+unmodified DEX. The exact seven-entry filter graph covers origin and genre
+groups, status/rating/sort selections, and minimum/maximum chapter text fields;
+altered schemas and unexpected preferences fail before transport. Its ordinary
+page-URL image path preserves inherited `Referer`/`Origin` headers without
+claiming a retained DEX client or source-interceptor execution.
+
+`PinnedInterpretedSource` accepts only the locked BatCave, Kawii, MangaMelon,
+Baozi, TuttoAnimeManga, or Mangas-Origines.fr bytes after exact SHA-256, APK signer fingerprint, manifest
 package/lib/entry-class, and shared structural-plan checks. For downloaded
 execution, `ExtensionAdmissionService.restore` first re-authenticates the
 enabled durable installation and `ExtensionSourceFactory` rechecks the exact
@@ -178,11 +194,13 @@ factory. It owns one
 source-scoped interpreter and transport behind a bounded cancellation-aware
 queue, maps every operation above into `KamiSource`, reuses the combined update
 for one-request library refreshes, validates default HTTP(S) page image
-requests, and registers in KamiCore without source-kind branches. The five
+requests, and registers in KamiCore without source-kind branches. The six
 profile suites prove their respective deterministic contracts; Baozi additionally
 proves preference admission, exact filter-schema rejection before transport,
 and interpreted image-request conversion, while Tutto proves its no-filter/
-no-preference boundary and inherited image headers.
+no-preference boundary and inherited image headers and Mangas-Origines.fr proves
+its seven-entry filter graph, fail-before-transport boundaries, and inherited
+image headers.
 
 The source-model host bridge bounds app-facing outputs before conversion:
 `MangasPage` and page-list collections are capped at 2,048 entries,
@@ -193,7 +211,7 @@ resource hardening, not full tachiyomix model fidelity.
 ## Current measured API workload
 
 The current `compat-audit gaps Tests/corpus/measurement` baseline is the
-authoritative workload snapshot for the 14 current lib 1.6 measurement APKs.
+authoritative workload snapshot for the 13 current lib 1.6 measurement APKs.
 It analyzes every artifact without executing DEX, reconciles classes defined
 across the APK's DEX entries, compares exact external method
 prototypes/staticness with the current host registry, and ranks each surface by
@@ -201,22 +219,23 @@ extension and invocation count:
 
 | Measurement result | Count |
 |---|---:|
-| Artifacts analyzed | 14/14 |
+| Artifacts analyzed | 13/13 |
 | Artifact analysis errors | 0 |
-| Structural candidates | 10 |
+| Structural candidates | 9 |
 | Stable-wrapper blockers | 4 |
-| Unique unregistered external method surfaces | 532 |
+| Unique unregistered external method surfaces | 511 |
+| Omitted external invocations | 0 |
 | Unsupported opcodes | 0 |
 
 The four stable-wrapper blockers are Komga, MangaPlus, NHentai.xxx, and XCOMIC.
-The 532-surface list is a prioritization signal, not a compatibility rate:
+The 511-surface list is a prioritization signal, not a compatibility rate:
 virtual/interface dispatch may resolve through a different receiver class, and
 dead code may never execute. The measurement artifacts are not admitted or
 executed, and their membership does not establish signer trust.
 
 Two optimized Windows runs exited 0 and produced byte-identical UTF-8 reports
-(98,876 bytes; SHA-256
-`37503437e4b0aa67bf17fe13fa0b1d1b1d5ab05d5d2583964b2de0c0fcfd99e3`). The
+(83,343 bytes; SHA-256
+`52b04c28af62c360f9b80c43591c255f471b3346966b84c58bb5174057bfa2b8`). The
 reports contain no local-path, corpus-path, APK-filename, URL, authorization or
 proxy-authorization header, `Set-Cookie`, `Bearer`, `token=`, or `password=`
 markers. Safe DEX API identities such as `okhttp3/Cookie` and `CookieJar` are
@@ -228,14 +247,21 @@ report above for current prioritization.
 
 ## Test evidence
 
-- 234/234 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
+- 254/254 MihonCompatKit tests pass locally on Windows/Swift 6.3.3 with the
   corpus present. Three new `CorpusLockTests` cover separated roles,
   SHA/URL/fetcher and manifest/signature checks, and the deterministic static
   measurement baseline.
-- The current portable Windows KamiCore suite passes 16/16 tests, including
-  exact Baozi and TuttoAnimeManga factory admission. Exact implementation head
-  `cf02c77` passes all 27 KamiCore tests on macOS.
-- Exact Tutto implementation head `cf02c77` passes
+- The current portable Windows KamiCore suite passes 17/17 tests, including
+  exact Baozi, TuttoAnimeManga, and Mangas-Origines.fr factory admission. Exact
+  Mangas-Origines.fr implementation head `0abc7f8` passes
+  [Swift CI 33817169918](https://github.com/taizaki69/Kami/actions/runs/33817169918),
+  [iOS Build 33817169894](https://github.com/taizaki69/Kami/actions/runs/33817169894),
+  and [IPA Package 33817169856](https://github.com/taizaki69/Kami/actions/runs/33817169856).
+  Swift CI found all 27 fixtures already hash-matched, passed 254/254
+  MihonCompatKit tests and 28/28 KamiCore tests, built and uploaded the
+  optimized CLI, and the iOS/IPA runs passed both build targets and unsigned
+  packaging.
+- Historical exact Tutto implementation head `cf02c77` passes
   [Swift CI 33342887303](https://github.com/taizaki69/Kami/actions/runs/33342887303),
   [iOS Build 33342887315](https://github.com/taizaki69/Kami/actions/runs/33342887315),
   and [IPA Package 33342887323](https://github.com/taizaki69/Kami/actions/runs/33342887323).
@@ -271,15 +297,16 @@ report above for current prioritization.
   measurement-corpus runs are byte-identical and contain none of the checked
   local/corpus path, APK filename, URL, authorization or proxy-authorization
   header, `Set-Cookie`, `Bearer`, `token=`, or `password=` markers. Safe DEX API
-  identities containing `Cookie` are expected. The current baseline is 14/14
-  artifacts, 10 structural candidates, 532 unique unregistered surfaces, and
-  zero unsupported opcodes.
+  identities containing `Cookie` are expected. The current baseline is 13/13
+  artifacts, nine structural candidates, 511 unique unregistered surfaces,
+  zero omitted invocations, and zero unsupported opcodes.
 - Nine focused interceptor-chain regressions cover application/network order,
   exact Request/tag identity, bounded response rebuilding, one-shot `proceed`,
   client limits, shared VM budget, `await` versus `awaitSuccess`, and
   cancellation.
-- Six verifier regressions cover the seven real Keiyoushi v2 APKs (Akuma, MangaDex,
-  BatCave, Kawii Manga, MangaMelon, Baozi Manhua, and TuttoAnimeManga), AOSP v1 and v3,
+- Six verifier regressions cover the eight real Keiyoushi v2 APKs (Akuma, MangaDex,
+  BatCave, Kawii Manga, MangaMelon, Baozi Manhua, TuttoAnimeManga, and
+  Mangas-Origines.fr), AOSP v1 and v3,
   verified certificate rotation, signed-content and signer-signature tampering,
   unsigned input, fingerprint normalization, and v3-block stripping. The
   pre-Baozi exact-head macOS CI run's 23 KamiCore tests cover persisted
@@ -302,22 +329,27 @@ report above for current prioritization.
   filter schema, a valid non-default tag state that changes the request, core
   source results, and interpreted image-request rewrite. TuttoAnimeManga's suite
   requires its exact no-filter/no-preference boundary, core source results, and
-  inherited image headers on its page-URL path.
+  inherited image headers on its page-URL path. Mangas-Origines.fr's suite
+  requires its exact seven-entry filter graph, valid filtered request encoding,
+  every core source result, inherited image headers, and fail-before-transport
+  rejection of altered filters or preferences.
 - Four pinned BatCave adapter tests cover every currently claimed `KamiSource`
   operation and default image request, reject a one-byte APK mutation before
   parsing, and prove concurrent callers are serialized; the Kawii and
   MangaMelon end-to-end tests cover the second and third exact profiles; the
-  Baozi and TuttoAnimeManga suites cover the fourth and fifth. KamiCore factory
-  tests prove admitted construction, including Baozi and TuttoAnimeManga, and
+  Baozi, TuttoAnimeManga, and Mangas-Origines.fr suites cover the fourth through
+  sixth. KamiCore factory tests prove admitted construction, including all
+  three, and
   registry tests prove insertion/source-ID deduplication.
-- Seven focused HTML regressions cover the BatCave selectors, modern direct-child
+- Nine focused HTML regressions cover the BatCave selectors, modern direct-child
   relative-selector and `:containsData` semantics, URL resolution, invalid bases,
+  body-fragment parsing, sibling/attribute/`eachText` behavior,
   input/node/depth/attribute limits, selector syntax/length/result and
   cumulative-work limits, and extracted-string bounds.
-- Four focused async regressions prove nested DEX-frame resumption, the typed
-  sync-entry diagnostic, DEX handler re-entry, cancellation, and bounded
-  response/body/charset/closed-state behavior.
-- Fifteen focused dispatch regressions prove runtime-receiver virtual/class
+- Seven focused async regressions prove nested DEX-frame resumption, shared
+  instruction budgets for synchronous and asynchronous virtual re-entry, typed
+  DEX handler re-entry, cancellation, and bounded response/body behavior.
+- Sixteen focused dispatch regressions prove runtime-receiver virtual/class
   override selection, lexical normal/range class-super behavior, inherited and
   maximally specific interface defaults, abstract masking, default conflicts,
   interface-super selection/version gating, strict runtime interface receivers,
@@ -335,8 +367,9 @@ report above for current prioritization.
   dispatch plus hierarchy-aware `check-cast` and `instance-of` behavior.
 - One focused arithmetic regression covers AOSP's operation/type-major binary
   opcode ordering across int, long, float, double, and `/2addr` instructions.
-- Twenty-one focused request/Kotlin-helper tests verify the pure request model,
-  Kotlin duration/string/collection/time behavior, URL-builder encoding and
+- Thirty-one focused request/Kotlin-helper tests verify the pure request model,
+  Kotlin duration/string/collection/map/set/time/locale behavior, HTML helpers,
+  URL-builder encoding and
   work bounds, nullable equality, output/input bounds, scheme rejection, and
   CRLF-header rejection.
 - Eleven focused transport tests cover source isolation, redirect policy,
@@ -344,20 +377,23 @@ report above for current prioritization.
   visibility, and safe GET follow-ups.
 - Parser hardening covers checksum/size/count limits and every truncated prefix
   of generated valid DEX and ZIP fixtures.
-- Exact-head Swift CI built `compat-audit` in release mode and uploaded it; the
-  current checkout also builds it locally in release mode.
+- Exact implementation-head Swift CI built `compat-audit` in release mode and
+  uploaded it; the current checkout also builds it locally in release mode.
 
 ## Honest frontier
 
-Kami can download, validate structurally, inspect, classify, and execute five
+Kami can download, validate structurally, inspect, classify, and execute six
 controlled real-extension profiles through bounded async response delivery.
-BatCave, Kawii, MangaMelon, Baozi, and TuttoAnimeManga produce exact
-popular/search/latest/details/chapters/pages compatibility models; MangaMelon
-and Baozi additionally prove static filtered search, while BatCave reaches the
+BatCave, Kawii, MangaMelon, Baozi, TuttoAnimeManga, and Mangas-Origines.fr
+produce exact popular/search/latest/details/chapters/pages compatibility
+models; MangaMelon, Baozi, and Mangas-Origines.fr additionally prove static
+filtered search, while BatCave reaches the
 app-facing registry seam and validated default page image requests. Baozi also
 proves its bounded scalar preference surface and interpreted image-request host
 rewrite. TuttoAnimeManga additionally proves its no-filter/no-preference
-boundary and inherited image headers on the page-URL path. These are five exact
+boundary and inherited image headers on the page-URL path. Mangas-Origines.fr
+additionally proves its seven-entry filter graph and inherited page-image
+headers. These are six exact
 measured profiles, not a claim that downloaded
 extensions are generally compatible. Signer trust,
 durable install/update, exact-byte startup restoration, selection UI,
@@ -366,7 +402,7 @@ registration are working. Browse renders every app-facing filter case,
 preserves the full source filter shape for text search, and supports
 blank-query static filtered search. Typed runtime compatibility reports and a
 non-executing static gap/corpus audit are working without changing admission;
-the broader 14-artifact current-lib-1.6 measurement corpus is now locked and
+the broader 13-artifact current-lib-1.6 measurement corpus is now locked and
 fully analyzed, so corpus expansion is no longer open. App export/share UX
 remains open; first-gap/field capture and deterministic promotion are working. Automatic
 catalog expansion, dynamic filter sources, production preference UI/persistence,

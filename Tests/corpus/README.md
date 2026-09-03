@@ -3,13 +3,17 @@
 `manifest.json` is the authoritative lock for three deliberately separate
 roles:
 
-- `execution` fixtures are the seven real APKs used by constructor,
+- `execution` fixtures are the eight real APKs used by constructor,
   signature, and interpreted-operation tests.
-- `measurement` fixtures are the remaining 14 current lib 1.6 release APKs used
+- `measurement` fixtures are the remaining 13 current lib 1.6 release APKs used
   only for bounded parsing, structural planning, and static compatibility-gap
   ranking.
 - `conformance` fixtures are small AOSP apksig inputs, including intentionally
   invalid and unsigned APKs.
+
+The lock contains 27 APK artifacts: 8 execution, 13 measurement, and 6
+conformance fixtures. Thus 19 locked artifacts are current lib 1.6 (6 execution
+and 13 measurement).
 
 The measurement set is behavior-stratified, not statistically sampled. It
 covers dominant generated families, custom/API-heavy sources, preferences,
@@ -19,6 +23,13 @@ execute DEX, contact a manga site, or prove compatibility. The tests do verify
 the release signatures as parser conformance, but exact trust and admission
 remain in Kami's separate repository-key and install-admission policy, and
 executable profiles remain an explicit fail-closed catalog.
+
+The six exact current-lib-1.6 executable profiles are BatCave, Kawii Manga,
+MangaMelon, Baozi Manhua, TuttoAnimeManga, and Mangas-Origines.fr. The current
+deterministic measurement baseline analyzed 13/13 artifacts, with 9 structural
+candidates, four stable-wrapper blockers, 511 unique unregistered external
+method surfaces, 0 omitted invocations, and 0 unsupported opcodes. These are
+static prioritization results, not a compatibility percentage or runtime proof.
 
 The fourth exact current-lib executable profile is Baozi Manhua 1.6.29
 (`eu.kanade.tachiyomi.extension.zh.baozimanhua`, version code 29). Its exact
@@ -48,6 +59,19 @@ filters/preferences before transport. This uses fake transport and does not
 contact a manga site; it proves only this exact APK, not arbitrary PizzaReader-
 family compatibility.
 
+The sixth exact current-lib executable profile is Mangas-Origines.fr 1.6.58
+(`eu.kanade.tachiyomi.extension.fr.mangasoriginesfr`, version code 58). Its
+exact fixture is `mangasoriginesfr.apk`, admitted only for SHA-256
+`b6922bbc5ddc376b50cdcd71123410af96cfddb0d0d6a493a1b50a9363cc718b`, signer
+fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, matching
+manifest identity, and declared source ID `4803238581797687746`. Deterministic
+real-APK regressions cover metadata, seven static filters, popular/latest/text
+and filtered search through the ordered POST form, details, chapters, pages,
+and page-URL image requests with `Referer`/`Origin` headers. This exact profile
+has no source-executed image-interceptor capability; its evidence is limited to
+the locked APK and its proven page-URL image path.
+
 On the downloaded-app path, the source factory preflights the exact profile
 source-ID set before DEX construction and postvalidates the IDs returned by the
 constructed source. Raw exact-profile constructors are intentionally limited to
@@ -76,9 +100,9 @@ All 27 exact APK fixtures are vendored so clean clones and CI remain
 deterministic even when upstream rotates release objects. The 21 Keiyoushi APKs
 are Apache-2.0 test inputs with attribution in
 `KEIYOUSHI-EXTENSIONS-NOTICE.md`; they are not linked into or shipped by the
-iOS app. The signer regression covers all seven real Keiyoushi execution APKs:
-Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, Baozi Manhua, and
-TuttoAnimeManga.
+iOS app. The signer regression covers all eight real Keiyoushi execution APKs:
+Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, Baozi Manhua,
+TuttoAnimeManga, and Mangas-Origines.fr.
 Verify every pinned byte sequence with:
 
 ```sh
