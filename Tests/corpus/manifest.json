@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "source": "SHA-256-locked Keiyoushi release assets and AOSP apksig conformance fixtures",
-  "locked": "2026-08-30",
+  "locked": "2026-09-03",
   "upstream": {
     "catalogRepository": "https://github.com/keiyoushi/extensions",
     "catalogBranch": "repo",
@@ -12,8 +12,8 @@
   "selection": {
     "kind": "behavior-stratified measurement, not a statistical compatibility sample",
     "currentLib16ArtifactCount": 19,
-    "executionArtifactCount": 7,
-    "measurementArtifactCount": 14,
+    "executionArtifactCount": 8,
+    "measurementArtifactCount": 13,
     "conformanceArtifactCount": 6,
     "measurementPolicy": "Measurement artifacts are parsed, signature-verified for parser conformance, and statically audited only. Corpus membership never grants signer trust, admits, installs, or executes an extension."
   },
@@ -258,8 +258,8 @@
     },
     {
       "name": "mangasoriginesfr",
-      "path": "measurement/mangasoriginesfr.apk",
-      "role": "measurement",
+      "path": "mangasoriginesfr.apk",
+      "role": "execution",
       "package": "eu.kanade.tachiyomi.extension.fr.mangasoriginesfr",
       "version": "1.6.58",
       "versionCode": 58,

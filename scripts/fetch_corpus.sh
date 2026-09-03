@@ -101,7 +101,7 @@ measurement/readmanga|https://github.com/keiyoushi/extensions/releases/download/
 measurement/sssscanlator|https://github.com/keiyoushi/extensions/releases/download/4277105/tachiyomi-pt.sssscanlator-v1.6.59.apk|2d7dfad2d4d293c58414b8905c6bcf454bcfb1a2bb6650a50d7480b0b9597883
 measurement/komikcast|https://github.com/keiyoushi/extensions/releases/download/01cba61/tachiyomi-id.komikcast-v1.6.83.apk|9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac
 measurement/pixivcomic|https://github.com/keiyoushi/extensions/releases/download/acab221/tachiyomi-ja.pixivcomic-v1.6.4.apk|86efecdc38f5aca875da0abd5e6f2a8449ca3b06682a3c81f262fab787bb3d71
-measurement/mangasoriginesfr|https://github.com/keiyoushi/extensions/releases/download/66535bd/tachiyomi-fr.mangasoriginesfr-v1.6.58.apk|b6922bbc5ddc376b50cdcd71123410af96cfddb0d0d6a493a1b50a9363cc718b
+mangasoriginesfr|https://github.com/keiyoushi/extensions/releases/download/66535bd/tachiyomi-fr.mangasoriginesfr-v1.6.58.apk|b6922bbc5ddc376b50cdcd71123410af96cfddb0d0d6a493a1b50a9363cc718b
 measurement/mangaplus|https://github.com/keiyoushi/extensions/releases/download/a76c957-0/tachiyomi-all.mangaplus-v1.6.65.apk|a9211fc852cb602107e0d6f8657c2fc7ae8154fc391c386b0a3f79e3f48d4126
 measurement/komga|https://github.com/keiyoushi/extensions/releases/download/66535bd/tachiyomi-all.komga-v1.6.69.apk|a711b134300ddec36fc60c8ec1a224a2593b44abae81b53e26436624dfef13cb
 measurement/xcomic|https://github.com/keiyoushi/extensions/releases/download/acab221/tachiyomi-all.xcomic-v1.6.4.apk|dc494cc99138191f17022c173e43e90689640cf5e5fa23de28ef6f557986ca80

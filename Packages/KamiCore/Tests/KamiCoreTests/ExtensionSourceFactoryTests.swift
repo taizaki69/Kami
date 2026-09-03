@@ -8,6 +8,7 @@ final class ExtensionSourceFactoryTests: XCTestCase {
     private static let mangaMelonSourceID: Int64 = 7_505_916_148_185_744_347
     private static let baoziManhuaSourceID: Int64 = 5_724_751_873_601_868_259
     private static let tuttoAnimeMangaSourceID: Int64 = 2_102_507_871_480_604_746
+    private static let mangasOriginesFRSourceID: Int64 = 4_803_238_581_797_687_746
     private static let keiyoushiFingerprint =
         "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
 
@@ -151,6 +152,58 @@ final class ExtensionSourceFactoryTests: XCTestCase {
         XCTAssertEqual(imageRequest?.headers, [
             "Referer": "https://tuttoanimemanga.net/",
             "Origin": "https://tuttoanimemanga.net",
+        ])
+        XCTAssertNil(imageRequest?.sourceExecutionID)
+    }
+
+    func testFactoryAdmitsExactMangasOriginesFRProfile() async throws {
+        let bytes = try corpus("mangasoriginesfr")
+        XCTAssertEqual(
+            APKSignatureVerifier.apkSHA256(bytes),
+            "b6922bbc5ddc376b50cdcd71123410af96cfddb0d0d6a493a1b50a9363cc718b"
+        )
+        let signingIdentity = try APKSignatureVerifier().verify(apkBytes: bytes)
+        XCTAssertEqual(
+            signingIdentity.signers.map(\.currentFingerprint),
+            [Self.keiyoushiFingerprint]
+        )
+        let temporary = try temporaryAPK(bytes)
+        defer { try? FileManager.default.removeItem(at: temporary.directory) }
+        let admission = ExtensionAdmission(
+            packageName: "eu.kanade.tachiyomi.extension.fr.mangasoriginesfr",
+            versionName: "1.6.58",
+            versionCode: 58,
+            apkPath: temporary.apk.path,
+            apkSHA256: APKSignatureVerifier.apkSHA256(bytes),
+            signingIdentity: signingIdentity,
+            trustSource: .user(fingerprint: Self.keiyoushiFingerprint),
+            sourceIDs: [Self.mangasOriginesFRSourceID]
+        )
+
+        let sources = try ExtensionSourceFactory().makeSources(
+            admission: admission,
+            transport: NoNetworkTransport()
+        )
+        let source = try XCTUnwrap(sources.first)
+        XCTAssertEqual(sources.count, 1)
+        XCTAssertEqual(source.id, Self.mangasOriginesFRSourceID)
+        XCTAssertEqual(source.name, "Mangas-Origines.fr")
+        XCTAssertEqual(source.language, "fr")
+        XCTAssertEqual(source.baseURL, "https://mangas-origines.fr")
+        XCTAssertTrue(source.supportsLatest)
+        XCTAssertEqual(source.getFilterList().count, 7)
+        XCTAssertFalse(source.transportPolicy.allowsInsecureHTTP)
+        let imageRequest = await source.getImageRequest(page: PageCompat(
+            index: 0,
+            imageURL: "https://images.example/mangas-origines-page.jpg"
+        ))
+        XCTAssertEqual(
+            imageRequest?.url,
+            "https://images.example/mangas-origines-page.jpg"
+        )
+        XCTAssertEqual(imageRequest?.headers, [
+            "Referer": "https://mangas-origines.fr/",
+            "Origin": "https://mangas-origines.fr",
         ])
         XCTAssertNil(imageRequest?.sourceExecutionID)
     }

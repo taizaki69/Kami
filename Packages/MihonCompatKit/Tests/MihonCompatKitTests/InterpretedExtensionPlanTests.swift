@@ -46,6 +46,13 @@ final class InterpretedExtensionPlanTests: XCTestCase {
                 10,
                 "Leu/kanade/tachiyomi/extension/it/tuttoanimemanga/ExtensionGenerated;"
             ),
+            (
+                "mangasoriginesfr",
+                "eu.kanade.tachiyomi.extension.fr.mangasoriginesfr",
+                "1.6.58",
+                58,
+                "Lw;"
+            ),
         ]
         let inspector = InterpretedExtensionPlanInspector()
 

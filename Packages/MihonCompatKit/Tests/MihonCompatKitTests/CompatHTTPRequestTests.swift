@@ -148,6 +148,79 @@ final class CompatHTTPRequestTests: XCTestCase {
         }
     }
 
+    func testKotlinSetHelpersPreserveUniquenessAndMembership() throws {
+        let (vm, bridge) = try makeVM()
+        let empty = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/SetsKt;", "emptySet",
+            prototype: "()Ljava/util/Set;",
+            isStatic: true,
+            args: []
+        )
+        let first = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/SetsKt;", "plus",
+            prototype: "(Ljava/util/Set;Ljava/lang/Object;)Ljava/util/Set;",
+            isStatic: true,
+            args: [empty, HostBridge.string("alpha")]
+        )
+        let duplicate = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/SetsKt;", "plus",
+            prototype: "(Ljava/util/Set;Ljava/lang/Object;)Ljava/util/Set;",
+            isStatic: true,
+            args: [first, HostBridge.string("alpha")]
+        )
+        let directContains = try invoke(
+            bridge, vm,
+            class: "Ljava/util/Set;", "contains",
+            prototype: "(Ljava/lang/Object;)Z",
+            args: [duplicate, HostBridge.string("alpha")]
+        )
+        let iterableContains = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "contains",
+            prototype: "(Ljava/lang/Iterable;Ljava/lang/Object;)Z",
+            isStatic: true,
+            args: [duplicate, HostBridge.string("missing")]
+        )
+        let iterator = try invoke(
+            bridge, vm,
+            class: "Ljava/lang/Iterable;", "iterator",
+            prototype: "()Ljava/util/Iterator;",
+            args: [duplicate]
+        )
+        let firstHasNext = try invoke(
+            bridge, vm,
+            class: "Ljava/util/Iterator;", "hasNext",
+            prototype: "()Z",
+            args: [iterator]
+        )
+        _ = try invoke(
+            bridge, vm,
+            class: "Ljava/util/Iterator;", "next",
+            prototype: "()Ljava/lang/Object;",
+            args: [iterator]
+        )
+        let secondHasNext = try invoke(
+            bridge, vm,
+            class: "Ljava/util/Iterator;", "hasNext",
+            prototype: "()Z",
+            args: [iterator]
+        )
+
+        guard case let .int(rawDirectContains) = directContains,
+              case let .int(rawIterableContains) = iterableContains,
+              case let .int(rawFirstHasNext) = firstHasNext,
+              case let .int(rawSecondHasNext) = secondHasNext else {
+            return XCTFail("expected Kotlin boolean results")
+        }
+        XCTAssertEqual(rawDirectContains, 1)
+        XCTAssertEqual(rawIterableContains, 0)
+        XCTAssertEqual(rawFirstHasNext, 1)
+        XCTAssertEqual(rawSecondHasNext, 0)
+    }
+
     func testKotlinStatusAndChapterNumberHelpersMatchPizzaReader() throws {
         let (vm, bridge) = try makeVM()
         let prefix = try invoke(
@@ -179,6 +252,164 @@ final class CompatHTTPRequestTests: XCTestCase {
         XCTAssertEqual(prefixObject.payload as? String, "In cors")
         XCTAssertEqual(integerObject.payload as? String, "5")
         XCTAssertEqual(value, 0.5)
+    }
+
+    func testJavaCharacterIsDigitUsesUnicodeDecimalDigitSemantics() throws {
+        let (vm, bridge) = try makeVM()
+        func isDigit(_ codeUnit: UInt16) throws -> Int32 {
+            let result = try invoke(
+                bridge, vm,
+                class: "Ljava/lang/Character;", "isDigit",
+                prototype: "(C)Z",
+                isStatic: true,
+                args: [.int(Int32(codeUnit))]
+            )
+            guard case let .int(value) = result else {
+                throw VMError.verify("expected Character.isDigit boolean")
+            }
+            return value
+        }
+
+        XCTAssertEqual(try isDigit(0x0037), 1)
+        XCTAssertEqual(try isDigit(0x0663), 1)
+        XCTAssertEqual(try isDigit(0x0041), 0)
+        XCTAssertEqual(try isDigit(0xd800), 0)
+    }
+
+    func testStringLowercaseSupportsFrenchLocaleUsedByOrigines() throws {
+        let (vm, bridge) = try makeVM()
+        let french = try XCTUnwrap(bridge.staticFields["Ljava/util/Locale;->FRENCH"])
+        let result = try invoke(
+            bridge, vm,
+            class: "Ljava/lang/String;", "toLowerCase",
+            prototype: "(Ljava/util/Locale;)Ljava/lang/String;",
+            args: [HostBridge.string("ÉCOLE ET SCÉNARIO"), french]
+        )
+        XCTAssertEqual(vmStringValue(result), "école et scénario")
+    }
+
+    func testKotlinStringBuilderVarargAppendMatchesOriginesDescription() throws {
+        let (vm, bridge) = try makeVM()
+        let builder = RVal.obj(ObjInstance(
+            dexType: "Ljava/lang/StringBuilder;",
+            payload: "",
+            isHost: true
+        ))
+        let values = RVal.arr(ArrInstance(
+            elemDescriptor: "Ljava/lang/String;",
+            elements: [
+                HostBridge.string("Nom alternatif: "),
+                HostBridge.string("Alternative Hero"),
+            ]
+        ))
+        let returned = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "append",
+            prototype: "(Ljava/lang/StringBuilder;[Ljava/lang/String;)Ljava/lang/StringBuilder;",
+            isStatic: true,
+            args: [builder, values]
+        )
+        XCTAssertEqual(vmStringValue(returned), "Nom alternatif: Alternative Hero")
+
+        let rendered = try invoke(
+            bridge, vm,
+            class: "Ljava/lang/StringBuilder;", "toString",
+            prototype: "()Ljava/lang/String;",
+            args: [builder]
+        )
+        XCTAssertEqual(vmStringValue(rendered), "Nom alternatif: Alternative Hero")
+    }
+
+    func testKotlinMapCapacityAndLinkedHashMapLookupStayBounded() throws {
+        let (vm, bridge) = try makeVM()
+        func mapCapacity(_ size: Int32) throws -> Int32 {
+            let result = try invoke(
+                bridge, vm,
+                class: "Lkotlin/collections/MapsKt;", "mapCapacity",
+                prototype: "(I)I",
+                isStatic: true,
+                args: [.int(size)]
+            )
+            guard case let .int(value) = result else {
+                throw VMError.verify("expected MapsKt.mapCapacity integer")
+            }
+            return value
+        }
+
+        XCTAssertEqual(try mapCapacity(-1), -1)
+        XCTAssertEqual(try mapCapacity(0), 1)
+        XCTAssertEqual(try mapCapacity(2), 3)
+        XCTAssertEqual(try mapCapacity(3), 5)
+        XCTAssertEqual(try mapCapacity(12), 17)
+        XCTAssertEqual(try mapCapacity(1 << 30), Int32.max)
+
+        let map = RVal.obj(ObjInstance(
+            dexType: "Ljava/util/LinkedHashMap;",
+            isHost: true
+        ))
+        _ = try invoke(
+            bridge, vm,
+            class: "Ljava/util/LinkedHashMap;", "<init>",
+            prototype: "(I)V",
+            args: [map, .int(4)]
+        )
+        _ = try invoke(
+            bridge, vm,
+            class: "Ljava/util/Map;", "put",
+            prototype: "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+            args: [map, HostBridge.string("auteur"), HostBridge.string("Measured Writer")]
+        )
+        let found = try invoke(
+            bridge, vm,
+            class: "Ljava/util/LinkedHashMap;", "get",
+            prototype: "(Ljava/lang/Object;)Ljava/lang/Object;",
+            args: [map, HostBridge.string("auteur")]
+        )
+        let missing = try invoke(
+            bridge, vm,
+            class: "Ljava/util/LinkedHashMap;", "get",
+            prototype: "(Ljava/lang/Object;)Ljava/lang/Object;",
+            args: [map, HostBridge.string("missing")]
+        )
+        XCTAssertEqual(vmStringValue(found), "Measured Writer")
+        XCTAssertTrue(missing.isNull)
+
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Ljava/util/LinkedHashMap;", "<init>",
+            prototype: "(I)V",
+            args: [map, .int(1_000_001)]
+        ))
+    }
+
+    func testKotlinCollectionPlusPreservesOrderAndDuplicates() throws {
+        let (vm, bridge) = try makeVM()
+        let source = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "listOf",
+            prototype: "([Ljava/lang/Object;)Ljava/util/List;",
+            isStatic: true,
+            args: [.arr(ArrInstance(
+                elemDescriptor: "Ljava/lang/Object;",
+                elements: [HostBridge.string("Action"), HostBridge.string("Adventure")]
+            ))]
+        )
+        let result = try invoke(
+            bridge, vm,
+            class: "Lkotlin/collections/CollectionsKt;", "plus",
+            prototype: "(Ljava/util/Collection;Ljava/lang/Object;)Ljava/util/List;",
+            isStatic: true,
+            args: [source, HostBridge.string("Action")]
+        )
+        for (index, expected) in ["Action", "Adventure", "Action"].enumerated() {
+            let value = try invoke(
+                bridge, vm,
+                class: "Ljava/util/List;", "get",
+                prototype: "(I)Ljava/lang/Object;",
+                args: [result, .int(Int32(index))]
+            )
+            XCTAssertEqual(vmStringValue(value), expected)
+        }
     }
 
     func testKotlinTakeNormalizesSplitUTF16SurrogatesAtTheVMBoundary() throws {
@@ -530,6 +761,209 @@ final class CompatHTTPRequestTests: XCTestCase {
             args: [companion, HostBridge.string("not-an-instant")]
         )
         XCTAssertTrue(invalid.isNull)
+    }
+
+    func testJavaZoneIDOfAcceptsIANAIdentifierAndRejectsInvalidInput() throws {
+        let (vm, bridge) = try makeVM()
+        let zone = try invoke(
+            bridge, vm,
+            class: "Ljava/time/ZoneId;", "of",
+            prototype: "(Ljava/lang/String;)Ljava/time/ZoneId;",
+            isStatic: true,
+            args: [HostBridge.string("Europe/Paris")]
+        )
+        guard case let .obj(object) = zone else {
+            return XCTFail("expected ZoneId host object")
+        }
+        XCTAssertEqual(object.dexType, "Ljava/time/ZoneId;")
+
+        for invalid in ["", "Not/A_Time_Zone", String(repeating: "A", count: 257)] {
+            XCTAssertThrowsError(try invoke(
+                bridge, vm,
+                class: "Ljava/time/ZoneId;", "of",
+                prototype: "(Ljava/lang/String;)Ljava/time/ZoneId;",
+                isStatic: true,
+                args: [HostBridge.string(invalid)]
+            )) { error in
+                guard let throwable = error as? DEXThrowable,
+                      case let .obj(throwableObject) = throwable.value else {
+                    return XCTFail("expected DateTimeException for \(invalid)")
+                }
+                XCTAssertEqual(throwableObject.dexType, "Ljava/time/DateTimeException;")
+            }
+        }
+    }
+
+    func testJavaLocalDateOfValidatesCalendarDateAndUsesParisStartOfDay() throws {
+        let (vm, bridge) = try makeVM()
+        let date = try invoke(
+            bridge, vm,
+            class: "Ljava/time/LocalDate;", "of",
+            prototype: "(III)Ljava/time/LocalDate;",
+            isStatic: true,
+            args: [.int(2026), .int(8), .int(8)]
+        )
+        let zone = try invoke(
+            bridge, vm,
+            class: "Ljava/time/ZoneId;", "of",
+            prototype: "(Ljava/lang/String;)Ljava/time/ZoneId;",
+            isStatic: true,
+            args: [HostBridge.string("Europe/Paris")]
+        )
+        let zoned = try invoke(
+            bridge, vm,
+            class: "Ljava/time/LocalDate;", "atStartOfDay",
+            prototype: "(Ljava/time/ZoneId;)Ljava/time/ZonedDateTime;",
+            args: [date, zone]
+        )
+        let instant = try invoke(
+            bridge, vm,
+            class: "Ljava/time/chrono/ChronoZonedDateTime;", "toInstant",
+            prototype: "()Ljava/time/Instant;",
+            args: [zoned]
+        )
+        let epoch = try invoke(
+            bridge, vm,
+            class: "Ljava/time/Instant;", "toEpochMilli",
+            prototype: "()J",
+            args: [instant]
+        )
+        guard case let .long(milliseconds) = epoch else {
+            return XCTFail("expected epoch milliseconds")
+        }
+        XCTAssertEqual(milliseconds, 1_786_140_000_000)
+
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Ljava/time/LocalDate;", "of",
+            prototype: "(III)Ljava/time/LocalDate;",
+            isStatic: true,
+            args: [.int(2025), .int(2), .int(29)]
+        )) { error in
+            guard let throwable = error as? DEXThrowable,
+                  case let .obj(object) = throwable.value else {
+                return XCTFail("expected DateTimeException")
+            }
+            XCTAssertEqual(object.dexType, "Ljava/time/DateTimeException;")
+        }
+    }
+
+    func testJsoupParseBodyFragmentPreservesBoundedBaseURLResolution() throws {
+        let (vm, bridge) = try makeVM()
+        let document = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/Jsoup;", "parseBodyFragment",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Lorg/jsoup/nodes/Document;",
+            isStatic: true,
+            args: [
+                HostBridge.string(#"<a class="entry" href="/oeuvre/hero/">Hero</a>"#),
+                HostBridge.string("https://mangas-origines.fr/catalogue/"),
+            ]
+        )
+        let anchor = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/nodes/Document;", "selectFirst",
+            prototype: "(Ljava/lang/String;)Lorg/jsoup/nodes/Element;",
+            args: [document, HostBridge.string("a.entry")]
+        )
+        let absoluteURL = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/nodes/Element;", "absUrl",
+            prototype: "(Ljava/lang/String;)Ljava/lang/String;",
+            args: [anchor, HostBridge.string("href")]
+        )
+        XCTAssertEqual(
+            vmStringValue(absoluteURL),
+            "https://mangas-origines.fr/oeuvre/hero/"
+        )
+
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/Jsoup;", "parseBodyFragment",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Lorg/jsoup/nodes/Document;",
+            isStatic: true,
+            args: [HostBridge.string("<p>unsafe</p>"), HostBridge.string("file:///private/")]
+        ))
+    }
+
+    func testJsoupElementSiblingAttributeAndEachTextMatchOriginesDetailsAndPages() throws {
+        let (vm, bridge) = try makeVM()
+        let document = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/Jsoup;", "parseBodyFragment",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Lorg/jsoup/nodes/Document;",
+            isStatic: true,
+            args: [
+                HostBridge.string(#"""
+                <div class="infos"><dt>Auteur</dt><dd>Measured Writer</dd></div>
+                <div class="genres"><a data-src="/a">Action</a><a>Adventure</a></div>
+                """#),
+                HostBridge.string("https://mangas-origines.fr/oeuvre/hero/"),
+            ]
+        )
+        let terms = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/nodes/Document;", "select",
+            prototype: "(Ljava/lang/String;)Lorg/jsoup/select/Elements;",
+            args: [document, HostBridge.string("div.infos dt")]
+        )
+        let term = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/select/Elements;", "first",
+            prototype: "()Lorg/jsoup/nodes/Element;",
+            args: [terms]
+        )
+        let sibling = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/nodes/Element;", "nextElementSibling",
+            prototype: "()Lorg/jsoup/nodes/Element;",
+            args: [term]
+        )
+        let siblingText = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/nodes/Element;", "text",
+            prototype: "()Ljava/lang/String;",
+            args: [sibling]
+        )
+        XCTAssertEqual(vmStringValue(siblingText), "Measured Writer")
+
+        let genres = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/nodes/Document;", "select",
+            prototype: "(Ljava/lang/String;)Lorg/jsoup/select/Elements;",
+            args: [document, HostBridge.string("div.genres a")]
+        )
+        let texts = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/select/Elements;", "eachText",
+            prototype: "()Ljava/util/List;",
+            args: [genres]
+        )
+        for (index, expected) in ["Action", "Adventure"].enumerated() {
+            let text = try invoke(
+                bridge, vm,
+                class: "Ljava/util/List;", "get",
+                prototype: "(I)Ljava/lang/Object;",
+                args: [texts, .int(Int32(index))]
+            )
+            XCTAssertEqual(vmStringValue(text), expected)
+        }
+        let firstGenre = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/select/Elements;", "first",
+            prototype: "()Lorg/jsoup/nodes/Element;",
+            args: [genres]
+        )
+        let hasDataSource = try invoke(
+            bridge, vm,
+            class: "Lorg/jsoup/nodes/Element;", "hasAttr",
+            prototype: "(Ljava/lang/String;)Z",
+            args: [firstGenre, HostBridge.string("data-src")]
+        )
+        guard case let .int(rawHasDataSource) = hasDataSource else {
+            return XCTFail("expected Element.hasAttr boolean")
+        }
+        XCTAssertEqual(rawHasDataSource, 1)
     }
 
     func testHostBridgeRejectsMalformedRequestInputs() throws {
@@ -935,6 +1369,28 @@ final class CompatHTTPRequestTests: XCTestCase {
             args: [parts, .int(2)]
         ))
 
+        let characterParts = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/StringsKt;", "split$default",
+            prototype: "(Ljava/lang/CharSequence;[CZIILjava/lang/Object;)Ljava/util/List;",
+            isStatic: true,
+            args: [
+                HostBridge.string("oeuvre/hero/chapter-7"),
+                .arr(ArrInstance(elemDescriptor: "C", elements: [.int(47)])),
+                .int(0),
+                .int(2),
+                .int(0),
+                .null,
+            ]
+        )
+        let characterTail = try invoke(
+            bridge, vm,
+            class: "Ljava/util/List;", "get",
+            prototype: "(I)Ljava/lang/Object;",
+            args: [characterParts, .int(1)]
+        )
+        XCTAssertEqual(vmStringValue(characterTail), "hero/chapter-7")
+
         let emptyDelimiter = RVal.arr(ArrInstance(
             elemDescriptor: "Ljava/lang/String;",
             elements: [HostBridge.string("")]
@@ -1122,6 +1578,32 @@ final class CompatHTTPRequestTests: XCTestCase {
         )
         XCTAssertEqual(vmStringValue(numericGroup), "42")
         XCTAssertEqual(vmStringValue(extensionGroup), "JPG")
+
+        let destructured = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/MatchResult;", "getDestructured",
+            prototype: "()Lkotlin/text/MatchResult$Destructured;",
+            args: [uppercaseMatch]
+        )
+        let destructuredMatch = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/MatchResult$Destructured;", "getMatch",
+            prototype: "()Lkotlin/text/MatchResult;",
+            args: [destructured]
+        )
+        let destructuredGroups = try invoke(
+            bridge, vm,
+            class: "Lkotlin/text/MatchResult;", "getGroupValues",
+            prototype: "()Ljava/util/List;",
+            args: [destructuredMatch]
+        )
+        let destructuredExtension = try invoke(
+            bridge, vm,
+            class: "Ljava/util/List;", "get",
+            prototype: "(I)Ljava/lang/Object;",
+            args: [destructuredGroups, .int(2)]
+        )
+        XCTAssertEqual(vmStringValue(destructuredExtension), "JPG")
 
         XCTAssertThrowsError(try invoke(
             bridge, vm,

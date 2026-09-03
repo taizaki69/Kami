@@ -7,6 +7,12 @@ final class AsyncInterpreterTests: XCTestCase {
         return result
     }
 
+    private func string(_ value: RVal) -> String? {
+        guard case let .obj(object) = value,
+              object.dexType == "Ljava/lang/String;" else { return nil }
+        return object.payload as? String
+    }
+
     private func invoke(
         _ bridge: HostBridge,
         _ vm: DexInterpreter,
@@ -35,6 +41,50 @@ final class AsyncInterpreterTests: XCTestCase {
             UInt8(count & 0xff), UInt8(count >> 8),
             UInt8(handlerOffset & 0xff), UInt8(handlerOffset >> 8),
         ]
+    }
+
+    private func nestedVirtualBudgetFixture() throws -> (
+        vm: DexInterpreter,
+        bridge: HostBridge,
+        target: RVal
+    ) {
+        var builder = DexBuilder()
+        let fetch = builder.method(
+            classDescriptor: "LAsyncHost;",
+            name: "fetch",
+            shorty: "L",
+            ret: "Ljava/lang/Object;"
+        )
+        builder.setClass("LTarget;")
+        builder.addMethod(.init(
+            name: "burn", registers: 1, ins: 1, outs: 0,
+            insns: Insn.nop() + Insn.nop() + Insn.nop() + Insn.nop()
+                + Insn.const4Units(0, 0)
+                + Insn.returnObjectReg(0),
+            isStatic: false,
+            returnType: "Ljava/lang/Object;"
+        ))
+        builder.setClass("LTest;")
+        builder.addMethod(.init(
+            name: "run", registers: 1, ins: 0, outs: 0,
+            insns: Insn.invokeStatic(fetch, [])
+                + Insn.moveResultObject(0)
+                + Insn.returnObjectReg(0),
+            isStatic: true,
+            returnType: "Ljava/lang/Object;"
+        ))
+
+        let bridge = HostBridge.minimal()
+        let vm = DexInterpreter(
+            dex: try DexFile(builder.build()),
+            bridge: bridge,
+            maxInstructions: 8
+        )
+        return (
+            vm,
+            bridge,
+            try vm.instantiate(classDescriptor: "LTarget;")
+        )
     }
 
     func testAsyncHostInvocationResumesNestedDexFrames() async throws {
@@ -92,6 +142,135 @@ final class AsyncInterpreterTests: XCTestCase {
         }
         let result = try await vm.callAsync(classDescriptor: "LTest;", method: "run")
         XCTAssertEqual(int(result), 4)
+    }
+
+    func testVirtualAsyncEntrySelectsOverrideAndInheritedOverride() async throws {
+        var builder = DexBuilder()
+        let baseMarker = builder.method(
+            classDescriptor: "LAsyncHost;",
+            name: "baseMarker",
+            shorty: "L",
+            ret: "Ljava/lang/String;"
+        )
+        let childMarker = builder.method(
+            classDescriptor: "LAsyncHost;",
+            name: "childMarker",
+            shorty: "L",
+            ret: "Ljava/lang/String;"
+        )
+        builder.setClass("LBase;", superclass: "Ljava/lang/Object;")
+        builder.addMethod(.init(
+            name: "run", registers: 2, ins: 1, outs: 0,
+            insns: Insn.invokeStatic(baseMarker, [])
+                + Insn.moveResultObject(0)
+                + Insn.returnObjectReg(0),
+            isStatic: false,
+            returnType: "Ljava/lang/String;"
+        ))
+        builder.setClass("LChild;", superclass: "LBase;")
+        builder.addMethod(.init(
+            name: "run", registers: 2, ins: 1, outs: 0,
+            insns: Insn.invokeStatic(childMarker, [])
+                + Insn.moveResultObject(0)
+                + Insn.returnObjectReg(0),
+            isStatic: false,
+            returnType: "Ljava/lang/String;"
+        ))
+        builder.setClass("LGrandChild;", superclass: "LChild;")
+
+        let bridge = HostBridge.minimal()
+        bridge.registerAsync(
+            class: "LAsyncHost;",
+            "baseMarker",
+            prototype: "()Ljava/lang/String;",
+            isStatic: true
+        ) { _, _ in
+            await Task.yield()
+            return HostBridge.string("base")
+        }
+        bridge.registerAsync(
+            class: "LAsyncHost;",
+            "childMarker",
+            prototype: "()Ljava/lang/String;",
+            isStatic: true
+        ) { _, _ in
+            await Task.yield()
+            return HostBridge.string("child")
+        }
+        let vm = DexInterpreter(dex: try DexFile(builder.build()), bridge: bridge)
+        let child = try vm.instantiate(classDescriptor: "LChild;")
+        let grandChild = try vm.instantiate(classDescriptor: "LGrandChild;")
+
+        let childResult = try await vm.callVirtualEntryAsync(
+            receiver: child,
+            method: "run",
+            prototype: "()Ljava/lang/String;",
+            args: [child]
+        )
+        let grandChildResult = try await vm.callVirtualEntryAsync(
+            receiver: grandChild,
+            method: "run",
+            prototype: "()Ljava/lang/String;",
+            args: [grandChild]
+        )
+        XCTAssertEqual(string(childResult), "child")
+        XCTAssertEqual(string(grandChildResult), "child")
+    }
+
+    func testNestedVirtualAsyncEntrySharesTheOuterInstructionBudget() async throws {
+        let (vm, bridge, target) = try nestedVirtualBudgetFixture()
+        bridge.registerAsync(
+            class: "LAsyncHost;",
+            "fetch",
+            prototype: "()Ljava/lang/Object;",
+            isStatic: true
+        ) { vm, _ in
+            await Task.yield()
+            return try await vm.callVirtualEntryAsync(
+                receiver: target,
+                method: "burn",
+                prototype: "()Ljava/lang/Object;",
+                args: [target]
+            )
+        }
+
+        do {
+            _ = try await vm.callAsync(classDescriptor: "LTest;", method: "run")
+            XCTFail("nested virtual entry must not receive a fresh instruction budget")
+        } catch let error as VMError {
+            guard case let .budgetExceeded(limit) = error else {
+                return XCTFail("expected shared budget failure, got \(error)")
+            }
+            XCTAssertEqual(limit, 8)
+        }
+    }
+
+    func testNestedSynchronousVirtualEntryFromAsyncHostSharesTheOuterInstructionBudget() async throws {
+        let (vm, bridge, target) = try nestedVirtualBudgetFixture()
+        bridge.registerAsync(
+            class: "LAsyncHost;",
+            "fetch",
+            prototype: "()Ljava/lang/Object;",
+            isStatic: true
+        ) { vm, _ in
+            await Task.yield()
+            return try vm.callVirtualEntry(
+                receiver: target,
+                method: "burn",
+                prototype: "()Ljava/lang/Object;",
+                args: [target]
+            )
+        }
+
+        do {
+            _ = try await vm.callAsync(classDescriptor: "LTest;", method: "run")
+            XCTFail("synchronous re-entry must not receive a fresh instruction budget")
+        } catch let error as VMError {
+            guard case let .budgetExceeded(limit) = error else {
+                return XCTFail("expected shared budget failure, got \(error)")
+            }
+            XCTAssertEqual(limit, 8)
+        }
     }
 
     func testAsyncDexThrowableReentersTypedHandlerAtInvoke() async throws {

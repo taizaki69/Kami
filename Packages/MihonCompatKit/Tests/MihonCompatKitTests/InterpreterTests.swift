@@ -1879,6 +1879,58 @@ final class InterpreterTests: XCTestCase {
         )
     }
 
+    func testDirectVirtualEntrySelectsAndInheritsOverrideAndValidatesReceiver() throws {
+        var builder = DexBuilder()
+        builder.setClass("LBase;", superclass: "Ljava/lang/Object;")
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 1) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass("LChild;", superclass: "LBase;")
+        builder.addMethod(.init(
+            name: "value", registers: 2, ins: 1, outs: 0,
+            insns: Insn.const4Units(0, 2) + Insn.returnReg(0),
+            isStatic: false, returnType: "I"
+        ))
+        builder.setClass("LGrandChild;", superclass: "LChild;")
+
+        let vm = DexInterpreter(dex: try DexFile(builder.build()))
+        let child = try vm.instantiate(classDescriptor: "LChild;")
+        let otherChild = try vm.instantiate(classDescriptor: "LChild;")
+        let grandChild = try vm.instantiate(classDescriptor: "LGrandChild;")
+
+        XCTAssertEqual(
+            int(try vm.callVirtualEntry(
+                receiver: child,
+                method: "value",
+                prototype: "()I",
+                args: [child]
+            )),
+            2
+        )
+        XCTAssertEqual(
+            int(try vm.callVirtualEntry(
+                receiver: grandChild,
+                method: "value",
+                prototype: "()I",
+                args: [grandChild]
+            )),
+            2
+        )
+        XCTAssertThrowsError(try vm.callVirtualEntry(
+            receiver: child,
+            method: "value",
+            prototype: "()I",
+            args: [otherChild]
+        )) { error in
+            guard case let VMError.verify(message) = error else {
+                return XCTFail("expected receiver verification failure, got \(error)")
+            }
+            XCTAssertTrue(message.contains("different receiver"))
+        }
+    }
+
     func testInvokeInterfaceSelectsImplementationFromRuntimeReceiver() throws {
         var builder = DexBuilder()
         let interfaceValue = builder.method(

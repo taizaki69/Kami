@@ -797,6 +797,69 @@ final class RealExtensionExecutionTests: XCTestCase {
         XCTAssertTrue(filters.isEmpty)
     }
 
+    /// Exact locked execution fixture for the promoted Mangas Origines FR
+    /// 1.6.58 profile. App-facing operation coverage lives in the dedicated
+    /// deterministic profile suite.
+    func testMangasOriginesFRConstructorMetadataAndFiltersExecute() throws {
+        let (vm, manifest) = try loadVM("mangasoriginesfr")
+        let cls = "L" + (manifest.resolvedSourceClass ?? "")
+            .replacingOccurrences(of: ".", with: "/") + ";"
+        let sourceWrapper = "Lw;"
+        let receiver = try vm.instantiate(classDescriptor: cls)
+        guard case let .obj(object) = receiver else {
+            return XCTFail("expected Mangas Origines FR object, got \(receiver)")
+        }
+        XCTAssertEqual(object.dexType, cls)
+
+        let name = try vm.call(
+            classDescriptor: cls,
+            method: "getName",
+            prototype: "()Ljava/lang/String;",
+            args: [receiver]
+        )
+        let language = try vm.call(
+            classDescriptor: cls,
+            method: "getLang",
+            prototype: "()Ljava/lang/String;",
+            args: [receiver]
+        )
+        let baseURL = try vm.call(
+            classDescriptor: cls,
+            method: "getBaseUrl",
+            prototype: "()Ljava/lang/String;",
+            args: [receiver]
+        )
+        let sourceID = try vm.call(
+            classDescriptor: cls,
+            method: "getId",
+            prototype: "()J",
+            args: [receiver]
+        )
+        let supportsLatest = try vm.call(
+            classDescriptor: sourceWrapper,
+            method: "getSupportsLatest",
+            prototype: "()Z",
+            args: [receiver]
+        )
+        let filterList = try vm.call(
+            classDescriptor: sourceWrapper,
+            method: "getFilterList",
+            prototype: "()Leu/kanade/tachiyomi/source/model/FilterList;",
+            args: [receiver]
+        )
+
+        XCTAssertEqual(vmStringValue(name), "Mangas-Origines.fr")
+        XCTAssertEqual(vmStringValue(language), "fr")
+        XCTAssertEqual(vmStringValue(baseURL), "https://mangas-origines.fr")
+        guard case let .long(id) = sourceID,
+              case let .int(rawSupportsLatest) = supportsLatest else {
+            return XCTFail("expected source identity and latest flag")
+        }
+        XCTAssertEqual(id, 4_803_238_581_797_687_746)
+        XCTAssertEqual(rawSupportsLatest, 1)
+        XCTAssertNotNil(HostBridge.sourceFilters(from: filterList))
+    }
+
     /// MangaDex 1.4.212: the factory entry class's REAL constructor executes
     /// (invoke-direct Object.<init> + return-void). Its getters are iget-based
     /// (instance state from the host HttpSource superclass) — that is the M2/M3

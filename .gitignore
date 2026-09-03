@@ -20,7 +20,7 @@ Tests/corpus/**/*.apk
 !Tests/corpus/measurement/sssscanlator.apk
 !Tests/corpus/measurement/komikcast.apk
 !Tests/corpus/measurement/pixivcomic.apk
-!Tests/corpus/measurement/mangasoriginesfr.apk
+!Tests/corpus/mangasoriginesfr.apk
 !Tests/corpus/measurement/mangaplus.apk
 !Tests/corpus/measurement/komga.apk
 !Tests/corpus/measurement/xcomic.apk

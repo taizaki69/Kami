@@ -75,6 +75,11 @@ public final class DexInterpreter {
     /// outer entry's remaining instruction budget instead of starting a fresh
     /// budget session.
     private var activeAsyncEntryDepth = 0
+    /// Number of suspended host operations currently executing on behalf of an
+    /// async VM entry. Interpreted re-entry from those callbacks happens after
+    /// the original frames have unwound to depth zero, so this is the remaining
+    /// signal that the caller must share the outer instruction budget.
+    private var asyncHostOperationDepth = 0
     /// Conservative default: interpreted frames are large in debug builds and
     /// unbounded recursion (obfuscated/mis-resolved super calls) must not
     /// overflow the host stack. The production runtime raises this by
@@ -183,6 +188,109 @@ public final class DexInterpreter {
                 descriptor = dex.typeDescriptors[definition.superclassIndex]
             }
             return nil
+        }
+    }
+
+    /// Enters one exact virtual method through the receiver's parsed class
+    /// chain. App-facing source APIs use this instead of assuming R8 emitted
+    /// every inherited operation directly on the generated entry class.
+    func callVirtualEntry(
+        receiver: RVal,
+        method: String,
+        prototype: String,
+        args: [RVal]
+    ) throws -> RVal {
+        try reportCompatibilityGap {
+            if Self.isNullReference(receiver) {
+                throw DEXThrowable(HostBridge.string(
+                    "NullPointerException: null receiver for virtual entry \(method)\(prototype)"
+                ))
+            }
+            guard let runtimeDescriptor = typeHierarchy.runtimeDescriptor(of: receiver) else {
+                throw VMError.verify("virtual entry receiver is not a reference")
+            }
+            guard let argumentReceiver = args.first else {
+                throw VMError.verify(
+                    "virtual entry \(method)\(prototype) arguments omit the receiver"
+                )
+            }
+            guard receiver === argumentReceiver else {
+                throw VMError.verify(
+                    "virtual entry \(method)\(prototype) arguments begin with a different receiver"
+                )
+            }
+            let lookup = try methodResolver.virtual(
+                receiverDescriptor: runtimeDescriptor,
+                name: method,
+                prototype: prototype
+            )
+            return try withInstructionBudget {
+                switch lookup {
+                case let .found(resolved):
+                    let reference = dex.methodIds[resolved.method.methodIndex]
+                    let relation = typeHierarchy.assignability(
+                        from: runtimeDescriptor,
+                        to: reference.declaringClass,
+                        strict: false
+                    )
+                    if relation == .no {
+                        throw VMError.verify(
+                            "\(reference.signature) receiver \(runtimeDescriptor) "
+                                + "is not assignable to \(reference.declaringClass)"
+                        )
+                    }
+                    return try execute(
+                        def: resolved.definition,
+                        method: resolved.method,
+                        args: args
+                    )
+                case .abstract:
+                    throw DEXThrowable(HostBridge.string(
+                        "AbstractMethodError: \(runtimeDescriptor)->\(method)\(prototype)"
+                    ))
+                case let .conflict(interfaces):
+                    throw DEXThrowable(HostBridge.string(
+                        "IncompatibleClassChangeError: conflicting defaults for "
+                            + "\(runtimeDescriptor)->\(method)\(prototype): "
+                            + interfaces.joined(separator: ", ")
+                    ))
+                case .missing:
+                    throw DEXThrowable(HostBridge.string(
+                        "NoSuchMethodError: \(runtimeDescriptor)->\(method)\(prototype)"
+                    ))
+                case .unresolved:
+                    throw VMError.unresolvedMethod(
+                        class: runtimeDescriptor,
+                        signature: method + prototype
+                    )
+                }
+            }
+        }
+    }
+
+    /// Async counterpart of `callVirtualEntry`. Any registered host suspension
+    /// resumes the same VM call tree and instruction-budget session.
+    func callVirtualEntryAsync(
+        receiver: RVal,
+        method: String,
+        prototype: String,
+        args: [RVal]
+    ) async throws -> RVal {
+        try await reportCompatibilityGap {
+            activeAsyncEntryDepth += 1
+            defer { activeAsyncEntryDepth -= 1 }
+            do {
+                return try allowingAsyncHostInvocation {
+                    try callVirtualEntry(
+                        receiver: receiver,
+                        method: method,
+                        prototype: prototype,
+                        args: args
+                    )
+                }
+            } catch let suspension as DexAsyncSuspension {
+                return try await resolve(suspension)
+            }
         }
     }
 
@@ -445,7 +553,9 @@ public final class DexInterpreter {
     }
 
     private func withInstructionBudget<T>(_ operation: () throws -> T) throws -> T {
-        let startsSession = entryDepth == 0 && depth == 0
+        let startsSession = entryDepth == 0
+            && depth == 0
+            && asyncHostOperationDepth == 0
         if startsSession { remainingInstructions = maxInstructions }
         entryDepth += 1
         defer { entryDepth -= 1 }
@@ -728,6 +838,8 @@ public final class DexInterpreter {
             let outcome: Result<RVal, DEXThrowable>
             do {
                 try Task.checkCancellation()
+                asyncHostOperationDepth += 1
+                defer { asyncHostOperationDepth -= 1 }
                 let value = try await suspension.operation()
                 try Task.checkCancellation()
                 outcome = .success(value)

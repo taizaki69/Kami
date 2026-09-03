@@ -1295,6 +1295,45 @@ public final class HostBridge {
             return hostList(pieces, isMutable: false)
         }
         bridge.register(
+            class: "Lkotlin/text/StringsKt;",
+            "split$default",
+            prototype: "(Ljava/lang/CharSequence;[CZIILjava/lang/Object;)Ljava/util/List;",
+            isStatic: true
+        ) { vm, args in
+            let operation = "StringsKt.split$default"
+            guard case let .arr(delimiterArray) = try argument(args, 1, operation),
+                  delimiterArray.elemDescriptor == "C" else {
+                throw VMError.verify("\(operation) character delimiter array")
+            }
+            try requireCollectionCapacity(delimiterArray.elements.count, operation)
+            let delimiters = try delimiterArray.elements.enumerated().map { index, value in
+                guard case let .int(rawValue) = value,
+                      let codeUnit = UInt16(exactly: rawValue) else {
+                    throw VMError.verify("\(operation) character delimiter \(index)")
+                }
+                return string(String(decoding: [codeUnit], as: UTF16.self))
+            }
+            guard let stringSplit = bridge.resolve(
+                class: "Lkotlin/text/StringsKt;",
+                "split$default",
+                prototype: "(Ljava/lang/CharSequence;[Ljava/lang/String;ZIILjava/lang/Object;)Ljava/util/List;",
+                isStatic: true
+            ) else {
+                throw VMError.verify("\(operation) string overload is unavailable")
+            }
+            return try stringSplit(vm, [
+                try argument(args, 0, operation),
+                .arr(ArrInstance(
+                    elemDescriptor: "Ljava/lang/String;",
+                    elements: delimiters
+                )),
+                try argument(args, 2, operation),
+                try argument(args, 3, operation),
+                try argument(args, 4, operation),
+                try argument(args, 5, operation),
+            ])
+        }
+        bridge.register(
             class: "Ljava/net/URLEncoder;",
             "encode",
             prototype: "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
@@ -1530,6 +1569,23 @@ public final class HostBridge {
             box.entries.append((key, value))
             return .null
         }
+        let mapLookup: (DexInterpreter, [RVal]) throws -> RVal = { _, args in
+            let box = try mapBox(args, "Map.get")
+            let key = try argument(args, 1, "Map.get")
+            return box.entries.first(where: { javaValueEquals($0.key, key) })?.value ?? .null
+        }
+        bridge.register(
+            class: "Ljava/util/Map;",
+            "get",
+            prototype: "(Ljava/lang/Object;)Ljava/lang/Object;",
+            mapLookup
+        )
+        bridge.register(
+            class: "Ljava/util/LinkedHashMap;",
+            "get",
+            prototype: "(Ljava/lang/Object;)Ljava/lang/Object;",
+            mapLookup
+        )
         bridge.register(class: "Ljava/util/Map;", "size", prototype: "()I") { _, args in
             .int(Int32(clamping: try mapBox(args, "Map.size").entries.count))
         }
@@ -1726,6 +1782,35 @@ public final class HostBridge {
                 throw VMError.verify("MatchResult.getGroupValues receiver")
             }
             return hostList(match.groupValues.map(string), isMutable: false)
+        }
+        bridge.register(
+            class: "Lkotlin/text/MatchResult;",
+            "getDestructured",
+            prototype: "()Lkotlin/text/MatchResult$Destructured;"
+        ) { _, args in
+            guard case let .obj(matchObject) = try argument(
+                args, 0, "MatchResult.getDestructured"
+            ), matchObject.payload is KotlinMatchResultBox else {
+                throw VMError.verify("MatchResult.getDestructured receiver")
+            }
+            return .obj(ObjInstance(
+                dexType: "Lkotlin/text/MatchResult$Destructured;",
+                payload: matchObject,
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: "Lkotlin/text/MatchResult$Destructured;",
+            "getMatch",
+            prototype: "()Lkotlin/text/MatchResult;"
+        ) { _, args in
+            guard case let .obj(destructuredObject) = try argument(
+                args, 0, "MatchResult.Destructured.getMatch"
+            ), let matchObject = destructuredObject.payload as? ObjInstance,
+               matchObject.payload is KotlinMatchResultBox else {
+                throw VMError.verify("MatchResult.Destructured.getMatch receiver")
+            }
+            return .obj(matchObject)
         }
         return bridge
     }
@@ -3099,6 +3184,39 @@ public final class HostBridge {
             object.payload = ((object.payload as? String) ?? "") + character
             return .obj(object)
         }
+        bridge.register(
+            class: "Lkotlin/text/StringsKt;",
+            "append",
+            prototype: "(Ljava/lang/StringBuilder;[Ljava/lang/String;)Ljava/lang/StringBuilder;",
+            isStatic: true
+        ) { _, args in
+            guard case let .obj(builder) = try argument(args, 0, "StringsKt.append"),
+                  builder.dexType == d,
+                  case let .arr(values) = try argument(args, 1, "StringsKt.append") else {
+                throw VMError.verify("StringsKt.append arguments")
+            }
+            try requireCollectionCapacity(values.elements.count, "StringsKt.append")
+            var result = (builder.payload as? String) ?? ""
+            var resultBytes = result.utf8.count
+            for value in values.elements {
+                guard value.isNull || stringPayload(value) != nil else {
+                    throw VMError.verify("StringsKt.append string array element")
+                }
+                let addition = vmStringValue(value)
+                let total = resultBytes.addingReportingOverflow(addition.utf8.count)
+                guard !total.overflow,
+                      total.partialValue <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                    throw hostThrowable(
+                        "Ljava/lang/IllegalArgumentException;",
+                        "StringsKt.append output is too long"
+                    )
+                }
+                result.append(addition)
+                resultBytes = total.partialValue
+            }
+            builder.payload = result
+            return .obj(builder)
+        }
         bridge.register(class: d, "toString", prototype: "()Ljava/lang/String;") { _, args in
             Self.string(text(try argument(args, 0, "StringBuilder.toString")))
         }
@@ -3320,6 +3438,19 @@ public final class HostBridge {
         let d = "Ljava/lang/String;"
         let locale = "Ljava/util/Locale;"
         let strings = "Lkotlin/text/StringsKt;"
+        bridge.register(
+            class: "Ljava/lang/Character;",
+            "isDigit",
+            prototype: "(C)Z",
+            isStatic: true
+        ) { _, args in
+            guard case let .int(rawValue) = try argument(args, 0, "Character.isDigit"),
+                  let codeUnit = UInt16(exactly: rawValue) else {
+                throw VMError.verify("Character.isDigit argument")
+            }
+            guard let scalar = UnicodeScalar(UInt32(codeUnit)) else { return .int(0) }
+            return .int(CharacterSet.decimalDigits.contains(scalar) ? 1 : 0)
+        }
         bridge.staticFields["\(locale)->ROOT"] = .obj(ObjInstance(
             dexType: locale,
             payload: "ROOT",
@@ -3328,6 +3459,11 @@ public final class HostBridge {
         bridge.staticFields["\(locale)->ENGLISH"] = .obj(ObjInstance(
             dexType: locale,
             payload: "ENGLISH",
+            isHost: true
+        ))
+        bridge.staticFields["\(locale)->FRENCH"] = .obj(ObjInstance(
+            dexType: locale,
+            payload: "FRENCH",
             isHost: true
         ))
         bridge.register(class: d, "length", prototype: "()I") { _, args in
@@ -3374,10 +3510,20 @@ public final class HostBridge {
             let value = try requiredString(args, 0, "String.toLowerCase")
             guard case let .obj(localeObject) = try argument(args, 1, "String.toLowerCase"),
                   localeObject.dexType == locale,
-                  localeObject.payload as? String == "ROOT" else {
-                throw VMError.verify("String.toLowerCase supports Locale.ROOT only")
+                  let localeName = localeObject.payload as? String else {
+                throw VMError.verify("String.toLowerCase locale")
             }
-            let lowered = value.lowercased()
+            let lowered: String
+            switch localeName {
+            case "ROOT":
+                lowered = value.lowercased()
+            case "ENGLISH":
+                lowered = value.lowercased(with: Locale(identifier: "en"))
+            case "FRENCH":
+                lowered = value.lowercased(with: Locale(identifier: "fr"))
+            default:
+                throw VMError.verify("String.toLowerCase unsupported locale")
+            }
             guard lowered.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
                 throw DEXThrowable(string(
                     "IllegalArgumentException: lowercase output is too long"
@@ -4164,6 +4310,79 @@ public final class HostBridge {
             ))
         }
         bridge.register(
+            class: localDate,
+            "of",
+            prototype: "(III)Ljava/time/LocalDate;",
+            isStatic: true
+        ) { _, args in
+            guard case let .int(rawYear) = try argument(args, 0, "LocalDate.of"),
+                  case let .int(rawMonth) = try argument(args, 1, "LocalDate.of"),
+                  case let .int(rawDay) = try argument(args, 2, "LocalDate.of"),
+                  (1...9_999).contains(rawYear),
+                  (1...12).contains(rawMonth),
+                  (1...31).contains(rawDay) else {
+                throw hostThrowable(
+                    "Ljava/time/DateTimeException;",
+                    "invalid local date"
+                )
+            }
+            let year = Int(rawYear)
+            let month = Int(rawMonth)
+            let day = Int(rawDay)
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+            let components = DateComponents(
+                calendar: calendar,
+                timeZone: calendar.timeZone,
+                year: year,
+                month: month,
+                day: day,
+                hour: 12
+            )
+            guard let value = calendar.date(from: components) else {
+                throw hostThrowable(
+                    "Ljava/time/DateTimeException;",
+                    "invalid local date"
+                )
+            }
+            let roundTrip = calendar.dateComponents([.year, .month, .day], from: value)
+            guard roundTrip.year == year,
+                  roundTrip.month == month,
+                  roundTrip.day == day else {
+                throw hostThrowable(
+                    "Ljava/time/DateTimeException;",
+                    "invalid local date"
+                )
+            }
+            return .obj(ObjInstance(
+                dexType: localDate,
+                payload: LocalDateBox(year: year, month: month, day: day),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: zoneID,
+            "of",
+            prototype: "(Ljava/lang/String;)Ljava/time/ZoneId;",
+            isStatic: true
+        ) { _, args in
+            let identifier = try requiredString(args, 0, "ZoneId.of")
+            guard !identifier.isEmpty,
+                  identifier.utf8.count <= 256,
+                  !identifier.unicodeScalars.contains(where: { $0.value < 0x20 }),
+                  let timeZone = TimeZone(identifier: identifier) else {
+                throw hostThrowable(
+                    "Ljava/time/DateTimeException;",
+                    "invalid time-zone identifier"
+                )
+            }
+            return .obj(ObjInstance(
+                dexType: zoneID,
+                payload: ZoneIDBox(timeZone: timeZone),
+                isHost: true
+            ))
+        }
+        bridge.register(
             class: zoneID,
             "systemDefault",
             prototype: "()Ljava/time/ZoneId;",
@@ -4434,6 +4653,49 @@ public final class HostBridge {
 
     private static func registerCollectionSurface(_ bridge: HostBridge) {
         let collections = "Lkotlin/collections/CollectionsKt;"
+        let sets = "Lkotlin/collections/SetsKt;"
+        let maps = "Lkotlin/collections/MapsKt;"
+        let linkedHashMap = "Ljava/util/LinkedHashMap;"
+        bridge.register(
+            class: maps,
+            "mapCapacity",
+            prototype: "(I)I",
+            isStatic: true
+        ) { _, args in
+            guard case let .int(expectedSize) = try argument(
+                args, 0, "MapsKt.mapCapacity"
+            ) else {
+                throw VMError.verify("MapsKt.mapCapacity size")
+            }
+            if expectedSize < 0 { return .int(expectedSize) }
+            if expectedSize < 3 { return .int(expectedSize + 1) }
+            if expectedSize < 1 << 30 {
+                return .int(Int32(Float(expectedSize) / 0.75 + 1.0))
+            }
+            return .int(Int32.max)
+        }
+        bridge.objectFactories[linkedHashMap] = { _ in
+            .obj(ObjInstance(
+                dexType: linkedHashMap,
+                payload: HostMapBox(isMutable: true),
+                isHost: true
+            ))
+        }
+        bridge.register(class: linkedHashMap, "<init>", prototype: "(I)V") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "LinkedHashMap.<init>"),
+                  case let .int(capacity) = try argument(args, 1, "LinkedHashMap.<init>"),
+                  capacity >= 0 else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "negative LinkedHashMap capacity"
+                )
+            }
+            try requireCollectionCapacity(Int(capacity), "LinkedHashMap.<init>")
+            let box = HostMapBox(isMutable: true)
+            box.entries.reserveCapacity(Int(capacity))
+            object.payload = box
+            return .null
+        }
         bridge.register(
             class: collections,
             "listOf",
@@ -4462,6 +4724,73 @@ public final class HostBridge {
             prototype: "()Ljava/util/List;",
             isStatic: true
         ) { _, _ in hostList([], isMutable: false) }
+        bridge.register(
+            class: sets,
+            "emptySet",
+            prototype: "()Ljava/util/Set;",
+            isStatic: true
+        ) { _, _ in
+            hostList([], isMutable: false, descriptor: "Ljava/util/Set;")
+        }
+        bridge.register(
+            class: sets,
+            "setOf",
+            prototype: "(Ljava/lang/Object;)Ljava/util/Set;",
+            isStatic: true
+        ) { _, args in
+            hostList(
+                [try argument(args, 0, "SetsKt.setOf")],
+                isMutable: false,
+                descriptor: "Ljava/util/Set;"
+            )
+        }
+        bridge.register(
+            class: sets,
+            "plus",
+            prototype: "(Ljava/util/Set;Ljava/lang/Object;)Ljava/util/Set;",
+            isStatic: true
+        ) { _, args in
+            let source = try listBox(args, "SetsKt.plus")
+            try requireCollectionCapacity(source.elements.count + 1, "SetsKt.plus")
+            let value = try argument(args, 1, "SetsKt.plus")
+            var elements = source.elements
+            if !elements.contains(where: { javaValueEquals($0, value) }) {
+                elements.append(value)
+            }
+            return hostList(elements, isMutable: false, descriptor: "Ljava/util/Set;")
+        }
+        bridge.register(
+            class: "Ljava/util/Set;",
+            "contains",
+            prototype: "(Ljava/lang/Object;)Z"
+        ) { _, args in
+            let set = try listBox(args, "Set.contains")
+            let target = try argument(args, 1, "Set.contains")
+            return .int(set.elements.contains(where: { javaValueEquals($0, target) }) ? 1 : 0)
+        }
+        bridge.register(
+            class: collections,
+            "contains",
+            prototype: "(Ljava/lang/Iterable;Ljava/lang/Object;)Z",
+            isStatic: true
+        ) { _, args in
+            let iterable = try listBox(args, "CollectionsKt.contains")
+            let target = try argument(args, 1, "CollectionsKt.contains")
+            return .int(iterable.elements.contains(where: { javaValueEquals($0, target) }) ? 1 : 0)
+        }
+        bridge.register(
+            class: collections,
+            "plus",
+            prototype: "(Ljava/util/Collection;Ljava/lang/Object;)Ljava/util/List;",
+            isStatic: true
+        ) { _, args in
+            let source = try listBox(args, "CollectionsKt.plus")
+            try requireCollectionCapacity(source.elements.count + 1, "CollectionsKt.plus")
+            return hostList(
+                source.elements + [try argument(args, 1, "CollectionsKt.plus")],
+                isMutable: false
+            )
+        }
         bridge.register(
             class: collections,
             "listOfNotNull",
@@ -7145,6 +7474,7 @@ public final class HostBridge {
         let document = "Lorg/jsoup/nodes/Document;"
         let element = "Lorg/jsoup/nodes/Element;"
         let elements = "Lorg/jsoup/select/Elements;"
+        let jsoup = "Lorg/jsoup/Jsoup;"
         let jsoupExtensions = "Leu/kanade/tachiyomi/util/JsoupExtensionsKt;"
 
         func box(_ args: [RVal], _ method: String) throws -> CompatHTMLElementBox {
@@ -7241,6 +7571,25 @@ public final class HostBridge {
                 htmlOverride: override
             )
         }
+        bridge.register(
+            class: jsoup,
+            "parseBodyFragment",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Lorg/jsoup/nodes/Document;",
+            isStatic: true
+        ) { _, args in
+            let html = try requiredString(args, 0, "Jsoup.parseBodyFragment")
+            let baseURL = try requiredString(args, 1, "Jsoup.parseBodyFragment")
+            do {
+                let context = try CompatHTMLParser.parse(
+                    html,
+                    baseURL: baseURL,
+                    policy: bridge.htmlPolicy
+                )
+                return value(context.document, context: context, descriptor: document)
+            } catch {
+                throw htmlThrowable(error)
+            }
+        }
 
         for descriptor in [document, element] {
             bridge.register(
@@ -7328,6 +7677,30 @@ public final class HostBridge {
             let receiver = try box(args, "Element.children")
             return list(receiver.element.children().array(), context: receiver.context)
         }
+        bridge.register(
+            class: element,
+            "nextElementSibling",
+            prototype: "()Lorg/jsoup/nodes/Element;"
+        ) { _, args in
+            let receiver = try box(args, "Element.nextElementSibling")
+            do {
+                guard let sibling = try receiver.element.nextElementSibling() else {
+                    return .null
+                }
+                return value(sibling, context: receiver.context)
+            } catch {
+                throw htmlThrowable(error)
+            }
+        }
+        bridge.register(
+            class: element,
+            "hasAttr",
+            prototype: "(Ljava/lang/String;)Z"
+        ) { _, args in
+            let receiver = try box(args, "Element.hasAttr")
+            let key = try requiredString(args, 1, "Element.hasAttr")
+            return .int(receiver.element.hasAttr(key) ? 1 : 0)
+        }
 
         bridge.register(class: elements, "last", prototype: "()Lorg/jsoup/nodes/Element;") { _, args in
             try listBox(args, "Elements.last").elements.last ?? .null
@@ -7337,6 +7710,30 @@ public final class HostBridge {
         }
         bridge.register(class: elements, "size", prototype: "()I") { _, args in
             .int(Int32(clamping: try listBox(args, "Elements.size").elements.count))
+        }
+        bridge.register(
+            class: elements,
+            "eachText",
+            prototype: "()Ljava/util/List;"
+        ) { _, args in
+            let source = try listBox(args, "Elements.eachText").elements
+            try requireCollectionCapacity(source.count, "Elements.eachText")
+            var texts: [RVal] = []
+            texts.reserveCapacity(source.count)
+            for item in source {
+                guard case let .obj(object) = item,
+                      let node = object.payload as? CompatHTMLElementBox else {
+                    throw VMError.verify("Elements.eachText element")
+                }
+                do {
+                    texts.append(string(try node.context.boundedString(
+                        try node.element.text()
+                    )))
+                } catch {
+                    throw htmlThrowable(error)
+                }
+            }
+            return hostList(texts, isMutable: false)
         }
     }
 

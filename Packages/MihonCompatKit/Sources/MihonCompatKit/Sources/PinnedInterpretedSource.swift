@@ -232,6 +232,38 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         )
     }
 
+    /// Loads the exact current Mangas-Origines.fr 1.6.58 artifact through production transport.
+    public static func mangasOriginesFR1658(
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        let profile = PinnedInterpretedProfile.mangasOriginesFR1658
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: profile.networkIdentity,
+            policy: transportPolicy
+        )
+        return try Self(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
+    /// Injection seam for deterministic Mangas-Origines.fr tests.
+    public static func mangasOriginesFR1658(
+        apkBytes: [UInt8],
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        try Self(
+            profile: .mangasOriginesFR1658,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
     fileprivate init(
         profile: PinnedInterpretedProfile,
         apkBytes: [UInt8],
@@ -419,6 +451,7 @@ public enum InterpretedExtensionProfileCatalog {
             .mangaMelon161,
             .baoziManhua1629,
             .tuttoAnimeManga1610,
+            .mangasOriginesFR1658,
         ]
         return profiles.first {
             $0.packageName == packageName &&
@@ -551,6 +584,20 @@ private struct PinnedInterpretedProfile: Sendable {
         versionCode: 10,
         expectedSourceID: 2_102_507_871_480_604_746,
         filterSupport: .none,
+        preferenceSupport: .none,
+        imageRequestSupport: .pageURL
+    )
+
+    static let mangasOriginesFR1658 = PinnedInterpretedProfile(
+        identifier: "mangas-origines-fr-1.6.58",
+        sha256: "b6922bbc5ddc376b50cdcd71123410af96cfddb0d0d6a493a1b50a9363cc718b",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+        maximumAPKBytes: 64 * 1024 * 1024,
+        packageName: "eu.kanade.tachiyomi.extension.fr.mangasoriginesfr",
+        versionName: "1.6.58",
+        versionCode: 58,
+        expectedSourceID: 4_803_238_581_797_687_746,
+        filterSupport: .staticList,
         preferenceSupport: .none,
         imageRequestSupport: .pageURL
     )
@@ -695,8 +742,8 @@ private actor PinnedInterpretedRuntime {
             prototype: "()J",
             args: [receiver]
         )
-        let supportsLatestValue = try vm.call(
-            classDescriptor: sourceAPIWrapperDescriptor,
+        let supportsLatestValue = try vm.callVirtualEntry(
+            receiver: receiver,
             method: StableInterpretedSourceAPI.supportsLatest.name,
             prototype: StableInterpretedSourceAPI.supportsLatest.prototype,
             args: [receiver]
@@ -708,8 +755,8 @@ private actor PinnedInterpretedRuntime {
             filterListValue = nil
             filters = []
         case .staticList:
-            let value = try vm.call(
-                classDescriptor: sourceAPIWrapperDescriptor,
+            let value = try vm.callVirtualEntry(
+                receiver: receiver,
                 method: StableInterpretedSourceAPI.filterList.name,
                 prototype: StableInterpretedSourceAPI.filterList.prototype,
                 args: [receiver]
@@ -758,8 +805,8 @@ private actor PinnedInterpretedRuntime {
         let imageClientValue: RVal?
         if case .interpreted = profile.imageRequestSupport,
            preferences.strings["BAOZI_BANNER"] == "0" {
-            let client = try vm.call(
-                classDescriptor: sourceAPIWrapperDescriptor,
+            let client = try vm.callVirtualEntry(
+                receiver: receiver,
                 method: "getClient",
                 prototype: "()Lokhttp3/OkHttpClient;",
                 args: [receiver]
@@ -800,8 +847,8 @@ private actor PinnedInterpretedRuntime {
         defer { release() }
         try Task.checkCancellation()
         let result = try await withFirstCompatibilityGap(stage: .popular) {
-            try await vm.callAsync(
-                classDescriptor: entryClassDescriptor,
+            try await vm.callVirtualEntryAsync(
+                receiver: receiver,
                 method: StableInterpretedSourceAPI.popular.name,
                 prototype: StableInterpretedSourceAPI.popular.prototype,
                 args: [receiver, .int(page), .null]
@@ -819,8 +866,8 @@ private actor PinnedInterpretedRuntime {
         defer { release() }
         try Task.checkCancellation()
         let result = try await withFirstCompatibilityGap(stage: .latest) {
-            try await vm.callAsync(
-                classDescriptor: entryClassDescriptor,
+            try await vm.callVirtualEntryAsync(
+                receiver: receiver,
                 method: StableInterpretedSourceAPI.latest.name,
                 prototype: StableInterpretedSourceAPI.latest.prototype,
                 args: [receiver, .int(page), .null]
@@ -854,10 +901,10 @@ private actor PinnedInterpretedRuntime {
             runtimeFilterValue = .null
         }
         let result = try await withFirstCompatibilityGap(stage: .search) {
-            try await vm.callAsync(
+            try await vm.callVirtualEntryAsync(
                 // Keiyoushi's stable public wrapper routes URL queries and then
                 // virtually dispatches to the extension's R8-renamed worker.
-                classDescriptor: sourceAPIWrapperDescriptor,
+                receiver: receiver,
                 method: StableInterpretedSourceAPI.search.name,
                 prototype: StableInterpretedSourceAPI.search.prototype,
                 args: [receiver, .int(page), HostBridge.string(query), runtimeFilterValue, .null]
@@ -879,10 +926,10 @@ private actor PinnedInterpretedRuntime {
         defer { release() }
         try Task.checkCancellation()
         let result = try await withFirstCompatibilityGap(stage: .mangaUpdate) {
-            try await vm.callAsync(
+            try await vm.callVirtualEntryAsync(
                 // The inherited wrapper owns concurrency protection and initialized
                 // state, then virtually dispatches to the extension implementation.
-                classDescriptor: sourceAPIWrapperDescriptor,
+                receiver: receiver,
                 method: StableInterpretedSourceAPI.mangaUpdate.name,
                 prototype: StableInterpretedSourceAPI.mangaUpdate.prototype,
                 args: [
@@ -919,8 +966,8 @@ private actor PinnedInterpretedRuntime {
         defer { release() }
         try Task.checkCancellation()
         let result = try await withFirstCompatibilityGap(stage: .pages) {
-            try await vm.callAsync(
-                classDescriptor: entryClassDescriptor,
+            try await vm.callVirtualEntryAsync(
+                receiver: receiver,
                 method: StableInterpretedSourceAPI.pages.name,
                 prototype: StableInterpretedSourceAPI.pages.prototype,
                 args: [receiver, HostBridge.chapterValue(from: chapter), .null]
@@ -949,8 +996,8 @@ private actor PinnedInterpretedRuntime {
                 defer { release() }
                 try Task.checkCancellation()
                 let result = try withFirstCompatibilityGap(stage: .imageRequest) {
-                    try vm.call(
-                        classDescriptor: entryClassDescriptor,
+                    try vm.callVirtualEntry(
+                        receiver: receiver,
                         method: "imageRequest",
                         prototype: "(Leu/kanade/tachiyomi/source/model/Page;)Lokhttp3/Request;",
                         args: [receiver, HostBridge.pageValue(from: page)]
