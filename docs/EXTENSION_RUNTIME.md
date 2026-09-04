@@ -6,10 +6,10 @@
 
 Kami has crossed from DEX analysis into controlled execution. The partial M1
 interpreter runs synthetic conformance fixtures and progressively deeper paths
-from eight pinned execution-fixture APKs. Exact BatCave, Kawii Manga, MangaMelon,
-Baozi Manhua, TuttoAnimeManga, and Mangas-Origines.fr profiles now cross the
-app-facing `KamiSource` boundary end to end under deterministic offline fixtures.
-A separate set of 13 current lib 1.6
+from nine pinned execution-fixture APKs. Exact BatCave, Kawii Manga, MangaMelon,
+Baozi Manhua, TuttoAnimeManga, Mangas-Origines.fr, and Komikcast/VoraToon profiles
+now cross the app-facing `KamiSource` boundary end to end under deterministic
+offline fixtures. A separate set of 12 current lib 1.6
 APKs is locked for non-executing measurement only. This is not yet a complete verifier,
 Java or Kotlin runtime, general tachiyomix source bridge, or arbitrary-extension
 implementation.
@@ -32,7 +32,7 @@ set before DEX construction, selects an exact measured profile, and
 postvalidates every source ID returned by construction against that set and the
 persisted admission. The current catalog contains exact BatCave 1.6.9, Kawii
 Manga 1.6.1, MangaMelon 1.6.1, Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10,
-and Mangas-Origines.fr 1.6.58 profiles; an
+Mangas-Origines.fr 1.6.58, and Komikcast/VoraToon 1.6.83 profiles; an
 authenticated but unmeasured extension is stored securely and left disabled
 rather than executed heuristically. `SourceRegistry` removal is package-owner
 scoped, so disabling one downloaded package cannot remove another package's
@@ -43,10 +43,10 @@ not a downloaded-app bypass. They still reverify the exact profile hash and
 signer (as well as manifest/plan identity); downloaded execution requires the
 persisted admission capability and `ExtensionSourceFactory`.
 
-The corpus lock additionally contains 13 current lib 1.6 Keiyoushi APKs under
-`Tests/corpus/measurement/`. Alongside the eight execution fixtures and six AOSP
+The corpus lock additionally contains 12 current lib 1.6 Keiyoushi APKs under
+`Tests/corpus/measurement/`. Alongside the nine execution fixtures and six AOSP
 apksig conformance fixtures, this is 27 artifacts total, including 19 current
-lib 1.6 artifacts (six execution plus 13 measurement). The measurement set is
+lib 1.6 artifacts (seven execution plus 12 measurement). The measurement set is
 behavior-stratified, not statistical. The earlier 16-artifact measurement run
 occupied 1.24 MB (1,242,086 bytes) before Baozi moved into the execution role.
 Its artifacts are parsed, signature-verified for parser conformance, and
@@ -157,23 +157,43 @@ Measured real-APK behavior today:
   image requests with `Referer`/`Origin`. The image path is a validated
   page-URL projection only; it has no source-executed image-interceptor
   capability.
+- Komikcast/VoraToon 1.6.83 is admitted as the seventh exact current profile.
+  Its package is `eu.kanade.tachiyomi.extension.id.komikcast`, version code
+  `83`, SHA-256
+  `9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac`, v2 signer
+  fingerprint
+  `9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, and
+  source ID `972717448578983812`. Its base URL is `https://v1.voratoon.com`
+  and its JSON API is `https://api.voratoon.com`. The exact series URL
+  `https://v1.voratoon.com/series/demo` is also proven to route through the
+  bounded API detail path via `CollectionsKt.getOrNull`. Deterministic real-APK
+  fixtures prove metadata, popular/latest/text and filtered search, details,
+  chapters, pages, and the exact custom image headers. Its schema has static
+  `Sort`, `Sort Order`, `Status`, `Format`, and `Type` filters plus a dynamic
+  `Genre` group fetched from `/genres`; transient retry, in-memory cache reuse,
+  concurrent refresh coalescing, and queued ordinary search are covered. The
+  source-private virtual cache is bounded and in-memory; its zstd stream is a
+  logical source-internal identity only, not native zstd decompression or
+  persistent cross-launch storage. Tamper/schema/preferences fail closed before
+  transport. No live-site, Cloudflare/challenge, source-scoped image
+  interceptor/transform, or arbitrary dynamic-filter compatibility is claimed.
 - These source-result paths are proven only with deterministic offline response
   fixtures. `PinnedInterpretedSource` maps them through the complete app-facing
   contract and the iOS reader resolves one source `ImageRequest` per page
-  asynchronously. No test claims dynamic/network-backed filter lists, live-site
-  availability, or production preference persistence. Baozi's scalar preference
+  asynchronously. Komikcast's bounded dynamic Genre path is the sole
+  network-backed filter exception in this exact catalog; arbitrary dynamic
+  filters, live-site availability, or production preference persistence remain
+  unclaimed. Baozi's scalar preference
   values can be injected into the exact profile, but the app UI/storage path is
   not wired. The pinned suite never performs live network I/O.
 
-The measurement-only static audit covers all 13/13 remaining current lib 1.6
-artifacts with zero errors. It finds 9 structural candidates and four
-stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), plus 511
+The measurement-only static audit covers all 12/12 remaining current lib 1.6
+artifacts with zero errors. It finds 8 structural candidates and four
+stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), plus 484
 unique unregistered external method surfaces, zero omitted invocations, and zero
 unsupported opcodes. These are prioritization results, not a compatibility rate
 and not runtime evidence; the measurement APKs remain outside the exact profile
-catalog and are never admitted or executed by this path. Komikcast, with 42
-unresolved surfaces, is the recommended next measured candidate only as a
-prioritization signal.
+catalog and are never admitted or executed by this path.
 
 The iOS Browse screen now consumes that filter contract directly. A generic,
 transactional sheet renders every `SourceFilter` case, including nested groups;
@@ -189,7 +209,7 @@ stale results, and failed next-page requests no longer advance the page counter.
 Extension APK                       (untrusted)
    ↓ install + signature trust      durable, capability-gated
 content-addressed APK               persisted; re-authenticated on restore
-   ↓ exact profile catalog          BatCave + Kawii + MangaMelon + Baozi + TuttoAnimeManga + Mangas-Origines.fr; measurement APKs fail closed
+   ↓ exact profile catalog          BatCave + Kawii + MangaMelon + Baozi + TuttoAnimeManga + Mangas-Origines.fr + Komikcast; measurement APKs fail closed
    ↓ bounded ZIP/DEFLATE + CRC      working
 AndroidManifest.xml (AXML)          working
 classes*.dex                        validated structural parse
@@ -197,8 +217,8 @@ classes*.dex                        validated structural parse
    ↓ DexInterpreter                 partial M1; async frame resume works
    ↓ Java/Kotlin HostBridge         partial exact-signature M2 surface
    ↓ source-scoped HTTP transport   bounded async request/response slice works
-   ↓ bounded HTML/JSON bridges      all six measured core source paths work
-   ↓ tachiyomix API bridge          six exact pinned profiles work
+   ↓ bounded HTML/JSON bridges      all seven measured core source paths work
+   ↓ tachiyomix API bridge          seven exact pinned profiles work
 KamiSource (Swift protocol)         native + admitted measured adapters work
    ↓ SourceRegistry / app / DB      restore, enable/disable, filtered Browse work
 ```
@@ -408,7 +428,7 @@ Signer-authenticated admission, durable installation/selection, exact-byte
 restoration, and capability-consuming source construction are now measured.
 Stable public `KeiSource` wrapper routing now works whether a wrapper remains on
 a local superclass or is vertically merged by R8 into the generated entry, and
-the second through sixth current extensions are proven end to end. Bounded
+the second through seventh current extensions are proven end to end. Bounded
 shared plan generation now replaces duplicated structural discovery, but it does not
 expand admission. A privacy-safe diagnostics layer now records the first typed
 VM linkage/opcode failure at the public VM boundary by app-facing stage, before
@@ -419,16 +439,15 @@ runtime finding into a deterministic XCTest assertion seed, while the separate
 non-executing static corpus audit ranks unregistered external invocations,
 unsupported opcodes, and plan blockers. The static method list is deliberately a priority signal,
 not runtime proof: virtual/interface dispatch may resolve through a different
-receiver class. The broader current corpus is now locked and measured: all 13
-remaining measurement APKs analyzed without errors, with 9 structural
-candidates, four stable-wrapper blockers, 511 unique unregistered external
+receiver class. The broader current corpus is now locked and measured: all 12
+remaining measurement APKs analyzed without errors, with 8 structural
+candidates, four stable-wrapper blockers, 484 unique unregistered external
 method surfaces, zero omitted invocations, and zero unsupported opcodes.
 App-facing local report export remains open; the next compatibility step is
-evidence-driven promotion of the next locked structural candidate. Komikcast,
-with 42 unresolved surfaces, is the recommended next measured candidate only
-as a prioritization signal.
-Dynamic/network-backed filter lists and production preference UI/persistence
-remain open. Interpreted reader-image execution, currently proven for Baozi with
+evidence-driven promotion of the next locked structural candidate.
+Komikcast's bounded dynamic Genre path is working only for that exact profile;
+arbitrary dynamic/network-backed filter lists and production preference
+UI/persistence remain open. Interpreted reader-image execution, currently proven for Baozi with
 its banner transform disabled, reaches the bounded source chain and
 observes/follows bounded GET redirects; page-URL profiles, including
 Mangas-Origines.fr, only expose validated URL/header projections and have no
@@ -443,12 +462,12 @@ does not mean every method on that class is callable.
 
 The target is a signature-aware bridge from `HttpSource`, `SManga`, `SChapter`,
 `MangasPage`, filters, network helpers, and Jsoup helpers onto `KamiSource`.
-The exact BatCave, Kawii Manga, MangaMelon, Baozi Manhua, TuttoAnimeManga, and
-Mangas-Origines.fr profiles implement
+The exact BatCave, Kawii Manga, MangaMelon, Baozi Manhua, TuttoAnimeManga,
+Mangas-Origines.fr, and Komikcast/VoraToon profiles implement
 their respective measured subsets with one actor per source owning its mutable
-interpreter and source-scoped transport. The app can construct any of the six
+interpreter and source-scoped transport. The app can construct any of the seven
 profiles from a restored admission. Their shared structural plan is derived
-from the authenticated APK instead of copied into each profile. The 13
+from the authenticated APK instead of copied into each profile. The 12
 measurement APKs remain non-executing. Automatic profile admission beyond the
 exact catalog and the remaining APIs are still M3 work. Per-source network
 clients must own rate limits, cookies, and redacted tracing. The first pinned
@@ -466,6 +485,26 @@ the explicit compatibility default `BAOZI_BANNER=0`; a caller-provided
 preference set still overrides it. If banner mode `1` or `2` is explicitly
 selected, Kami keeps the safe URL/header reader path instead of invoking a
 known-incomplete transform.
+
+Komikcast/VoraToon 1.6.83's dynamic filter path is a capability of that exact
+APK profile. It is admitted only for package
+`eu.kanade.tachiyomi.extension.id.komikcast`, version code `83`, SHA-256
+`9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac`, v2 signer
+fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, and source
+ID `972717448578983812`. Its base URL is `https://v1.voratoon.com`, its JSON
+API is `https://api.voratoon.com`; the exact series URL
+`https://v1.voratoon.com/series/demo` is also proven to route through the
+bounded API detail path via `CollectionsKt.getOrNull`. Its static `Sort`, `Sort Order`, `Status`,
+`Format`, and `Type` filters are joined by a fetched dynamic `Genre` group.
+Real-APK fixtures prove metadata, popular/latest/text and filtered search,
+details, chapters, pages, exact custom image headers, transient retry, cache
+reuse, concurrent refresh coalescing, queued ordinary search, and fail-closed
+tamper/schema/preferences. Refresh state lives in a bounded source-private
+in-memory virtual cache; the logical zstd stream identity preserves the APK's
+read/write shape but is not native zstd decompression or persistent cross-launch
+storage. The profile has no claim of live-site or Cloudflare/challenge support,
+source-scoped image interceptors/transforms, or arbitrary dynamic filters.
 
 Source-operation `await`/`awaitSuccess` and supported interpreted reader images
 (currently Baozi with its banner transform disabled) execute the configured
@@ -551,28 +590,29 @@ compatibility.
 
 ## Verification
 
-`MihonCompatKit` currently has 254 passing tests locally on Windows/Swift 6.3.3.
-The three `CorpusLockTests` regressions cover separated corpus roles,
-SHA/URL/fetcher and manifest/signature checks, and the deterministic static
-measurement baseline. The suite also includes 6 focused signer regressions
-explicitly exercising all eight real Keiyoushi execution APKs—Akuma, MangaDex,
-BatCave, Kawii Manga, MangaMelon, Baozi Manhua, TuttoAnimeManga, and
-Mangas-Origines.fr—while the AOSP fixtures are separate signature-conformance
-inputs. All eight execution fixtures receive coverage (legacy constructor
-coverage plus six exact current source paths, including Baozi, TuttoAnimeManga,
-and Mangas-Origines.fr), along with 3 deterministic structural-plan regressions,
+The current local Windows/Swift 6.3.3 suites pass 255/255 MihonCompatKit tests
+and 18/18 portable KamiCore tests with the complete corpus present. The three
+`CorpusLockTests` regressions cover separated corpus roles, SHA/URL/fetcher and
+manifest/signature checks, and the deterministic static measurement baseline.
+The suite also includes 6 focused signer regressions explicitly exercising all
+nine real Keiyoushi execution APKs—Akuma, MangaDex, BatCave, Kawii Manga,
+MangaMelon, Baozi Manhua, TuttoAnimeManga, Mangas-Origines.fr, and Komikcast—
+while the AOSP fixtures are separate signature-conformance inputs. The current
+execution corpus has nine covered fixtures (legacy constructor coverage plus
+seven exact current source paths). It also includes 3 deterministic
+structural-plan regressions,
 7 privacy-safe runtime/static diagnostics regressions, 7 focused
 HTML/parser-limit regressions, Java URL-encoding and bounded Kotlin
 string/collection-helper regressions, generated chapter/page JSON success/
-failure paths, 7 focused async interpreter/transport regressions, 11 HTTP
+failure paths, 7 focused async interpreter/transport regressions, 10 HTTP
 transport regressions, 9 bounded OkHttp interceptor-chain regressions, 4 BatCave
 adapter/tamper/concurrency/policy regressions, 10 Baozi profile regressions, 3
 TuttoAnimeManga profile regressions, 5 Mangas-Origines.fr profile regressions, and
 complete Kawii/MangaMelon profile regressions, alongside the existing parser,
 bytecode verifier, request-model, repository, and compression coverage.
-KamiCore currently passes 17/17 portable Windows tests, including exact Baozi,
-TuttoAnimeManga, and Mangas-Origines.fr factory admission. Exact
-Mangas-Origines.fr implementation head `0abc7f8` passes all 28 macOS KamiCore
+The current portable KamiCore suite includes exact Baozi, TuttoAnimeManga,
+Mangas-Origines.fr, and Komikcast factory admission. Exact Mangas-Origines.fr
+implementation head `0abc7f8` historically passed all 28 macOS KamiCore
 tests, including
 reader settings and image-pipeline boundaries, Browse feed/search routing,
 SQLite signer persistence, repository-key pinning, install/update and legacy

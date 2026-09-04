@@ -199,6 +199,7 @@ public protocol KamiSource: Sendable {
     var name: String { get }
     var language: String { get }
     var supportsLatest: Bool { get }
+    var supportsFilterFetching: Bool { get }
     var baseURL: String { get }
     /// Network policy used by both source operations and reader image loads.
     /// Implementations should opt into insecure HTTP only deliberately.
@@ -213,6 +214,9 @@ public protocol KamiSource: Sendable {
     func getPageList(chapter: SChapterCompat) async throws -> [PageCompat]
     func getImageRequest(page: PageCompat) async -> ImageRequest?
     func getFilterList() -> [SourceFilter]
+    /// Refreshes source-provided filter metadata when it is network-backed.
+    /// Static sources inherit the immediate `getFilterList()` implementation.
+    func refreshFilterList() async throws -> [SourceFilter]
 }
 
 /// An opaque source-owned execution capability for reader image requests.
@@ -344,6 +348,7 @@ public struct InterpretedExtensionPreferences: Sendable, Equatable {
 
 public extension KamiSource {
     var supportsLatest: Bool { false }
+    var supportsFilterFetching: Bool { false }
     var transportPolicy: CompatHTTPTransportPolicy {
         CompatHTTPTransportPolicy(allowsInsecureHTTP: false)
     }
@@ -351,6 +356,7 @@ public extension KamiSource {
         MangasPageCompat(mangas: [], hasNextPage: false)
     }
     func getFilterList() -> [SourceFilter] { [] }
+    func refreshFilterList() async throws -> [SourceFilter] { getFilterList() }
     func getMangaUpdate(manga: SMangaCompat) async throws -> SMangaUpdateCompat {
         let details = try await getMangaDetails(manga: manga)
         let chapters = try await getChapterList(manga: details)

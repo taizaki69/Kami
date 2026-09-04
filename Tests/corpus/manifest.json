@@ -12,8 +12,8 @@
   "selection": {
     "kind": "behavior-stratified measurement, not a statistical compatibility sample",
     "currentLib16ArtifactCount": 19,
-    "executionArtifactCount": 8,
-    "measurementArtifactCount": 13,
+    "executionArtifactCount": 9,
+    "measurementArtifactCount": 12,
     "conformanceArtifactCount": 6,
     "measurementPolicy": "Measurement artifacts are parsed, signature-verified for parser conformance, and statically audited only. Corpus membership never grants signer trust, admits, installs, or executes an extension."
   },
@@ -230,8 +230,8 @@
     },
     {
       "name": "komikcast",
-      "path": "measurement/komikcast.apk",
-      "role": "measurement",
+      "path": "komikcast.apk",
+      "role": "execution",
       "package": "eu.kanade.tachiyomi.extension.id.komikcast",
       "version": "1.6.83",
       "versionCode": 83,

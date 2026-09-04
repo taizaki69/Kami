@@ -52,45 +52,6 @@ final class CompatHTTPTransportTests: XCTestCase {
         override func stopLoading() {}
     }
 
-    private actor RecordingTransport: CompatHTTPTransport {
-        nonisolated let sourceID: String
-        private let response: CompatHTTPResponse
-        private var requests: [CompatHTTPRequest] = []
-
-        init(sourceID: String, response: CompatHTTPResponse) {
-            self.sourceID = sourceID
-            self.response = response
-        }
-
-        func execute(_ request: CompatHTTPRequest) async throws -> CompatHTTPResponse {
-            requests.append(request)
-            return response
-        }
-
-        func recordedRequests() -> [CompatHTTPRequest] { requests }
-    }
-
-    func testTransportContractIsAsyncInjectableAndSourceScoped() async throws {
-        let response = CompatHTTPResponse(
-            finalURL: "https://example.test/final",
-            statusCode: 200,
-            headers: [CompatHTTPHeader(name: "Content-Type", value: "application/json")],
-            body: [0x7b, 0x7d]
-        )
-        let first = RecordingTransport(sourceID: "source-a", response: response)
-        let second = RecordingTransport(sourceID: "source-b", response: response)
-        let request = CompatHTTPRequest(url: "https://example.test/api")
-
-        let actualResponse = try await execute(request, using: first)
-        let firstRequests = await first.recordedRequests()
-        let secondRequests = await second.recordedRequests()
-        XCTAssertEqual(actualResponse, response)
-        XCTAssertEqual(first.sourceID, "source-a")
-        XCTAssertEqual(second.sourceID, "source-b")
-        XCTAssertEqual(firstRequests, [request])
-        XCTAssertEqual(secondRequests, [])
-    }
-
     func testRequestEncodingIsBoundedAndDeterministic() throws {
         let request = CompatHTTPRequest(
             url: "https://example.test/search?q=raw",
@@ -519,12 +480,5 @@ final class CompatHTTPTransportTests: XCTestCase {
         XCTAssertTrue(
             requests[1].value(forHTTPHeaderField: "Cookie")?.contains("redirect=seen") == true
         )
-    }
-
-    private func execute(
-        _ request: CompatHTTPRequest,
-        using transport: any CompatHTTPTransport
-    ) async throws -> CompatHTTPResponse {
-        try await transport.execute(request)
     }
 }

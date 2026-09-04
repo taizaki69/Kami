@@ -254,19 +254,19 @@ simplest `ParsedHttpSource` shapes; cannot be the general strategy.
 
 ### 6.1 Current local corpus measurement (2026-09-03)
 
-The local Kami corpus now locks 27 APK artifacts: eight real Keiyoushi execution
-fixtures, 13 current lib 1.6 Keiyoushi measurement-only fixtures under
+The local Kami corpus now locks 27 APK artifacts: nine real Keiyoushi execution
+fixtures, 12 current lib 1.6 Keiyoushi measurement-only fixtures under
 `Tests/corpus/measurement/`, and six AOSP apksig conformance fixtures. The
-current lib 1.6 total is 19 (six execution fixtures plus the 13 measurement
+current lib 1.6 total is 19 (seven execution fixtures plus the 12 measurement
 fixtures). The artifacts were selected by behavior family and shape, not as a
 statistical sample.
 
 The measurement artifacts are parsed, signature-verified for parser
 conformance, and statically audited only. Corpus membership never grants signer
 trust, admission, installation, or execution. The deterministic audit analyzed
-13/13 measurement APKs with zero errors, found nine structural candidates and
+12/12 remaining measurement APKs with zero errors, found eight structural candidates and
 four stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), and
-reported 511 unique unregistered external method surfaces with zero omitted
+reported 484 unique unregistered external method surfaces with zero omitted
 invocations and zero unsupported
 opcodes. These are prioritization results, not runtime compatibility proof.
 
@@ -308,6 +308,28 @@ and reject altered filters or unexpected preferences before transport. The
 page-URL image request preserves inherited `Referer`/`Origin` headers but does
 not claim a retained DEX client or source-executed interceptor path. These are
 offline assertions and do not claim live-site availability.
+
+Komikcast/VoraToon 1.6.83 is now the seventh exact execution profile. Its
+admission is pinned to package
+`eu.kanade.tachiyomi.extension.id.komikcast`, version 1.6.83/code 83, SHA-256
+`9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac`, v2 signer
+fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, manifest,
+and source ID `972717448578983812`. Its base URL is `https://v1.voratoon.com`
+and its JSON API is `https://api.voratoon.com`. The exact series URL
+`https://v1.voratoon.com/series/demo` is also proven to route through the
+bounded API detail path via `CollectionsKt.getOrNull`. Deterministic real-APK fixtures
+prove metadata, popular/latest/text and filtered search, details, chapters,
+pages, and exact custom image headers. Its filter schema has static `Sort`,
+`Sort Order`, `Status`, `Format`, and `Type` filters plus a dynamic `Genre`
+group fetched from `/genres`; retry after a transient 503, source-private
+in-memory cache reuse, concurrent refresh coalescing, and queued ordinary search
+are covered. Tampered APK bytes, altered filter schemas, and unexpected
+preferences fail closed before transport. The virtual cache's zstd stream is a
+logical source-internal identity only, not native zstd semantics or persistent
+cross-launch storage. This offline evidence does not claim live-site,
+Cloudflare/challenge, source-scoped image interceptor/transform, or arbitrary
+dynamic-filter compatibility.
 
 `ReaderView` resolves each source `ImageRequest` asynchronously. Supported
 interpreted requests now carry an opaque UUID capability while the source actor
@@ -352,9 +374,9 @@ feasibility problem**. The blockers, honestly categorized:
 | DEX parsing/analysis | **Done** (this repo, pure Swift) |
 | APK/manifest parsing | **Done** (pure Swift, incl. binary AXML) |
 | Repo index compatibility | **Done** (JSON + proto) |
-| Compatibility diagnostics | **Partial product surface**: exact sources capture the first typed stage-counted VM gap at the public VM boundary even when a nested host bridge catches/replaces it; unknown external fields fail closed unless explicitly modeled. `compat-audit gaps` emits a deterministic non-executing static/corpus priority report without paths or request data, and `compat-audit promote-gap` strictly converts the first canonical redacted runtime finding into a deterministic XCTest assertion seed. The current 13-artifact measurement run analyzed 13/13 with 0 errors, nine structural candidates, four stable-wrapper blockers, 511 unique unregistered external method surfaces, 0 omitted invocations, and 0 unsupported opcodes; app-facing export/share UX remains open |
-| DEX execution | **Partial M1/M2 plus six pinned app-facing profiles work**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual entry and nested async selection under one instruction budget, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, stable public source-wrapper routing across measured R8 layouts, pinned constructors/getters, and BatCave, Kawii Manga, MangaMelon, Baozi, TuttoAnimeManga, and Mangas-Origines.fr popular/search/latest/details/chapters/pages execute through bounded async response delivery and exact compatibility models; MangaMelon, Baozi, and Mangas-Origines.fr additionally prove exact static filters, while general downloaded-extension compatibility remains open |
-| Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI including query trimming/form encoding and bounded string/collection helpers, bounded lists/sets/maps and comparator sorting, structured coroutine lambdas, atomics/reflection, source filters with validated app-state reapplication, source-base constructors, bounded scalar preferences for Baozi, bounded OkHttp requests, a bounded application/network interceptor chain for source operations and source-scoped reader images, source-scoped async transport, response/body/Okio values including UTF-8/ByteString/Base64 request encoding, bounded Jsoup HTML/CSS including direct-child, sibling, attribute, `eachText`, and `:containsData` semantics, generated-serializer JSON encoding/decoding including defaults/longs/string memo objects, a measured locale/time-zone/Java-time subset, and reached `SManga`/`MangasPage`/`SChapter`/`SMangaUpdate`/`Page` models; dynamic filters, production preference UI/persistence, Android bitmap banner transforms, additional DOM APIs, and the long tail remain open |
+| Compatibility diagnostics | **Partial product surface**: exact sources capture the first typed stage-counted VM gap at the public VM boundary even when a nested host bridge catches/replaces it; unknown external fields fail closed unless explicitly modeled. `compat-audit gaps` emits a deterministic non-executing static/corpus priority report without paths or request data, and `compat-audit promote-gap` strictly converts the first canonical redacted runtime finding into a deterministic XCTest assertion seed. The current 12-artifact measurement run analyzed 12/12 with 0 errors, eight structural candidates, four stable-wrapper blockers, 484 unique unregistered external method surfaces, 0 omitted invocations, and 0 unsupported opcodes; app-facing export/share UX remains open |
+| DEX execution | **Partial M1/M2 plus seven pinned app-facing profiles work**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual entry and nested async selection under one instruction budget, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, stable public source-wrapper routing across measured R8 layouts, pinned constructors/getters, and BatCave, Kawii Manga, MangaMelon, Baozi, TuttoAnimeManga, Mangas-Origines.fr, and Komikcast/VoraToon popular/search/latest/details/chapters/pages execute through bounded async response delivery and exact compatibility models; MangaMelon, Baozi, and Mangas-Origines.fr additionally prove exact static filters, while Komikcast proves its bounded exact dynamic `Genre` path and custom image headers; arbitrary dynamic filters and general downloaded-extension compatibility remain open |
+| Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI including query trimming/form encoding and bounded string/collection helpers, bounded lists/sets/maps and comparator sorting, structured coroutine lambdas, atomics/reflection, source filters with validated app-state reapplication, source-base constructors, bounded scalar preferences for Baozi, bounded OkHttp requests, a bounded application/network interceptor chain for source operations and source-scoped reader images, source-scoped async transport, response/body/Okio values including UTF-8/ByteString/Base64 request encoding, bounded Jsoup HTML/CSS including direct-child, sibling, attribute, `eachText`, and `:containsData` semantics, generated-serializer JSON encoding/decoding including defaults/longs/string memo objects, a measured locale/time-zone/Java-time subset, and reached `SManga`/`MangasPage`/`SChapter`/`SMangaUpdate`/`Page` models; bounded dynamic Genre support is proven only for the exact Komikcast profile through a source-private in-memory virtual cache with logical zstd identity, while arbitrary dynamic filters, persistent preference UI/storage, native zstd semantics, Android bitmap banner transforms, additional DOM APIs, and the long tail remain open |
 | Cloudflare/WebView | Native WKWebView bridge design (see NETWORKING.md) |
 | Backup import | Proto decoding done; zstd decompression pending |
 

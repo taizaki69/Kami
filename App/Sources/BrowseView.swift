@@ -53,7 +53,7 @@ struct BrowseView: View {
 
 struct SourceBrowseView: View {
     let source: any KamiSource
-    private let defaultFilters: [SourceFilter]
+    @State private var defaultFilters: [SourceFilter]
 
     @State private var mode: Mode = .popular
     @State private var query = ""
@@ -66,12 +66,16 @@ struct SourceBrowseView: View {
     @State private var loading = false
     @State private var errorText: String?
     @State private var loadGeneration = 0
+    @State private var filterRefreshCompleted = false
+    @State private var filterRefreshInProgress = false
+    @State private var filterSchemaReady = false
 
     init(source: any KamiSource) {
         self.source = source
         let filters = source.getFilterList()
-        defaultFilters = filters
+        _defaultFilters = State(initialValue: filters)
         _appliedFilters = State(initialValue: filters)
+        _filterSchemaReady = State(initialValue: !source.supportsFilterFetching)
     }
 
     enum Mode: String, CaseIterable, Identifiable {
@@ -147,6 +151,9 @@ struct SourceBrowseView: View {
         }
         .task {
             if items.isEmpty { await load(page: 1, reset: true) }
+            if source.supportsFilterFetching {
+                await refreshFiltersIfNeeded()
+            }
         }
         .onChange(of: mode) { _, _ in
             filterSearchEnabled = false
@@ -154,6 +161,9 @@ struct SourceBrowseView: View {
             Task { await load(page: 1, reset: true) }
         }
         .refreshable {
+            if source.supportsFilterFetching {
+                await refreshFiltersIfNeeded()
+            }
             await load(page: 1, reset: true)
         }
         .toolbar {
@@ -169,6 +179,7 @@ struct SourceBrowseView: View {
                     .accessibilityLabel(filterSearchEnabled
                                         ? "Edit active filters"
                                         : "Filters")
+                    .disabled(!filterSchemaReady || filterRefreshInProgress)
                 }
             }
         }
@@ -209,7 +220,8 @@ struct SourceBrowseView: View {
         let generation = loadGeneration
         let requestedMode = mode
         let requestedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let requestedFilters = appliedFilters
+        let requestedFilterSearchEnabled = filterSearchEnabled
+        let requestedFilters = requestedFilterSearchEnabled ? appliedFilters : []
 
         loading = true
         errorText = nil
@@ -225,7 +237,7 @@ struct SourceBrowseView: View {
                 feed: requestedMode == .popular ? .popular : .latest,
                 query: requestedQuery,
                 filters: requestedFilters,
-                forceSearch: filterSearchEnabled
+                forceSearch: requestedFilterSearchEnabled
             )
             let result = try await request.execute(on: source)
 
@@ -239,7 +251,33 @@ struct SourceBrowseView: View {
             hasNext = result.hasNextPage
         } catch {
             guard generation == loadGeneration else { return }
+            guard !Task.isCancelled else { return }
             errorText = "The source request failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func refreshFiltersIfNeeded() async {
+        guard !Task.isCancelled,
+              !filterRefreshCompleted,
+              !filterRefreshInProgress else { return }
+        filterRefreshInProgress = true
+        defer {
+            filterRefreshInProgress = false
+            filterSchemaReady = true
+        }
+        do {
+            let refreshed = try await source.refreshFilterList()
+            // The source owns its retry ceiling. A nonthrowing placeholder is
+            // therefore a completed refresh for this source instance.
+            filterRefreshCompleted = true
+            guard !refreshed.isEmpty else { return }
+            defaultFilters = refreshed
+            appliedFilters = refreshed
+            filterSearchEnabled = false
+        } catch {
+            // Filter metadata is optional UI enrichment. Keep the source's
+            // initial filters and do not replace a successful browse result
+            // with a background refresh error.
         }
     }
 }

@@ -19,16 +19,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 - [x] `compat-audit` CLI (inspect/missing/index/methods/disasm/opcodes/plan/gaps) —
       deterministic file and directory inspection, run on the locked corpus
 - [x] SHA/URL-locked behavior-stratified current lib 1.6 measurement corpus —
-      13 measurement-only Keiyoushi APKs under `Tests/corpus/measurement/`,
-      alongside 8 execution and 6 AOSP conformance fixtures (27 total; 19
-      current lib 1.6 artifacts). The current measurement audit covers all 13/13
-      measurement APKs: 9 structural candidates with 511 unique unregistered
-      external method surfaces, zero omitted invocations, and zero unsupported
-      opcodes. This is prioritization evidence, not a statistical sample or
-      execution/admission proof. Windows verification currently passes 254/254
-      MihonCompatKit and 17/17 KamiCore tests with the corpus present.
-      Komikcast's 42 unresolved surfaces are only a prioritization signal for
-      the next measured candidate.
+      12 measurement-only Keiyoushi APKs under `Tests/corpus/measurement/`,
+      alongside 9 execution and 6 AOSP conformance fixtures (27 total; 19
+      current lib 1.6 artifacts). The current measurement audit covers all 12/12
+      remaining measurement APKs: 8 structural candidates with 484 unique
+      unregistered external method surfaces, zero omitted invocations, and zero
+      unsupported opcodes. This is prioritization evidence, not a statistical
+      sample or execution/admission proof. Current Windows verification through
+      the checked-in helper passes 255/255 MihonCompatKit and 18/18 portable
+      KamiCore tests; historical test counts remain documented in the
+      compatibility-matrix evidence. Komikcast is now an exact execution profile
+      rather than a measurement candidate.
 
 ## P0 — App foundation
 
@@ -60,8 +61,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       [#1](https://github.com/taizaki69/Kami/issues/1)
 - [~] Kotlin/Java class library M2 — Object/String/StringBuilder, core Kotlin
       ABI, bounded collections, atomics, reflection, and Mihon filters cover
-      the pinned BatCave, Kawii, MangaMelon, Baozi, TuttoAnimeManga, and
-      Mangas-Origines.fr request paths; bounded form/header/URL/cache/request/
+      the pinned BatCave, Kawii, MangaMelon, Baozi, TuttoAnimeManga,
+      Mangas-Origines.fr, and Komikcast/VoraToon request paths; bounded
+      form/header/URL/cache/request/
       call models, Kotlin duration shims, async frame resumption, source-scoped
       transport, response/body/Okio values, bounded Jsoup document/element/CSS
       selectors (including modern direct-child and `:containsData` semantics),
@@ -76,16 +78,23 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       additionally proves its bounded scalar SharedPreferences and interpreted
       image-request path; Mangas-Origines.fr additionally proves seven static
       filters, ordered POST popular/latest/search, details/chapters/pages, and
-      page-URL image requests with `Referer`/`Origin`; measured long
-      tail remains a static prioritization target in the locked measurement set
+      page-URL image requests with `Referer`/`Origin`; Komikcast/VoraToon
+      additionally proves static `Sort`/`Sort Order`/`Status`/`Format`/`Type`
+      filters plus bounded dynamic `Genre` fetch/retry/cache/concurrency and
+      exact custom image headers through its JSON API. Its source-private
+      in-memory virtual cache preserves logical zstd stream identity only; it
+      is not native zstd or persistent cross-launch storage. Arbitrary dynamic
+      filters and the measured long tail remain open.
 - [~] tachiyomix API bridge M3 (`HttpSource` → `KamiSource`) — the exact pinned
       BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, Baozi Manhua
-      1.6.29, TuttoAnimeManga 1.6.10, and Mangas-Origines.fr 1.6.58 profiles
+      1.6.29, TuttoAnimeManga 1.6.10, Mangas-Origines.fr 1.6.58, and
+      Komikcast/VoraToon 1.6.83 profiles
       implement the measured app-facing contract through stable
       public wrappers; static
       `Sort`/`Select` filters, Baozi's bounded scalar preferences and interpreted
-      custom image request, and Mangas-Origines.fr's seven-filter/page-URL path
-      are proven; dynamic/network-backed filters, production preference
+      custom image request, Mangas-Origines.fr's seven-filter/page-URL path, and
+      Komikcast's bounded dynamic `Genre` path
+      are proven; arbitrary dynamic/network-backed filters, production preference
       UI/persistence, source-executed image interceptors for page-URL profiles,
       and broader runtime coverage remain open
 - [x] First pinned real extension executing
@@ -128,8 +137,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       discovery checks manifest identity, supported lib version, single-source
       and single-DEX shape, absence of native `.so` entries, entry placement,
       and stable public wrappers without executing or admitting unknown APKs;
-      the six exact profiles and all 13 remaining measurement APKs produce
-      deterministic results: 9 measurement candidates, 511 unique
+      the seven exact profiles and all 12 remaining measurement APKs produce
+      deterministic results: 8 measurement candidates, 484 unique
       unregistered surfaces, zero omitted invocations, zero unsupported
       opcodes, and four stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx,
       and XCOMIC); legacy lib 1.4 specimens remain explicit blockers
@@ -158,6 +167,25 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       popular/latest/search, details, chapters, pages, and page-URL image
       requests with `Referer`/`Origin`; no source-executed image-interceptor
       capability is claimed.
+- [x] Expand the exact catalog with a seventh current extension — Komikcast /
+      VoraToon 1.6.83 (metadata identity `VoraToon` / `id` /
+      `https://v1.voratoon.com`) is admitted by exact package
+      `eu.kanade.tachiyomi.extension.id.komikcast`, version code `83`, SHA-256
+      `9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac`, v2
+      signer
+      `9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`,
+      manifest, source ID `972717448578983812`, and JSON API
+      `https://api.voratoon.com`. Deterministic real-APK fixtures prove that
+      the exact series URL `https://v1.voratoon.com/series/demo` routes through
+      the bounded API detail path via `CollectionsKt.getOrNull`, plus metadata,
+      popular/latest/text and filtered search, details, chapters,
+      pages, exact custom image headers, static `Sort`/`Sort Order`/`Status`/
+      `Format`/`Type` filters, dynamic `Genre` fetch/retry/cache/concurrency,
+      and fail-closed tamper/schema/preferences. The dynamic cache is bounded,
+      source-private, and in-memory; its zstd stream is a logical identity only,
+      not native zstd or persistent cross-launch storage. Live-site,
+      Cloudflare/challenge, source-scoped image-interceptor/transform, and
+      arbitrary dynamic-filter compatibility remain unclaimed.
 - [x] Execute source-defined OkHttp application and network interceptors for
       source operations through a bounded source-scoped chain. It preserves
       exact DEX `Request` identity/tags and registration/unwind order, enforces

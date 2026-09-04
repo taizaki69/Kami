@@ -53,6 +53,28 @@ public enum PinnedInterpretedSourceError: Error, Sendable, Equatable, LocalizedE
     }
 }
 
+private final class PinnedFilterSnapshot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [SourceFilter]
+
+    init(_ filters: [SourceFilter]) {
+        stored = filters
+    }
+
+    func read() -> [SourceFilter] {
+        lock.lock()
+        let result = stored
+        lock.unlock()
+        return result
+    }
+
+    func replace(with filters: [SourceFilter]) {
+        lock.lock()
+        stored = filters
+        lock.unlock()
+    }
+}
+
 /// The first app-facing DEX-backed source. Construction is deliberately limited
 /// to profiles compiled into Kami. Downloaded adapters use the separate,
 /// persisted `ExtensionAdmissionService` capability before registration.
@@ -61,11 +83,12 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
     public let name: String
     public let language: String
     public let supportsLatest: Bool
+    public let supportsFilterFetching: Bool
     public let baseURL: String
     public let transportPolicy: CompatHTTPTransportPolicy
 
     private let runtime: PinnedInterpretedRuntime
-    private let filters: [SourceFilter]
+    private let filterSnapshot: PinnedFilterSnapshot
     private let compatibilityRecorder: InterpretedCompatibilityRecorder
 
     /// Loads the exact BatCave 1.6.9 artifact through the production transport.
@@ -250,6 +273,38 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         )
     }
 
+    /// Loads the exact current Komikcast/VoraToon 1.6.83 artifact through production transport.
+    public static func komikcast1683(
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        let profile = PinnedInterpretedProfile.komikcast1683
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: profile.networkIdentity,
+            policy: transportPolicy
+        )
+        return try Self(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
+    /// Injection seam for deterministic Komikcast/VoraToon tests.
+    public static func komikcast1683(
+        apkBytes: [UInt8],
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        try Self(
+            profile: .komikcast1683,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
     /// Injection seam for deterministic Mangas-Origines.fr tests.
     public static func mangasOriginesFR1658(
         apkBytes: [UInt8],
@@ -289,10 +344,15 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         self.name = metadata.name
         self.language = metadata.language
         self.supportsLatest = metadata.supportsLatest
+        if case .dynamicList = profile.filterSupport {
+            self.supportsFilterFetching = true
+        } else {
+            self.supportsFilterFetching = false
+        }
         self.baseURL = metadata.baseURL
         self.transportPolicy = transportPolicy
         self.runtime = runtime
-        self.filters = runtime.filters
+        self.filterSnapshot = runtime.filterSnapshot
         self.compatibilityRecorder = compatibilityRecorder
     }
 
@@ -309,20 +369,13 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         query: String,
         filters: [SourceFilter]
     ) async throws -> MangasPageCompat {
-        guard filters.isEmpty || !self.filters.isEmpty else {
-            throw PinnedInterpretedSourceError.unsupportedOperation("filtered search")
-        }
         guard query.utf8.count <= 4_096 else {
             throw PinnedInterpretedSourceError.invalidInput(operation: "search")
-        }
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                !self.filters.isEmpty else {
-            throw PinnedInterpretedSourceError.unsupportedOperation("blank search")
         }
         return try await runtime.search(
             page: page,
             query: query,
-            filters: filters.isEmpty ? self.filters : filters
+            filters: filters
         )
     }
 
@@ -346,7 +399,15 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         await runtime.imageRequest(page: page)
     }
 
-    public func getFilterList() -> [SourceFilter] { filters }
+    public func getFilterList() -> [SourceFilter] { filterSnapshot.read() }
+
+    public func refreshFilterList() async throws -> [SourceFilter] {
+        // Kotlin launches this cache fill as a fire-and-forget job. Give the
+        // bounded source-owned refresh its own task so a disappearing SwiftUI
+        // view cannot strand the DEX lambda halfway through its finally block.
+        let refresh = Task { try await runtime.refreshFilters() }
+        return try await refresh.value
+    }
 
     public func compatibilityReport() -> InterpretedCompatibilityRuntimeReport {
         compatibilityRecorder.report()
@@ -452,6 +513,7 @@ public enum InterpretedExtensionProfileCatalog {
             .baoziManhua1629,
             .tuttoAnimeManga1610,
             .mangasOriginesFR1658,
+            .komikcast1683,
         ]
         return profiles.first {
             $0.packageName == packageName &&
@@ -473,6 +535,7 @@ private struct PinnedInterpretedProfile: Sendable {
     enum FilterSupport: Sendable {
         case none
         case staticList
+        case dynamicList(expectedBlockDescriptor: String, maximumJobs: Int)
     }
 
     enum PreferenceSupport: Sendable {
@@ -601,13 +664,27 @@ private struct PinnedInterpretedProfile: Sendable {
         preferenceSupport: .none,
         imageRequestSupport: .pageURL
     )
+
+    static let komikcast1683 = PinnedInterpretedProfile(
+        identifier: "komikcast-voratoon-1.6.83",
+        sha256: "9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+        maximumAPKBytes: 64 * 1024 * 1024,
+        packageName: "eu.kanade.tachiyomi.extension.id.komikcast",
+        versionName: "1.6.83",
+        versionCode: 83,
+        expectedSourceID: 972_717_448_578_983_812,
+        filterSupport: .dynamicList(expectedBlockDescriptor: "Ll0;", maximumJobs: 3),
+        preferenceSupport: .none,
+        imageRequestSupport: .interpreted
+    )
 }
 
 private actor PinnedInterpretedRuntime {
     private static let maximumRetainedImageRequests = 4_096
 
     nonisolated let metadata: PinnedInterpretedMetadata
-    nonisolated let filters: [SourceFilter]
+    nonisolated let filterSnapshot: PinnedFilterSnapshot
 
     private struct Waiter {
         let id: UInt64
@@ -626,7 +703,7 @@ private actor PinnedInterpretedRuntime {
     private let receiver: RVal
     private let entryClassDescriptor: String
     private let sourceAPIWrapperDescriptor: String
-    private let filterListValue: RVal?
+    private var filterListValue: RVal?
     private let pageURLImageHeaders: [String: String]
     private let pageURLImageSourceBaseURL: String?
     private let imageClientValue: RVal?
@@ -754,7 +831,7 @@ private actor PinnedInterpretedRuntime {
         case .none:
             filterListValue = nil
             filters = []
-        case .staticList:
+        case .staticList, .dynamicList:
             let value = try vm.callVirtualEntry(
                 receiver: receiver,
                 method: StableInterpretedSourceAPI.filterList.name,
@@ -831,7 +908,7 @@ private actor PinnedInterpretedRuntime {
         self.pageURLImageSourceBaseURL = pageURLImageSourceBaseURL
         self.imageClientValue = imageClientValue
         self.compatibilityRecorder = compatibilityRecorder
-        self.filters = filters
+        self.filterSnapshot = PinnedFilterSnapshot(filters)
         self.metadata = PinnedInterpretedMetadata(
             id: id,
             name: name,
@@ -879,6 +956,72 @@ private actor PinnedInterpretedRuntime {
         return converted
     }
 
+    func refreshFilters() async throws -> [SourceFilter] {
+        try await acquire()
+        defer { release() }
+        try Task.checkCancellation()
+        switch profile.filterSupport {
+        case .none:
+            return []
+        case .staticList:
+            return filterSnapshot.read()
+        case let .dynamicList(expectedBlockDescriptor, maximumJobs):
+            guard !expectedBlockDescriptor.isEmpty,
+                  (1...16).contains(maximumJobs) else {
+                throw PinnedInterpretedSourceError.unexpectedResult(
+                    operation: "filter refresh"
+                )
+            }
+
+            // A failed KeiSource fetch can schedule the next of its three
+            // bounded attempts when getFilterList is read again. Only execute
+            // the exact lambda class measured for these locked APK bytes.
+            var executedJobs = 0
+            while true {
+                while let job = bridge.firstPendingCoroutineJob {
+                    guard executedJobs < maximumJobs,
+                          case let .obj(block) = job.block,
+                          block.dexType == expectedBlockDescriptor else {
+                        throw PinnedInterpretedSourceError.unexpectedResult(
+                            operation: "filter refresh"
+                        )
+                    }
+                    _ = try await withFirstCompatibilityGap(stage: .filters) {
+                        try await vm.callAsync(
+                            classDescriptor: block.dexType,
+                            method: "invoke",
+                            prototype: "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                            args: [job.block, job.scope, .null]
+                        )
+                    }
+                    bridge.acknowledgeFirstPendingCoroutineJob()
+                    executedJobs += 1
+                    try Task.checkCancellation()
+                }
+
+                let value = try withFirstCompatibilityGap(stage: .filters) {
+                    try vm.callVirtualEntry(
+                        receiver: receiver,
+                        method: StableInterpretedSourceAPI.filterList.name,
+                        prototype: StableInterpretedSourceAPI.filterList.prototype,
+                        args: [receiver]
+                    )
+                }
+                guard let converted = HostBridge.sourceFilters(from: value) else {
+                    throw PinnedInterpretedSourceError.unexpectedResult(
+                        operation: "filter refresh"
+                    )
+                }
+                filterSnapshot.replace(with: converted)
+                // No suspension is permitted between publishing the schema and
+                // swapping its actor-owned DEX value. A search that observes the
+                // new snapshot must acquire this actor after both statements.
+                filterListValue = value
+                if !bridge.hasPendingCoroutineJobs { return converted }
+            }
+        }
+    }
+
     func search(
         page: Int,
         query: String,
@@ -888,14 +1031,26 @@ private actor PinnedInterpretedRuntime {
         try await acquire()
         defer { release() }
         try Task.checkCancellation()
+        // Resolve an omitted filter list only after acquiring the runtime. A
+        // queued dynamic refresh may replace both the public schema and the DEX
+        // FilterList while this search is waiting for actor-owned execution.
+        let currentFilters = filterSnapshot.read()
+        guard filters.isEmpty || !currentFilters.isEmpty else {
+            throw PinnedInterpretedSourceError.unsupportedOperation("filtered search")
+        }
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                !currentFilters.isEmpty else {
+            throw PinnedInterpretedSourceError.unsupportedOperation("blank search")
+        }
+        let resolvedFilters = filters.isEmpty ? currentFilters : filters
         let runtimeFilterValue: RVal
         if let filterListValue {
-            guard HostBridge.applySourceFilters(filters, to: filterListValue) else {
+            guard HostBridge.applySourceFilters(resolvedFilters, to: filterListValue) else {
                 throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
             }
             runtimeFilterValue = filterListValue
         } else {
-            guard filters.isEmpty else {
+            guard resolvedFilters.isEmpty else {
                 throw PinnedInterpretedSourceError.invalidInput(operation: "search filters")
             }
             runtimeFilterValue = .null

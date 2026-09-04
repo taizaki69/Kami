@@ -119,6 +119,53 @@ public final class HostBridge {
         let block: RVal
     }
 
+    private final class VirtualFileSystemBox {
+        struct FileEntry {
+            var bytes: [UInt8]
+            var modifiedAtMilliseconds: Int64
+        }
+
+        var directories: Set<String> = ["/cache"]
+        var files: [String: FileEntry] = [:]
+        var nextTemporaryFileID: UInt64 = 0
+    }
+
+    private struct VirtualFileBox {
+        let fileSystem: VirtualFileSystemBox
+        let path: String
+    }
+
+    private final class VirtualFileSourceBox {
+        let file: VirtualFileBox
+        let bytes: [UInt8]
+        var offset = 0
+        var isClosed = false
+
+        init(file: VirtualFileBox, bytes: [UInt8]) {
+            self.file = file
+            self.bytes = bytes
+        }
+    }
+
+    private final class VirtualFileSinkBox {
+        let file: VirtualFileBox
+        var bytes: [UInt8] = []
+        var isClosed = false
+
+        init(file: VirtualFileBox) {
+            self.file = file
+        }
+    }
+
+    private struct DecimalFormatSymbolsBox {
+        let localeIdentifier: String
+    }
+
+    private final class DecimalFormatBox {
+        var pattern = ""
+        var localeIdentifier = "en_US_POSIX"
+    }
+
     private enum FilterKind {
         case header
         case separator
@@ -433,6 +480,14 @@ public final class HostBridge {
 
     private struct JSONIntSerializerBox {}
 
+    private struct JSONFloatSerializerBox {}
+
+    private struct JSONElementSerializerBox {}
+
+    private struct JSONElementBox {
+        let value: Any
+    }
+
     private struct JSONNullableSerializerBox {
         let serializer: RVal
     }
@@ -553,6 +608,11 @@ public final class HostBridge {
     /// Per-source network identities. They hold only pure request-building
     /// state and share only this bridge's explicitly injected transport.
     private var sourceNetworks: [ObjectIdentifier: RVal] = [:]
+    /// Fire-and-forget Kotlin coroutines are queued instead of being allowed to
+    /// race the actor-owned VM. The interpreted source runtime drains them only
+    /// from an explicit async entry point.
+    private var pendingCoroutineJobs: [(scope: RVal, block: RVal)] = []
+    private let virtualFileSystem = VirtualFileSystemBox()
     private let transport: (any CompatHTTPTransport)?
     private let transportPolicy: CompatHTTPTransportPolicy
     private let htmlPolicy: CompatHTMLPolicy
@@ -576,6 +636,17 @@ public final class HostBridge {
         self.transportPolicy = transportPolicy
         self.htmlPolicy = htmlPolicy
     }
+
+    var firstPendingCoroutineJob: (scope: RVal, block: RVal)? {
+        pendingCoroutineJobs.first
+    }
+
+    func acknowledgeFirstPendingCoroutineJob() {
+        guard !pendingCoroutineJobs.isEmpty else { return }
+        pendingCoroutineJobs.removeFirst()
+    }
+
+    var hasPendingCoroutineJobs: Bool { !pendingCoroutineJobs.isEmpty }
 
     public func register(class descriptor: String, _ methodName: String,
                          prototype: String, isStatic: Bool = false,
@@ -889,6 +960,8 @@ public final class HostBridge {
         Self.registerStringSurface(bridge)
         Self.registerByteEncodingSurface(bridge)
         Self.registerStringBuilder(bridge)
+        Self.registerNumberFormatSurface(bridge)
+        Self.registerVirtualFileSurface(bridge)
         Self.registerCoroutineSurface(bridge)
 
         // These abstract tachiyomix base classes are supplied by the host app,
@@ -1901,6 +1974,393 @@ public final class HostBridge {
         }
     }
 
+    /// A source-scoped, in-memory subset of Android's cache-directory and
+    /// `java.io.File` APIs. Extension cache paths never escape into the host
+    /// filesystem; every bridge receives a fresh bounded namespace.
+    private static func registerVirtualFileSurface(_ bridge: HostBridge) {
+        let file = "Ljava/io/File;"
+        let source = "Lokio/Source;"
+        let bufferedSource = "Lokio/BufferedSource;"
+        let sink = "Lokio/Sink;"
+        let bufferedSink = "Lokio/BufferedSink;"
+        let maximumBytes = bridge.transportPolicy.maximumResponseBodyBytes
+        let maximumFileCount = 64
+        let maximumDirectoryCount = 32
+        let maximumTotalBytes = maximumBytes > Int.max / 4
+            ? Int.max
+            : maximumBytes * 4
+
+        func fileValue(_ path: String) -> RVal {
+            .obj(ObjInstance(
+                dexType: file,
+                payload: VirtualFileBox(fileSystem: bridge.virtualFileSystem, path: path),
+                isHost: true
+            ))
+        }
+
+        func fileBox(_ value: RVal, operation: String) throws -> VirtualFileBox {
+            guard case let .obj(object) = value,
+                  let box = object.payload as? VirtualFileBox,
+                  box.fileSystem === bridge.virtualFileSystem else {
+                throw VMError.verify("\(operation) file")
+            }
+            return box
+        }
+
+        func resolvedPath(base: String, child: String, operation: String) throws -> String {
+            guard !child.isEmpty,
+                  child.utf8.count <= 1_024,
+                  !child.contains("\0"),
+                  !child.hasPrefix("/"),
+                  !child.hasPrefix("\\"),
+                  !child.contains(":") else {
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "\(operation) path")
+            }
+            let components = child
+                .replacingOccurrences(of: "\\", with: "/")
+                .split(separator: "/", omittingEmptySubsequences: true)
+            guard !components.isEmpty,
+                  components.allSatisfy({ $0 != "." && $0 != ".." }) else {
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "\(operation) path")
+            }
+            let suffix = components.map(String.init).joined(separator: "/")
+            let candidate = base == "/" ? "/" + suffix : base + "/" + suffix
+            guard candidate.utf8.count <= 4_096 else {
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "\(operation) path")
+            }
+            return candidate
+        }
+
+        func parentPath(of path: String) -> String {
+            guard let separator = path.lastIndex(of: "/"), separator != path.startIndex else {
+                return "/"
+            }
+            return String(path[..<separator])
+        }
+
+        func sourceBox(_ value: RVal, operation: String) throws -> VirtualFileSourceBox {
+            guard case let .obj(object) = value,
+                  let box = object.payload as? VirtualFileSourceBox,
+                  box.file.fileSystem === bridge.virtualFileSystem else {
+                throw VMError.verify("\(operation) source")
+            }
+            return box
+        }
+
+        func sinkBox(_ value: RVal, operation: String) throws -> VirtualFileSinkBox {
+            guard case let .obj(object) = value,
+                  let box = object.payload as? VirtualFileSinkBox,
+                  box.file.fileSystem === bridge.virtualFileSystem else {
+                throw VMError.verify("\(operation) sink")
+            }
+            return box
+        }
+
+        func validateFileCapacity(
+            in fileSystem: VirtualFileSystemBox,
+            path: String,
+            bytesCount: Int,
+            operation: String
+        ) throws {
+            guard bytesCount >= 0,
+                  bytesCount <= maximumBytes,
+                  fileSystem.files[path] != nil || fileSystem.files.count < maximumFileCount else {
+                throw hostThrowable("Ljava/io/IOException;", "\(operation) capacity")
+            }
+            var total = bytesCount
+            for (existingPath, entry) in fileSystem.files where existingPath != path {
+                let next = total.addingReportingOverflow(entry.bytes.count)
+                guard !next.overflow, next.partialValue <= maximumTotalBytes else {
+                    throw hostThrowable("Ljava/io/IOException;", "\(operation) capacity")
+                }
+                total = next.partialValue
+            }
+        }
+
+        bridge.register(
+            class: "Landroid/content/ContextWrapper;",
+            "getCacheDir",
+            prototype: "()Ljava/io/File;"
+        ) { _, args in
+            guard case .obj = try argument(args, 0, "ContextWrapper.getCacheDir") else {
+                throw VMError.verify("ContextWrapper.getCacheDir receiver")
+            }
+            return fileValue("/cache")
+        }
+        bridge.register(
+            class: "Lkotlin/io/FilesKt;",
+            "resolve",
+            prototype: "(Ljava/io/File;Ljava/lang/String;)Ljava/io/File;",
+            isStatic: true
+        ) { _, args in
+            let base = try fileBox(
+                try argument(args, 0, "FilesKt.resolve"),
+                operation: "FilesKt.resolve"
+            )
+            let child = try requiredString(args, 1, "FilesKt.resolve")
+            return fileValue(try resolvedPath(
+                base: base.path,
+                child: child,
+                operation: "FilesKt.resolve"
+            ))
+        }
+        bridge.register(class: file, "mkdirs", prototype: "()Z") { _, args in
+            let box = try fileBox(try argument(args, 0, "File.mkdirs"), operation: "File.mkdirs")
+            guard !box.fileSystem.directories.contains(box.path),
+                  box.fileSystem.files[box.path] == nil else {
+                return .int(0)
+            }
+            guard box.fileSystem.directories.count < maximumDirectoryCount else {
+                throw hostThrowable("Ljava/io/IOException;", "File.mkdirs capacity")
+            }
+            box.fileSystem.directories.insert(box.path)
+            return .int(1)
+        }
+        bridge.register(class: file, "exists", prototype: "()Z") { _, args in
+            let box = try fileBox(try argument(args, 0, "File.exists"), operation: "File.exists")
+            return .int((box.fileSystem.directories.contains(box.path) ||
+                         box.fileSystem.files[box.path] != nil) ? 1 : 0)
+        }
+        bridge.register(class: file, "lastModified", prototype: "()J") { _, args in
+            let box = try fileBox(
+                try argument(args, 0, "File.lastModified"),
+                operation: "File.lastModified"
+            )
+            return .long(box.fileSystem.files[box.path]?.modifiedAtMilliseconds ?? 0)
+        }
+        bridge.register(class: file, "delete", prototype: "()Z") { _, args in
+            let box = try fileBox(try argument(args, 0, "File.delete"), operation: "File.delete")
+            let removedFile = box.fileSystem.files.removeValue(forKey: box.path) != nil
+            let removedDirectory = box.fileSystem.directories.remove(box.path) != nil
+            return .int((removedFile || removedDirectory) ? 1 : 0)
+        }
+        bridge.register(
+            class: file,
+            "renameTo",
+            prototype: "(Ljava/io/File;)Z"
+        ) { _, args in
+            let source = try fileBox(
+                try argument(args, 0, "File.renameTo"),
+                operation: "File.renameTo"
+            )
+            let destination = try fileBox(
+                try argument(args, 1, "File.renameTo"),
+                operation: "File.renameTo"
+            )
+            guard source.fileSystem === destination.fileSystem,
+                  let entry = source.fileSystem.files.removeValue(forKey: source.path) else {
+                return .int(0)
+            }
+            destination.fileSystem.files[destination.path] = entry
+            return .int(1)
+        }
+        bridge.register(
+            class: file,
+            "createTempFile",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;Ljava/io/File;)Ljava/io/File;",
+            isStatic: true
+        ) { _, args in
+            let prefix = try requiredString(args, 0, "File.createTempFile")
+            let suffix = try requiredString(args, 1, "File.createTempFile")
+            let directory = try fileBox(
+                try argument(args, 2, "File.createTempFile"),
+                operation: "File.createTempFile"
+            )
+            guard prefix.utf8.count >= 3,
+                  prefix.utf8.count <= 128,
+                  suffix.utf8.count <= 128,
+                  !prefix.contains("/"), !prefix.contains("\\"),
+                  !suffix.contains("/"), !suffix.contains("\\") else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "File.createTempFile arguments"
+                )
+            }
+            guard directory.fileSystem.directories.contains(directory.path) else {
+                throw hostThrowable("Ljava/io/IOException;", "File.createTempFile directory")
+            }
+            let id = directory.fileSystem.nextTemporaryFileID
+            directory.fileSystem.nextTemporaryFileID &+= 1
+            let name = prefix + String(id) + suffix
+            let path = try resolvedPath(
+                base: directory.path,
+                child: name,
+                operation: "File.createTempFile"
+            )
+            try validateFileCapacity(
+                in: directory.fileSystem,
+                path: path,
+                bytesCount: 0,
+                operation: "File.createTempFile"
+            )
+            directory.fileSystem.files[path] = .init(
+                bytes: [],
+                modifiedAtMilliseconds: Int64(Date().timeIntervalSince1970 * 1_000)
+            )
+            return fileValue(path)
+        }
+        bridge.register(
+            class: "Ljava/lang/System;",
+            "currentTimeMillis",
+            prototype: "()J",
+            isStatic: true
+        ) { _, _ in
+            .long(Int64(Date().timeIntervalSince1970 * 1_000))
+        }
+        bridge.register(
+            class: "Landroid/util/Log;",
+            "e",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I",
+            isStatic: true
+        ) { _, args in
+            let tag = try requiredString(args, 0, "Log.e")
+            let message = try requiredString(args, 1, "Log.e")
+            let throwable = try argument(args, 2, "Log.e")
+            guard tag.utf8.count <= 1_024,
+                  message.utf8.count <= 8_192 else {
+                throw VMError.verify("Log.e arguments")
+            }
+            if case .null = throwable {
+                // Accepted below.
+            } else if case .obj = throwable {
+                // Accepted below.
+            } else {
+                throw VMError.verify("Log.e throwable")
+            }
+            // Deliberately do not forward extension-controlled text or URLs to
+            // the host log. Android Log.e's integer result is not meaningful to
+            // the source's retry path.
+            return .int(0)
+        }
+
+        bridge.register(
+            class: "Lokio/Okio;",
+            "source",
+            prototype: "(Ljava/io/File;)Lokio/Source;",
+            isStatic: true
+        ) { _, args in
+            let box = try fileBox(try argument(args, 0, "Okio.source"), operation: "Okio.source")
+            guard let entry = box.fileSystem.files[box.path],
+                  entry.bytes.count <= maximumBytes else {
+                throw hostThrowable("Ljava/io/IOException;", "Okio.source file")
+            }
+            return .obj(ObjInstance(
+                dexType: source,
+                payload: VirtualFileSourceBox(file: box, bytes: entry.bytes),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: "Lokio/Okio;",
+            "sink$default",
+            prototype: "(Ljava/io/File;ZILjava/lang/Object;)Lokio/Sink;",
+            isStatic: true
+        ) { _, args in
+            let box = try fileBox(
+                try argument(args, 0, "Okio.sink$default"),
+                operation: "Okio.sink$default"
+            )
+            guard case let .int(rawAppend) = try argument(args, 1, "Okio.sink$default"),
+                  case let .int(mask) = try argument(args, 2, "Okio.sink$default"),
+                  mask & ~1 == 0,
+                  try argument(args, 3, "Okio.sink$default").isNull,
+                  box.fileSystem.directories.contains(parentPath(of: box.path)) else {
+                throw hostThrowable("Ljava/io/IOException;", "Okio.sink$default arguments")
+            }
+            let append = mask & 1 != 0 ? false : rawAppend != 0
+            let result = VirtualFileSinkBox(file: box)
+            if append, let existing = box.fileSystem.files[box.path] {
+                guard existing.bytes.count <= maximumBytes else {
+                    throw hostThrowable("Ljava/io/IOException;", "Okio.sink$default file")
+                }
+                result.bytes = existing.bytes
+            }
+            return .obj(ObjInstance(dexType: sink, payload: result, isHost: true))
+        }
+        bridge.register(
+            class: "Lokio/Okio;",
+            "buffer",
+            prototype: "(Lokio/Source;)Lokio/BufferedSource;",
+            isStatic: true
+        ) { _, args in
+            let box = try sourceBox(try argument(args, 0, "Okio.buffer(Source)"), operation: "Okio.buffer(Source)")
+            guard !box.isClosed else {
+                throw hostThrowable("Ljava/lang/IllegalStateException;", "Okio.buffer closed source")
+            }
+            return .obj(ObjInstance(dexType: bufferedSource, payload: box, isHost: true))
+        }
+        bridge.register(
+            class: "Lokio/Okio;",
+            "buffer",
+            prototype: "(Lokio/Sink;)Lokio/BufferedSink;",
+            isStatic: true
+        ) { _, args in
+            let box = try sinkBox(try argument(args, 0, "Okio.buffer(Sink)"), operation: "Okio.buffer(Sink)")
+            guard !box.isClosed else {
+                throw hostThrowable("Ljava/lang/IllegalStateException;", "Okio.buffer closed sink")
+            }
+            return .obj(ObjInstance(dexType: bufferedSink, payload: box, isHost: true))
+        }
+
+        // The virtual cache never crosses the bridge boundary, so the bounded
+        // in-memory representation may keep logical zstd streams uncompressed.
+        // This preserves the extension's write/read semantics without exposing
+        // a native codec or accepting attacker-controlled host files.
+        bridge.register(
+            class: "Lcom/squareup/zstd/okio/OkioZstd;",
+            "zstdDecompress",
+            prototype: "(Lokio/Source;)Lokio/Source;",
+            isStatic: true
+        ) { _, args in
+            let value = try argument(args, 0, "OkioZstd.zstdDecompress")
+            _ = try sourceBox(value, operation: "OkioZstd.zstdDecompress")
+            return value
+        }
+        bridge.register(
+            class: "Lcom/squareup/zstd/okio/OkioZstd;",
+            "zstdCompress",
+            prototype: "(Lokio/Sink;)Lokio/Sink;",
+            isStatic: true
+        ) { _, args in
+            let value = try argument(args, 0, "OkioZstd.zstdCompress")
+            _ = try sinkBox(value, operation: "OkioZstd.zstdCompress")
+            return value
+        }
+
+        for descriptor in [source, bufferedSource] {
+            bridge.register(class: descriptor, "close", prototype: "()V") { _, args in
+                let box = try sourceBox(
+                    try argument(args, 0, "Source.close"),
+                    operation: "Source.close"
+                )
+                box.isClosed = true
+                return .null
+            }
+        }
+        for descriptor in [sink, bufferedSink] {
+            bridge.register(class: descriptor, "close", prototype: "()V") { _, args in
+                let box = try sinkBox(
+                    try argument(args, 0, "Sink.close"),
+                    operation: "Sink.close"
+                )
+                if !box.isClosed {
+                    try validateFileCapacity(
+                        in: box.file.fileSystem,
+                        path: box.file.path,
+                        bytesCount: box.bytes.count,
+                        operation: "Sink.close"
+                    )
+                    box.file.fileSystem.files[box.file.path] = .init(
+                        bytes: box.bytes,
+                        modifiedAtMilliseconds: Int64(Date().timeIntervalSince1970 * 1_000)
+                    )
+                    box.isClosed = true
+                }
+                return .null
+            }
+        }
+    }
+
     /// Exact structured-coroutine surface reached by current lib 1.6 source
     /// update wrappers. `async` is represented lazily and `await` interprets
     /// the captured DEX lambda on the same VM, preserving verifier, call-depth,
@@ -1908,6 +2368,43 @@ public final class HostBridge {
     private static func registerCoroutineSurface(_ bridge: HostBridge) {
         let scope = "Lkotlinx/coroutines/CoroutineScope;"
         let deferred = "Lkotlinx/coroutines/Deferred;"
+        let globalScope = "Lkotlinx/coroutines/GlobalScope;"
+        let dispatcher = "Lkotlinx/coroutines/CoroutineDispatcher;"
+        let job = "Lkotlinx/coroutines/Job;"
+
+        bridge.staticFields["\(globalScope)->INSTANCE"] = .obj(ObjInstance(
+            dexType: globalScope,
+            isHost: true
+        ))
+        bridge.register(
+            class: "Lkotlinx/coroutines/Dispatchers;",
+            "getIO",
+            prototype: "()Lkotlinx/coroutines/CoroutineDispatcher;",
+            isStatic: true
+        ) { _, _ in
+            .obj(ObjInstance(dexType: dispatcher, payload: "IO", isHost: true))
+        }
+        bridge.register(
+            class: "Lkotlinx/coroutines/BuildersKt;",
+            "launch$default",
+            prototype: "(Lkotlinx/coroutines/CoroutineScope;Lkotlin/coroutines/CoroutineContext;Lkotlinx/coroutines/CoroutineStart;Lkotlin/jvm/functions/Function2;ILjava/lang/Object;)Lkotlinx/coroutines/Job;",
+            isStatic: true
+        ) { _, args in
+            guard case let .obj(scopeObject) = try argument(args, 0, "BuildersKt.launch$default"),
+                  scopeObject.dexType == globalScope,
+                  case let .obj(dispatcherObject) = try argument(args, 1, "BuildersKt.launch$default"),
+                  dispatcherObject.dexType == dispatcher,
+                  try argument(args, 2, "BuildersKt.launch$default").isNull,
+                  case let .obj(block) = try argument(args, 3, "BuildersKt.launch$default"),
+                  case let .int(mask) = try argument(args, 4, "BuildersKt.launch$default"),
+                  mask == 2,
+                  try argument(args, 5, "BuildersKt.launch$default").isNull,
+                  bridge.pendingCoroutineJobs.count < 16 else {
+                throw VMError.verify("BuildersKt.launch$default arguments")
+            }
+            bridge.pendingCoroutineJobs.append((scope: .obj(scopeObject), block: .obj(block)))
+            return .obj(ObjInstance(dexType: job, isHost: true))
+        }
 
         bridge.register(
             class: "Lkotlin/coroutines/jvm/internal/SuspendLambda;",
@@ -2327,6 +2824,18 @@ public final class HostBridge {
                 throw serializationThrowable("expected JSON integer")
             }
             if case let .obj(object) = strategy,
+               object.payload is JSONFloatSerializerBox {
+                if case let .float(value) = value, value.isFinite {
+                    return .float(value)
+                }
+                if case let .obj(boxed) = value,
+                   let value = boxed.payload as? Float,
+                   value.isFinite {
+                    return .float(value)
+                }
+                throw serializationThrowable("expected JSON float")
+            }
+            if case let .obj(object) = strategy,
                let listSerializer = object.payload as? ArrayListSerializerBox {
                 let list = try listBox([value], "JSON list encode")
                 try requireCollectionCapacity(list.elements.count, "JSON list encode")
@@ -2376,6 +2885,15 @@ public final class HostBridge {
                     : try deserialize(nullable.serializer, value: value, vm: vm)
             }
             if case let .obj(object) = strategy,
+               object.payload is JSONElementSerializerBox {
+                try validateJSON(value)
+                return .obj(ObjInstance(
+                    dexType: "Lkotlinx/serialization/json/JsonElement;",
+                    payload: JSONElementBox(value: value),
+                    isHost: true
+                ))
+            }
+            if case let .obj(object) = strategy,
                object.payload is JSONStringSerializerBox {
                 guard let value = value as? String else {
                     throw serializationThrowable("expected JSON string")
@@ -2385,6 +2903,17 @@ public final class HostBridge {
             if case let .obj(object) = strategy,
                object.payload is JSONIntSerializerBox {
                 return boxedInteger(try decodeJSONInt(value))
+            }
+            if case let .obj(object) = strategy,
+               object.payload is JSONFloatSerializerBox {
+                guard !isJSONBoolean(value), let number = value as? NSNumber else {
+                    throw serializationThrowable("expected JSON float")
+                }
+                let result = number.floatValue
+                guard result.isFinite else {
+                    throw serializationThrowable("JSON float is out of range")
+                }
+                return boxedFloat(result)
             }
             if case let .obj(object) = strategy,
                let listSerializer = object.payload as? ArrayListSerializerBox {
@@ -2478,6 +3007,8 @@ public final class HostBridge {
 
         let json = "Lkotlinx/serialization/json/Json;"
         let jsonBuilder = "Lkotlinx/serialization/json/JsonBuilder;"
+        let jsonElement = "Lkotlinx/serialization/json/JsonElement;"
+        let jsonElementCompanion = "Lkotlinx/serialization/json/JsonElement$Companion;"
         bridge.objectFactories[json] = { _ in
             .obj(ObjInstance(
                 dexType: json,
@@ -2491,6 +3022,28 @@ public final class HostBridge {
                 payload: JSONBuilderBox(encodeDefaults: false),
                 isHost: true
             ))
+        }
+        let jsonElementCompanionObject = ObjInstance(
+            dexType: jsonElementCompanion,
+            isHost: true
+        )
+        let jsonElementCompanionValue = RVal.obj(jsonElementCompanionObject)
+        let jsonElementSerializerValue = RVal.obj(ObjInstance(
+            dexType: "Lkotlinx/serialization/json/JsonElementSerializer;",
+            payload: JSONElementSerializerBox(),
+            isHost: true
+        ))
+        bridge.staticFields["\(jsonElement)->Companion"] = jsonElementCompanionValue
+        bridge.register(
+            class: jsonElementCompanion,
+            "serializer",
+            prototype: "()Lkotlinx/serialization/KSerializer;"
+        ) { _, args in
+            guard case let .obj(receiver) = try argument(args, 0, "JsonElement.Companion.serializer"),
+                  receiver === jsonElementCompanionObject else {
+                throw VMError.verify("JsonElement.Companion.serializer receiver")
+            }
+            return jsonElementSerializerValue
         }
         bridge.register(
             class: jsonBuilder,
@@ -2664,6 +3217,7 @@ public final class HostBridge {
         let arrayListSerializer = "Lkotlinx/serialization/internal/ArrayListSerializer;"
         let stringSerializer = "Lkotlinx/serialization/internal/StringSerializer;"
         let intSerializer = "Lkotlinx/serialization/internal/IntSerializer;"
+        let floatSerializer = "Lkotlinx/serialization/internal/FloatSerializer;"
         bridge.staticFields["\(stringSerializer)->INSTANCE"] = .obj(ObjInstance(
             dexType: stringSerializer,
             payload: JSONStringSerializerBox(),
@@ -2672,6 +3226,11 @@ public final class HostBridge {
         bridge.staticFields["\(intSerializer)->INSTANCE"] = .obj(ObjInstance(
             dexType: intSerializer,
             payload: JSONIntSerializerBox(),
+            isHost: true
+        ))
+        bridge.staticFields["\(floatSerializer)->INSTANCE"] = .obj(ObjInstance(
+            dexType: floatSerializer,
+            payload: JSONFloatSerializerBox(),
             isHost: true
         ))
         bridge.register(
@@ -2752,6 +3311,66 @@ public final class HostBridge {
             )
         }
         bridge.register(
+            class: json,
+            "decodeFromJsonElement",
+            prototype: "(Lkotlinx/serialization/DeserializationStrategy;Lkotlinx/serialization/json/JsonElement;)Ljava/lang/Object;"
+        ) { vm, args in
+            let operation = "Json.decodeFromJsonElement"
+            guard case let .obj(jsonObject) = try argument(args, 0, operation),
+                  jsonObject.dexType == json,
+                  case .obj = try argument(args, 1, operation),
+                  case let .obj(elementObject) = try argument(args, 2, operation),
+                  elementObject.dexType == jsonElement,
+                  let element = elementObject.payload as? JSONElementBox else {
+                throw VMError.verify("\(operation) arguments")
+            }
+            try validateJSON(element.value)
+            return try deserialize(
+                try argument(args, 1, operation),
+                value: element.value,
+                vm: vm
+            )
+        }
+        bridge.register(
+            class: "Lkotlinx/serialization/json/okio/OkioStreamsKt;",
+            "encodeToBufferedSink",
+            prototype: "(Lkotlinx/serialization/json/Json;Lkotlinx/serialization/SerializationStrategy;Ljava/lang/Object;Lokio/BufferedSink;)V",
+            isStatic: true
+        ) { _, args in
+            let operation = "OkioStreamsKt.encodeToBufferedSink"
+            guard case let .obj(jsonObject) = try argument(args, 0, operation),
+                  jsonObject.dexType == json,
+                  case let .obj(strategyObject) = try argument(args, 1, operation),
+                  strategyObject.payload is JSONElementSerializerBox,
+                  case let .obj(elementObject) = try argument(args, 2, operation),
+                  elementObject.dexType == jsonElement,
+                  let element = elementObject.payload as? JSONElementBox,
+                  case let .obj(sinkObject) = try argument(args, 3, operation),
+                  sinkObject.dexType == "Lokio/BufferedSink;",
+                  let sink = sinkObject.payload as? VirtualFileSinkBox,
+                  sink.file.fileSystem === bridge.virtualFileSystem,
+                  !sink.isClosed else {
+                throw VMError.verify("\(operation) arguments")
+            }
+            try validateJSON(element.value)
+            let data: Data
+            do {
+                data = try JSONSerialization.data(
+                    withJSONObject: element.value,
+                    options: [.sortedKeys, .fragmentsAllowed]
+                )
+            } catch {
+                throw serializationThrowable("JSON element could not be encoded")
+            }
+            let total = sink.bytes.count.addingReportingOverflow(data.count)
+            guard !total.overflow,
+                  total.partialValue <= bridge.transportPolicy.maximumResponseBodyBytes else {
+                throw serializationThrowable("encoded JSON is too long")
+            }
+            sink.bytes.append(contentsOf: data)
+            return .null
+        }
+        bridge.register(
             class: "Lkotlinx/serialization/json/okio/OkioStreamsKt;",
             "decodeFromBufferedSource",
             prototype: "(Lkotlinx/serialization/json/Json;Lkotlinx/serialization/DeserializationStrategy;Lokio/BufferedSource;)Ljava/lang/Object;",
@@ -2762,22 +3381,40 @@ public final class HostBridge {
                   jsonObject.dexType == "Lkotlinx/serialization/json/Json;",
                   case .obj = try argument(args, 1, operation),
                   case let .obj(sourceObject) = try argument(args, 2, operation),
-                  sourceObject.dexType == "Lokio/BufferedSource;",
-                  let source = sourceObject.payload as? ResponseBodyBox else {
+                  sourceObject.dexType == "Lokio/BufferedSource;" else {
                 throw VMError.verify("\(operation) arguments")
             }
-            guard !source.isClosed else {
-                throw hostThrowable(
-                    "Ljava/lang/IllegalStateException;",
-                    "decodeFromBufferedSource on closed source"
-                )
+            let bytes: [UInt8]
+            if let source = sourceObject.payload as? ResponseBodyBox {
+                guard !source.isClosed else {
+                    throw hostThrowable(
+                        "Ljava/lang/IllegalStateException;",
+                        "decodeFromBufferedSource on closed source"
+                    )
+                }
+                let remaining = source.bytes.count - source.offset
+                guard remaining <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                    throw serializationThrowable("JSON input is too long")
+                }
+                bytes = Array(source.bytes[source.offset...])
+                source.offset = source.bytes.count
+            } else if let source = sourceObject.payload as? VirtualFileSourceBox,
+                      source.file.fileSystem === bridge.virtualFileSystem {
+                guard !source.isClosed else {
+                    throw hostThrowable(
+                        "Ljava/lang/IllegalStateException;",
+                        "decodeFromBufferedSource on closed source"
+                    )
+                }
+                let remaining = source.bytes.count - source.offset
+                guard remaining <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                    throw serializationThrowable("JSON input is too long")
+                }
+                bytes = Array(source.bytes[source.offset...])
+                source.offset = source.bytes.count
+            } else {
+                throw VMError.verify("\(operation) source")
             }
-            let remaining = source.bytes.count - source.offset
-            guard remaining <= bridge.htmlPolicy.maximumExtractedStringBytes else {
-                throw serializationThrowable("JSON input is too long")
-            }
-            let bytes = Array(source.bytes[source.offset...])
-            source.offset = source.bytes.count
             guard let text = String(data: Data(bytes), encoding: .utf8) else {
                 throw serializationThrowable("JSON input is not valid UTF-8")
             }
@@ -3466,6 +4103,11 @@ public final class HostBridge {
             payload: "FRENCH",
             isHost: true
         ))
+        bridge.staticFields["\(locale)->US"] = .obj(ObjInstance(
+            dexType: locale,
+            payload: "US",
+            isHost: true
+        ))
         bridge.register(class: d, "length", prototype: "()I") { _, args in
             .int(Int32(vmStringValue(try argument(args, 0, "String.length")).utf16.count))
         }
@@ -3938,6 +4580,117 @@ public final class HostBridge {
         ))
     }
 
+    private static func boxedFloat(_ value: Float) -> RVal {
+        .obj(ObjInstance(
+            dexType: "Ljava/lang/Float;",
+            payload: value,
+            isHost: true
+        ))
+    }
+
+    private static func registerNumberFormatSurface(_ bridge: HostBridge) {
+        let locale = "Ljava/util/Locale;"
+        let symbols = "Ljava/text/DecimalFormatSymbols;"
+        let decimalFormat = "Ljava/text/DecimalFormat;"
+
+        bridge.register(
+            class: symbols,
+            "getInstance",
+            prototype: "(Ljava/util/Locale;)Ljava/text/DecimalFormatSymbols;",
+            isStatic: true
+        ) { _, args in
+            guard case let .obj(localeObject) = try argument(
+                args, 0, "DecimalFormatSymbols.getInstance"
+            ), localeObject.dexType == locale,
+               let localeName = localeObject.payload as? String,
+               localeName == "US" else {
+                throw VMError.verify("DecimalFormatSymbols.getInstance locale")
+            }
+            return .obj(ObjInstance(
+                dexType: symbols,
+                payload: DecimalFormatSymbolsBox(localeIdentifier: "en_US_POSIX"),
+                isHost: true
+            ))
+        }
+        bridge.objectFactories[decimalFormat] = { _ in
+            .obj(ObjInstance(
+                dexType: decimalFormat,
+                payload: DecimalFormatBox(),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: decimalFormat,
+            "<init>",
+            prototype: "(Ljava/lang/String;Ljava/text/DecimalFormatSymbols;)V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "DecimalFormat.<init>"),
+                  let box = object.payload as? DecimalFormatBox,
+                  case let .obj(symbolsObject) = try argument(args, 2, "DecimalFormat.<init>"),
+                  let symbolsBox = symbolsObject.payload as? DecimalFormatSymbolsBox else {
+                throw VMError.verify("DecimalFormat.<init> arguments")
+            }
+            let pattern = try requiredString(args, 1, "DecimalFormat.<init>")
+            guard pattern == "#.##" else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "unsupported decimal format pattern"
+                )
+            }
+            box.pattern = pattern
+            box.localeIdentifier = symbolsBox.localeIdentifier
+            return .null
+        }
+        bridge.register(
+            class: "Ljava/text/Format;",
+            "format",
+            prototype: "(Ljava/lang/Object;)Ljava/lang/String;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Format.format"),
+                  let box = object.payload as? DecimalFormatBox,
+                  box.pattern == "#.##",
+                  box.localeIdentifier == "en_US_POSIX" else {
+                throw VMError.verify("Format.format receiver")
+            }
+            let number: NSNumber
+            switch try argument(args, 1, "Format.format") {
+            case let .float(value) where value.isFinite:
+                number = NSNumber(value: value)
+            case let .double(value) where value.isFinite:
+                number = NSNumber(value: value)
+            case let .int(value):
+                number = NSNumber(value: value)
+            case let .long(value):
+                number = NSNumber(value: value)
+            case let .obj(valueObject):
+                if let value = valueObject.payload as? Float, value.isFinite {
+                    number = NSNumber(value: value)
+                } else if let value = valueObject.payload as? Double, value.isFinite {
+                    number = NSNumber(value: value)
+                } else if let value = valueObject.payload as? Int32 {
+                    number = NSNumber(value: value)
+                } else if let value = valueObject.payload as? Int64 {
+                    number = NSNumber(value: value)
+                } else {
+                    throw hostThrowable("Ljava/lang/IllegalArgumentException;", "Format.format value")
+                }
+            default:
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "Format.format value")
+            }
+            let formatter = NumberFormatter()
+            formatter.locale = Locale(identifier: box.localeIdentifier)
+            formatter.numberStyle = .decimal
+            formatter.usesGroupingSeparator = false
+            formatter.minimumFractionDigits = 0
+            formatter.maximumFractionDigits = 2
+            formatter.roundingMode = .halfEven
+            guard let result = formatter.string(from: number), result.utf8.count <= 128 else {
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "Format.format result")
+            }
+            return string(result)
+        }
+    }
+
     private static func registerPrimitiveBoxes(_ bridge: HostBridge) {
         let ranges = "Lkotlin/ranges/RangesKt;"
         bridge.staticFields["Ljava/lang/Boolean;->TRUE"] = boxedBoolean(true)
@@ -4002,6 +4755,19 @@ public final class HostBridge {
                 throw VMError.verify("Boolean.booleanValue receiver")
             }
             return .int(value ? 1 : 0)
+        }
+        bridge.register(class: "Ljava/lang/Float;", "floatValue", prototype: "()F") { _, args in
+            switch try argument(args, 0, "Float.floatValue") {
+            case let .float(value):
+                return .float(value)
+            case let .obj(object):
+                guard let value = object.payload as? Float else {
+                    throw VMError.verify("Float.floatValue receiver")
+                }
+                return .float(value)
+            default:
+                throw VMError.verify("Float.floatValue receiver")
+            }
         }
         bridge.register(
             class: "Ljava/lang/Boolean;",
@@ -4810,6 +5576,21 @@ public final class HostBridge {
         }
         bridge.register(
             class: collections,
+            "getOrNull",
+            prototype: "(Ljava/util/List;I)Ljava/lang/Object;",
+            isStatic: true
+        ) { _, args in
+            let values = try listBox(args, "CollectionsKt.getOrNull").elements
+            try requireCollectionCapacity(values.count, "CollectionsKt.getOrNull")
+            guard case let .int(rawIndex) = try argument(args, 1, "CollectionsKt.getOrNull"),
+                  rawIndex >= 0,
+                  Int(rawIndex) < values.count else {
+                return .null
+            }
+            return values[Int(rawIndex)]
+        }
+        bridge.register(
+            class: collections,
             "distinct",
             prototype: "(Ljava/lang/Iterable;)Ljava/util/List;",
             isStatic: true
@@ -5597,12 +6378,18 @@ public final class HostBridge {
             "<init>",
             prototype: "(Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V"
         ) { _, args in
-            guard case let .obj(object) = try argument(args, 0, "Filter.Separator.<init>") else {
+            guard case let .obj(object) = try argument(args, 0, "Filter.Separator.<init>"),
+                  case let .int(mask) = try argument(args, 2, "Filter.Separator.<init>"),
+                  try argument(args, 3, "Filter.Separator.<init>").isNull,
+                  mask & ~1 == 0 else {
                 throw VMError.verify("Filter.Separator constructor receiver")
             }
+            let name = mask & 1 != 0
+                ? ""
+                : try requiredString(args, 1, "Filter.Separator.<init>")
             object.payload = FilterStateBox(
                 kind: .separator,
-                name: vmStringValue(try argument(args, 1, "Filter.Separator.<init>")),
+                name: name,
                 state: .null
             )
             return .null
@@ -6450,6 +7237,31 @@ public final class HostBridge {
             }
             builder.addedURLBytes = added.partialValue
             builder.encodedPathSegments.append(encoded)
+            return .obj(object)
+        }
+        bridge.register(
+            class: headersBuilder,
+            "add",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Lokhttp3/Headers$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Headers.Builder.add"),
+                  let builder = object.payload as? HeadersBuilderBox else {
+                throw VMError.verify("Headers.Builder.add receiver")
+            }
+            let name = try requiredString(args, 1, "Headers.Builder.add")
+            let value = try requiredString(args, 2, "Headers.Builder.add")
+            try validateHTTPHeader(name: name, value: value, method: "Headers.Builder.add")
+            guard builder.headers.count < 10_000 else {
+                throw VMError.verify("Headers.Builder.add exceeds 10000 headers")
+            }
+            let existingBytes = builder.headers.reduce(0) {
+                $0 + $1.name.utf8.count + $1.value.utf8.count
+            }
+            let addedBytes = name.utf8.count + value.utf8.count
+            guard addedBytes <= 1_048_576 - existingBytes else {
+                throw VMError.verify("Headers.Builder.add exceeds 1048576 UTF-8 bytes")
+            }
+            builder.headers.append(CompatHTTPHeader(name: name, value: value))
             return .obj(object)
         }
         bridge.register(
@@ -7434,8 +8246,17 @@ public final class HostBridge {
             return .int(box.offset == box.bytes.count ? 1 : 0)
         }
         bridge.register(class: bufferedSource, "close", prototype: "()V") { _, args in
-            let box = try bodyBox(args, "BufferedSource.close")
-            box.isClosed = true
+            guard case let .obj(object) = try argument(args, 0, "BufferedSource.close") else {
+                throw VMError.verify("BufferedSource.close receiver")
+            }
+            if let box = object.payload as? ResponseBodyBox {
+                box.isClosed = true
+            } else if let box = object.payload as? VirtualFileSourceBox,
+                      box.file.fileSystem === bridge.virtualFileSystem {
+                box.isClosed = true
+            } else {
+                throw VMError.verify("BufferedSource.close receiver")
+            }
             return .null
         }
 

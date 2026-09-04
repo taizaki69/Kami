@@ -53,6 +53,13 @@ final class InterpretedExtensionPlanTests: XCTestCase {
                 58,
                 "Lw;"
             ),
+            (
+                "komikcast",
+                "eu.kanade.tachiyomi.extension.id.komikcast",
+                "1.6.83",
+                83,
+                "Leu/kanade/tachiyomi/extension/id/komikcast/ExtensionGenerated;"
+            ),
         ]
         let inspector = InterpretedExtensionPlanInspector()
 

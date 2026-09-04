@@ -9,6 +9,7 @@ final class ExtensionSourceFactoryTests: XCTestCase {
     private static let baoziManhuaSourceID: Int64 = 5_724_751_873_601_868_259
     private static let tuttoAnimeMangaSourceID: Int64 = 2_102_507_871_480_604_746
     private static let mangasOriginesFRSourceID: Int64 = 4_803_238_581_797_687_746
+    private static let komikcastSourceID: Int64 = 972_717_448_578_983_812
     private static let keiyoushiFingerprint =
         "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
 
@@ -191,6 +192,7 @@ final class ExtensionSourceFactoryTests: XCTestCase {
         XCTAssertEqual(source.language, "fr")
         XCTAssertEqual(source.baseURL, "https://mangas-origines.fr")
         XCTAssertTrue(source.supportsLatest)
+        XCTAssertFalse(source.supportsFilterFetching)
         XCTAssertEqual(source.getFilterList().count, 7)
         XCTAssertFalse(source.transportPolicy.allowsInsecureHTTP)
         let imageRequest = await source.getImageRequest(page: PageCompat(
@@ -206,6 +208,37 @@ final class ExtensionSourceFactoryTests: XCTestCase {
             "Origin": "https://mangas-origines.fr",
         ])
         XCTAssertNil(imageRequest?.sourceExecutionID)
+    }
+
+    func testFactoryAdmitsExactKomikcastProfile() async throws {
+        let bytes = try corpus("komikcast")
+        let temporary = try temporaryAPK(bytes)
+        defer { try? FileManager.default.removeItem(at: temporary.directory) }
+        let admission = ExtensionAdmission(
+            packageName: "eu.kanade.tachiyomi.extension.id.komikcast",
+            versionName: "1.6.83",
+            versionCode: 83,
+            apkPath: temporary.apk.path,
+            apkSHA256: APKSignatureVerifier.apkSHA256(bytes),
+            signingIdentity: try APKSignatureVerifier().verify(apkBytes: bytes),
+            trustSource: .user(fingerprint: Self.keiyoushiFingerprint),
+            sourceIDs: [Self.komikcastSourceID]
+        )
+
+        let sources = try ExtensionSourceFactory().makeSources(
+            admission: admission,
+            transport: NoNetworkTransport()
+        )
+        let source = try XCTUnwrap(sources.first)
+        XCTAssertEqual(sources.count, 1)
+        XCTAssertEqual(source.id, Self.komikcastSourceID)
+        XCTAssertEqual(source.name, "VoraToon")
+        XCTAssertEqual(source.language, "id")
+        XCTAssertEqual(source.baseURL, "https://v1.voratoon.com")
+        XCTAssertTrue(source.supportsLatest)
+        XCTAssertTrue(source.supportsFilterFetching)
+        XCTAssertEqual(source.getFilterList().count, 7)
+        XCTAssertFalse(source.transportPolicy.allowsInsecureHTTP)
     }
 
     func testFactoryAdmitsExactBaoziProfileThroughRepositoryAdmission() async throws {

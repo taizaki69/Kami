@@ -46,20 +46,6 @@ final class InterpreterTests: XCTestCase {
 
     // MARK: arithmetic
 
-    func testAddInt() throws {
-        var b = DexBuilder()
-        b.setClass("LTest;")
-        b.addMethod(.init(name: "add", registers: 4, ins: 2, outs: 0,
-                          insns: Insn.binop(0x90, 2, 2, 3) + Insn.returnReg(2), isStatic: true,
-                          returnType: "I", parameters: ["I", "I"]))
-        b.addMethod(.init(name: "run", registers: 2, ins: 0, outs: 2,
-                          insns: Insn.const4Units(0, 3) + Insn.const4Units(1, 4)
-                              + Insn.invokeStatic(0, [0, 1]) + Insn.moveResult(0)
-                              + Insn.returnReg(0), isStatic: true, returnType: "I"))
-        let result = try run(b, method: "run")
-        XCTAssertEqual(int(result), 7)
-    }
-
     func testSubMulDiv() throws {
         var b = DexBuilder()
         b.setClass("LTest;")

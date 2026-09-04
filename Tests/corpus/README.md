@@ -3,17 +3,17 @@
 `manifest.json` is the authoritative lock for three deliberately separate
 roles:
 
-- `execution` fixtures are the eight real APKs used by constructor,
+- `execution` fixtures are the nine real APKs used by constructor,
   signature, and interpreted-operation tests.
-- `measurement` fixtures are the remaining 13 current lib 1.6 release APKs used
+- `measurement` fixtures are the remaining 12 current lib 1.6 release APKs used
   only for bounded parsing, structural planning, and static compatibility-gap
   ranking.
 - `conformance` fixtures are small AOSP apksig inputs, including intentionally
   invalid and unsigned APKs.
 
-The lock contains 27 APK artifacts: 8 execution, 13 measurement, and 6
-conformance fixtures. Thus 19 locked artifacts are current lib 1.6 (6 execution
-and 13 measurement).
+The lock contains 27 APK artifacts: 9 execution, 12 measurement, and 6
+conformance fixtures. Thus 19 locked artifacts are current lib 1.6 (7 execution
+and 12 measurement).
 
 The measurement set is behavior-stratified, not statistically sampled. It
 covers dominant generated families, custom/API-heavy sources, preferences,
@@ -24,12 +24,13 @@ the release signatures as parser conformance, but exact trust and admission
 remain in Kami's separate repository-key and install-admission policy, and
 executable profiles remain an explicit fail-closed catalog.
 
-The six exact current-lib-1.6 executable profiles are BatCave, Kawii Manga,
-MangaMelon, Baozi Manhua, TuttoAnimeManga, and Mangas-Origines.fr. The current
-deterministic measurement baseline analyzed 13/13 artifacts, with 9 structural
-candidates, four stable-wrapper blockers, 511 unique unregistered external
-method surfaces, 0 omitted invocations, and 0 unsupported opcodes. These are
-static prioritization results, not a compatibility percentage or runtime proof.
+The seven exact current-lib-1.6 executable profiles are BatCave, Kawii Manga,
+MangaMelon, Baozi Manhua, TuttoAnimeManga, Mangas-Origines.fr, and
+Komikcast/VoraToon. The current deterministic measurement baseline analyzed
+12/12 remaining artifacts, with 8 structural candidates, four stable-wrapper
+blockers, 484 unique unregistered external method surfaces, 0 omitted
+invocations, and 0 unsupported opcodes. These are static prioritization
+results, not a compatibility percentage or runtime proof.
 
 The fourth exact current-lib executable profile is Baozi Manhua 1.6.29
 (`eu.kanade.tachiyomi.extension.zh.baozimanhua`, version code 29). Its exact
@@ -72,6 +73,32 @@ and page-URL image requests with `Referer`/`Origin` headers. This exact profile
 has no source-executed image-interceptor capability; its evidence is limited to
 the locked APK and its proven page-URL image path.
 
+The seventh exact current-lib executable profile is Komikcast/VoraToon 1.6.83
+(`eu.kanade.tachiyomi.extension.id.komikcast`, version code 83). Its exact
+fixture is `komikcast.apk`, admitted only for SHA-256
+`9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac`, v2 signer
+fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, matching
+manifest identity, and declared source ID `972717448578983812`. Its base URL is
+`https://v1.voratoon.com` and its JSON API is `https://api.voratoon.com`.
+The exact series URL `https://v1.voratoon.com/series/demo` is also proven to
+route through the bounded API detail path via `CollectionsKt.getOrNull`.
+Deterministic real-APK regressions cover metadata, popular/latest/text and
+filtered search, details, chapters, pages, and exact custom image headers. The
+image projection uses `Referer: https://v1.voratoon.com/`,
+`Origin: https://v1.voratoon.com`,
+`Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8`, and
+`Accept-language: en-US,en;q=0.9,id;q=0.8`. The
+filter schema contains static `Sort`, `Sort Order`, `Status`, `Format`, and
+`Type` filters plus a dynamic `Genre` group fetched from `/genres`; bounded
+fixtures cover retry after a transient 503, source-private in-memory cache
+reuse, concurrent refresh coalescing, ordinary search queued behind refresh,
+and fail-closed tamper/schema/preferences. The cache's zstd stream is a logical
+source-internal identity only; it is not native zstd decompression or persistent
+cross-launch storage. The profile does not claim live-site,
+Cloudflare/challenge, source-scoped image-interceptor/transform, or arbitrary
+dynamic-filter compatibility.
+
 On the downloaded-app path, the source factory preflights the exact profile
 source-ID set before DEX construction and postvalidates the IDs returned by the
 constructed source. Raw exact-profile constructors are intentionally limited to
@@ -100,9 +127,9 @@ All 27 exact APK fixtures are vendored so clean clones and CI remain
 deterministic even when upstream rotates release objects. The 21 Keiyoushi APKs
 are Apache-2.0 test inputs with attribution in
 `KEIYOUSHI-EXTENSIONS-NOTICE.md`; they are not linked into or shipped by the
-iOS app. The signer regression covers all eight real Keiyoushi execution APKs:
+iOS app. The signer regression covers all nine real Keiyoushi execution APKs:
 Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, Baozi Manhua,
-TuttoAnimeManga, and Mangas-Origines.fr.
+TuttoAnimeManga, Mangas-Origines.fr, and Komikcast.
 Verify every pinned byte sequence with:
 
 ```sh

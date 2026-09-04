@@ -99,7 +99,7 @@ measurement/foolslidecustomizable|https://github.com/keiyoushi/extensions/releas
 measurement/doctruyen3q|https://github.com/keiyoushi/extensions/releases/download/a18924b/tachiyomi-vi.doctruyen3q-v1.6.38.apk|3fe67ce34b42c4cb7b193a9536a27ae1b3f41805a866489e82797f56aad4c0a0
 measurement/readmanga|https://github.com/keiyoushi/extensions/releases/download/a76c957-2/tachiyomi-ru.readmanga-v1.6.89.apk|c19c626ca9e34e113ab871aadfe19566a441669644f77a38793a0dd5dab7a00a
 measurement/sssscanlator|https://github.com/keiyoushi/extensions/releases/download/4277105/tachiyomi-pt.sssscanlator-v1.6.59.apk|2d7dfad2d4d293c58414b8905c6bcf454bcfb1a2bb6650a50d7480b0b9597883
-measurement/komikcast|https://github.com/keiyoushi/extensions/releases/download/01cba61/tachiyomi-id.komikcast-v1.6.83.apk|9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac
+komikcast|https://github.com/keiyoushi/extensions/releases/download/01cba61/tachiyomi-id.komikcast-v1.6.83.apk|9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac
 measurement/pixivcomic|https://github.com/keiyoushi/extensions/releases/download/acab221/tachiyomi-ja.pixivcomic-v1.6.4.apk|86efecdc38f5aca875da0abd5e6f2a8449ca3b06682a3c81f262fab787bb3d71
 mangasoriginesfr|https://github.com/keiyoushi/extensions/releases/download/66535bd/tachiyomi-fr.mangasoriginesfr-v1.6.58.apk|b6922bbc5ddc376b50cdcd71123410af96cfddb0d0d6a493a1b50a9363cc718b
 measurement/mangaplus|https://github.com/keiyoushi/extensions/releases/download/a76c957-0/tachiyomi-all.mangaplus-v1.6.65.apk|a9211fc852cb602107e0d6f8657c2fc7ae8154fc391c386b0a3f79e3f48d4126
