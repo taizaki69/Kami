@@ -17,7 +17,7 @@ Tests/corpus/**/*.apk
 !Tests/corpus/measurement/foolslidecustomizable.apk
 !Tests/corpus/measurement/doctruyen3q.apk
 !Tests/corpus/measurement/readmanga.apk
-!Tests/corpus/measurement/sssscanlator.apk
+!Tests/corpus/sssscanlator.apk
 !Tests/corpus/measurement/komikcast.apk
 !Tests/corpus/measurement/pixivcomic.apk
 !Tests/corpus/mangasoriginesfr.apk

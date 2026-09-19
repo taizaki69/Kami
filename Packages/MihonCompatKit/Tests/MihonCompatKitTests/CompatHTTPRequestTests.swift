@@ -503,6 +503,619 @@ final class CompatHTTPRequestTests: XCTestCase {
         }
     }
 
+    func testGeneratedSerializerBoundsDescriptorsAndPropagatesJSONModes() throws {
+        let generatedSerializer = "LTestGeneratedSerializer;"
+        let generatedDescriptor = "Lkotlinx/serialization/internal/PluginGeneratedSerialDescriptor;"
+        let serialDescriptor = "Lkotlinx/serialization/descriptors/SerialDescriptor;"
+        let serializer = "Lkotlinx/serialization/KSerializer;"
+        let decoder = "Lkotlinx/serialization/encoding/Decoder;"
+        let compositeDecoder = "Lkotlinx/serialization/encoding/CompositeDecoder;"
+        let stringSerializer = "Lkotlinx/serialization/internal/StringSerializer;"
+        let intSerializer = "Lkotlinx/serialization/internal/IntSerializer;"
+
+        var builder = DexBuilder()
+        let descriptorInit = builder.method(
+            classDescriptor: generatedDescriptor,
+            name: "<init>",
+            shorty: "VLLI",
+            ret: "V",
+            parameters: [
+                "Ljava/lang/String;",
+                "Lkotlinx/serialization/internal/GeneratedSerializer;",
+                "I",
+            ]
+        )
+        let addElement = builder.method(
+            classDescriptor: generatedDescriptor,
+            name: "addElement",
+            shorty: "VLZ",
+            ret: "V",
+            parameters: ["Ljava/lang/String;", "Z"]
+        )
+        let nullableFactory = builder.method(
+            classDescriptor: "Lkotlinx/serialization/builtins/BuiltinSerializersKt;",
+            name: "getNullable",
+            shorty: "LL",
+            ret: serializer,
+            parameters: [serializer]
+        )
+        let beginStructure = builder.method(
+            classDescriptor: decoder,
+            name: "beginStructure",
+            shorty: "LL",
+            ret: compositeDecoder,
+            parameters: [serialDescriptor]
+        )
+        let decodeElementIndex = builder.method(
+            classDescriptor: compositeDecoder,
+            name: "decodeElementIndex",
+            shorty: "IL",
+            ret: "I",
+            parameters: [serialDescriptor]
+        )
+        let decodeStringElement = builder.method(
+            classDescriptor: compositeDecoder,
+            name: "decodeStringElement",
+            shorty: "LLI",
+            ret: "Ljava/lang/String;",
+            parameters: [serialDescriptor, "I"]
+        )
+        let decodeNullableElement = builder.method(
+            classDescriptor: compositeDecoder,
+            name: "decodeNullableSerializableElement",
+            shorty: "LLILL",
+            ret: "Ljava/lang/Object;",
+            parameters: [
+                serialDescriptor, "I",
+                "Lkotlinx/serialization/DeserializationStrategy;",
+                "Ljava/lang/Object;",
+            ]
+        )
+        let endStructure = builder.method(
+            classDescriptor: compositeDecoder,
+            name: "endStructure",
+            shorty: "VL",
+            ret: "V",
+            parameters: [serialDescriptor]
+        )
+        let stringField = builder.field(
+            classDescriptor: stringSerializer,
+            name: "INSTANCE",
+            typeDescriptor: serializer
+        )
+        let intField = builder.field(
+            classDescriptor: intSerializer,
+            name: "INSTANCE",
+            typeDescriptor: serializer
+        )
+        let nullField = builder.field(
+            classDescriptor: "Ljava/lang/Object;",
+            name: "NULL",
+            typeDescriptor: "Ljava/lang/Object;"
+        )
+        let generatedDescriptorType = builder.type(generatedDescriptor)
+        let serializerArrayType = builder.type("[\(serializer)")
+        let modelName = builder.string("Test.Model")
+        let titleName = builder.string("title")
+        let rankName = builder.string("rank")
+
+        builder.setClass(
+            generatedSerializer,
+            interfaces: [
+                serializer,
+                "Lkotlinx/serialization/internal/GeneratedSerializer;",
+            ]
+        )
+        let getDescriptor = builder.addMethod(.init(
+            name: "getDescriptor",
+            registers: 8,
+            ins: 1,
+            outs: 4,
+            insns: Insn.newInstance(0, generatedDescriptorType)
+                + Insn.constString(1, modelName)
+                + Insn.const4Units(2, 2)
+                + Insn.invokeDirect(descriptorInit, [0, 1, 7, 2])
+                + Insn.constString(3, titleName)
+                + Insn.const4Units(4, 0)
+                + Insn.invokeVirtual(addElement, [0, 3, 4])
+                + Insn.constString(5, rankName)
+                + Insn.const4Units(6, 1)
+                + Insn.invokeVirtual(addElement, [0, 5, 6])
+                + Insn.returnObjectReg(0),
+            isStatic: false,
+            returnType: serialDescriptor
+        ))
+        let childSerializers = builder.addMethod(.init(
+            name: "childSerializers",
+            registers: 4,
+            ins: 1,
+            outs: 1,
+            insns: Insn.sget(0, stringField, object: true)
+                + Insn.sget(1, intField, object: true)
+                + Insn.invokeStatic(nullableFactory, [1])
+                + Insn.moveResultObject(1)
+                + Insn.const4Units(2, 2)
+                + Insn.newArray(3, 2, serializerArrayType)
+                + Insn.const4Units(2, 0)
+                + Insn.aput(0, 3, 2, object: true)
+                + Insn.const4Units(2, 1)
+                + Insn.aput(1, 3, 2, object: true)
+                + Insn.returnObjectReg(3),
+            isStatic: false,
+            returnType: "[\(serializer)"
+        ))
+        builder.addMethod(.init(
+            name: "deserialize",
+            registers: 10,
+            ins: 2,
+            outs: 5,
+            insns: Insn.invokeVirtual(getDescriptor, [8])
+                + Insn.moveResultObject(0)
+                + Insn.invokeInterface(beginStructure, [9, 0])
+                + Insn.moveResultObject(1)
+                + Insn.invokeInterface(decodeElementIndex, [1, 0])
+                + Insn.moveResult(2)
+                + Insn.invokeInterface(decodeStringElement, [1, 0, 2])
+                + Insn.moveResultObject(3)
+                + Insn.invokeVirtual(childSerializers, [8])
+                + Insn.moveResultObject(4)
+                + Insn.const4Units(5, 1)
+                + Insn.aget(6, 4, 5, object: true)
+                + Insn.const4Units(5, 1)
+                + Insn.sget(7, nullField, object: true)
+                + Insn.invokeInterface(decodeNullableElement, [1, 0, 5, 6, 7])
+                + Insn.moveResultObject(3)
+                + Insn.invokeInterface(endStructure, [1, 0])
+                + Insn.returnObjectReg(3),
+            isStatic: false,
+            returnType: "Ljava/lang/Object;",
+            parameters: [decoder]
+        ))
+
+        let bridge = HostBridge.minimal()
+        bridge.staticFields["Ljava/lang/Object;->NULL"] = .null
+        let vm = DexInterpreter(dex: try DexFile(builder.build()), bridge: bridge)
+        let serializerValue = try vm.instantiate(classDescriptor: generatedSerializer)
+
+        func assertDEXFailure(_ body: () throws -> Void) {
+            XCTAssertThrowsError(try body()) { error in
+                XCTAssertTrue(error is DEXThrowable, "expected DEX throwable, got \(error)")
+            }
+        }
+
+        let incomplete = RVal.obj(ObjInstance(dexType: generatedDescriptor, isHost: true))
+        _ = try invoke(
+            bridge, vm,
+            class: generatedDescriptor, "<init>",
+            prototype: "(Ljava/lang/String;Lkotlinx/serialization/internal/GeneratedSerializer;I)V",
+            args: [
+                incomplete,
+                HostBridge.string("Broken.Model"),
+                serializerValue,
+                .int(2),
+            ]
+        )
+        _ = try invoke(
+            bridge, vm,
+            class: generatedDescriptor, "addElement",
+            prototype: "(Ljava/lang/String;Z)V",
+            args: [incomplete, HostBridge.string("title"), .int(0)]
+        )
+        assertDEXFailure {
+            _ = try invoke(
+                bridge, vm,
+                class: serialDescriptor, "getElementsCount",
+                prototype: "()I",
+                args: [incomplete]
+            )
+        }
+        assertDEXFailure {
+            _ = try invoke(
+                bridge, vm,
+                class: generatedDescriptor, "addElement",
+                prototype: "(Ljava/lang/String;Z)V",
+                args: [incomplete, HostBridge.string("title"), .int(1)]
+            )
+        }
+
+        let descriptor = try vm.call(
+            classDescriptor: generatedSerializer,
+            method: "getDescriptor",
+            prototype: "()\(serialDescriptor)",
+            args: [serializerValue]
+        )
+        let count = try invoke(
+            bridge, vm,
+            class: serialDescriptor, "getElementsCount",
+            prototype: "()I",
+            args: [descriptor]
+        )
+        let firstName = try invoke(
+            bridge, vm,
+            class: serialDescriptor, "getElementName",
+            prototype: "(I)Ljava/lang/String;",
+            args: [descriptor, .int(0)]
+        )
+        let secondName = try invoke(
+            bridge, vm,
+            class: serialDescriptor, "getElementName",
+            prototype: "(I)Ljava/lang/String;",
+            args: [descriptor, .int(1)]
+        )
+        let secondOptional = try invoke(
+            bridge, vm,
+            class: serialDescriptor, "isElementOptional",
+            prototype: "(I)Z",
+            args: [descriptor, .int(1)]
+        )
+        guard case let .int(rawCount) = count,
+              case let .int(rawOptional) = secondOptional else {
+            return XCTFail("expected generated descriptor metadata")
+        }
+        XCTAssertEqual(rawCount, 2)
+        XCTAssertEqual(vmStringValue(firstName), "title")
+        XCTAssertEqual(vmStringValue(secondName), "rank")
+        XCTAssertEqual(rawOptional, 1)
+
+        let rankDescriptor = try invoke(
+            bridge, vm,
+            class: serialDescriptor, "getElementDescriptor",
+            prototype: "(I)Lkotlinx/serialization/descriptors/SerialDescriptor;",
+            args: [descriptor, .int(1)]
+        )
+        let rankNullable = try invoke(
+            bridge, vm,
+            class: serialDescriptor, "isNullable",
+            prototype: "()Z",
+            args: [rankDescriptor]
+        )
+        guard case let .int(rawRankNullable) = rankNullable else {
+            return XCTFail("expected nullable child descriptor")
+        }
+        XCTAssertEqual(rawRankNullable, 1)
+
+        let json = RVal.obj(ObjInstance(
+            dexType: "Lkotlinx/serialization/json/Json;",
+            isHost: true
+        ))
+        let decodePrototype = "(Lkotlinx/serialization/DeserializationStrategy;Ljava/lang/String;)Ljava/lang/Object;"
+        let strictInput = HostBridge.string(#"{"title":"Hero","rank":null,"ignored":true}"#)
+        XCTAssertThrowsError(try invoke(
+            bridge, vm,
+            class: "Lkotlinx/serialization/json/Json;", "decodeFromString",
+            prototype: decodePrototype,
+            args: [json, serializerValue, strictInput]
+        )) { error in
+            guard let throwable = error as? DEXThrowable,
+                  case let .obj(object) = throwable.value else {
+                return XCTFail("expected strict unknown-key serialization failure, got \(error)")
+            }
+            XCTAssertEqual(object.dexType, "Lkotlinx/serialization/SerializationException;")
+        }
+
+        let factory = RVal.obj(ObjInstance(
+            dexType: "Luy/kohesive/injekt/api/InjektFactory;",
+            isHost: true
+        ))
+        let type = RVal.obj(ObjInstance(dexType: "Ljava/lang/reflect/Type;", isHost: true))
+        let lenientJSON = try invoke(
+            bridge, vm,
+            class: "Luy/kohesive/injekt/api/InjektFactory;", "getInstance",
+            prototype: "(Ljava/lang/reflect/Type;)Ljava/lang/Object;",
+            args: [factory, type]
+        )
+        let decodedNull = try invoke(
+            bridge, vm,
+            class: "Lkotlinx/serialization/json/Json;", "decodeFromString",
+            prototype: decodePrototype,
+            args: [lenientJSON, serializerValue, strictInput]
+        )
+        XCTAssertTrue(decodedNull.isNull)
+
+        let decodedRank = try invoke(
+            bridge, vm,
+            class: "Lkotlinx/serialization/json/Json;", "decodeFromString",
+            prototype: decodePrototype,
+            args: [
+                lenientJSON,
+                serializerValue,
+                HostBridge.string(#"{"title":"Hero","rank":7,"ignored":true}"#),
+            ]
+        )
+        guard case let .obj(boxedRank) = decodedRank else {
+            return XCTFail("expected boxed nullable rank")
+        }
+        XCTAssertEqual(boxedRank.payload as? Int32, 7)
+    }
+
+    func testJsonElementsKeepConcreteTypesAcrossArrayAndObjectViews() throws {
+        let (vm, bridge) = try makeVM()
+        let json = RVal.obj(ObjInstance(
+            dexType: "Lkotlinx/serialization/json/Json;",
+            isHost: true
+        ))
+        let jsonObject = "Lkotlinx/serialization/json/JsonObject;"
+        let jsonArray = "Lkotlinx/serialization/json/JsonArray;"
+        let jsonElement = "Lkotlinx/serialization/json/JsonElement;"
+        let jsonPrimitive = "Lkotlinx/serialization/json/JsonPrimitive;"
+        let elementKt = "Lkotlinx/serialization/json/JsonElementKt;"
+        let arrayGet = "(I)\(jsonElement)"
+        let primitiveCast = "(Lkotlinx/serialization/json/JsonElement;)\(jsonPrimitive)"
+
+        func call(
+            _ descriptor: String,
+            _ name: String,
+            prototype: String,
+            args: [RVal],
+            isStatic: Bool = false
+        ) throws -> RVal {
+            try invoke(
+                bridge, vm,
+                class: descriptor,
+                name,
+                prototype: prototype,
+                isStatic: isStatic,
+                args: args
+            )
+        }
+        func intValue(_ value: RVal, _ message: String = "expected host integer") throws -> Int32 {
+            guard case let .int(result) = value else {
+                throw VMError.verify(message)
+            }
+            return result
+        }
+        func next(_ iterator: RVal) throws -> RVal {
+            try call(
+                "Ljava/util/Iterator;", "next",
+                prototype: "()Ljava/lang/Object;",
+                args: [iterator]
+            )
+        }
+        func primitive(_ element: RVal) throws -> RVal {
+            try call(
+                elementKt, "getJsonPrimitive",
+                prototype: primitiveCast,
+                args: [element],
+                isStatic: true
+            )
+        }
+
+        let parsed = try call(
+            "Lkotlinx/serialization/json/Json;", "parseToJsonElement",
+            prototype: "(Ljava/lang/String;)\(jsonElement)",
+            args: [json, HostBridge.string(#"{"title":"Hero","chapters":["1",null,2]}"#)]
+        )
+        let object = try call(
+            elementKt, "getJsonObject",
+            prototype: "(Lkotlinx/serialization/json/JsonElement;)\(jsonObject)",
+            args: [parsed],
+            isStatic: true
+        )
+        XCTAssertTrue(object === parsed)
+        XCTAssertEqual(try intValue(try call(
+            jsonObject, "containsKey",
+            prototype: "(Ljava/lang/Object;)Z",
+            args: [object, HostBridge.string("title")]
+        )), 1)
+        XCTAssertEqual(try intValue(try call(
+            jsonObject, "containsKey",
+            prototype: "(Ljava/lang/Object;)Z",
+            args: [object, HostBridge.string("missing")]
+        )), 0)
+
+        let chapterElement = try call(
+            jsonObject, "get",
+            prototype: "(Ljava/lang/Object;)Ljava/lang/Object;",
+            args: [object, HostBridge.string("chapters")]
+        )
+        let array = try call(
+            elementKt, "getJsonArray",
+            prototype: "(Lkotlinx/serialization/json/JsonElement;)\(jsonArray)",
+            args: [chapterElement],
+            isStatic: true
+        )
+        XCTAssertTrue(array === chapterElement)
+        XCTAssertEqual(try intValue(try call(
+            jsonArray, "size",
+            prototype: "()I",
+            args: [array]
+        )), 3)
+        XCTAssertEqual(try intValue(try call(
+            "Ljava/util/List;", "size",
+            prototype: "()I",
+            args: [array]
+        )), 3)
+
+        let first = try call(jsonArray, "get", prototype: arrayGet, args: [array, .int(0)])
+        let firstViaList = try call(
+            "Ljava/util/List;", "get",
+            prototype: "(I)Ljava/lang/Object;",
+            args: [array, .int(0)]
+        )
+        XCTAssertEqual(vmStringValue(try call(
+            jsonPrimitive, "getContent",
+            prototype: "()Ljava/lang/String;",
+            args: [try primitive(first)]
+        )), "1")
+        XCTAssertEqual(vmStringValue(try call(
+            jsonPrimitive, "getContent",
+            prototype: "()Ljava/lang/String;",
+            args: [try primitive(firstViaList)]
+        )), "1")
+
+        let nullElement = try call(jsonArray, "get", prototype: arrayGet, args: [array, .int(1)])
+        XCTAssertTrue(try call(
+            elementKt, "getContentOrNull",
+            prototype: "(Lkotlinx/serialization/json/JsonPrimitive;)Ljava/lang/String;",
+            args: [try primitive(nullElement)],
+            isStatic: true
+        ).isNull)
+        let numberElement = try call(jsonArray, "get", prototype: arrayGet, args: [array, .int(2)])
+        XCTAssertEqual(vmStringValue(try call(
+            jsonPrimitive, "getContent",
+            prototype: "()Ljava/lang/String;",
+            args: [try primitive(numberElement)]
+        )), "2")
+
+        // Rendering must preserve JSON member order and scalar types instead
+        // of falling back to a host object's diagnostic description.
+        for (descriptor, value, expected) in [
+            (jsonObject, object, #"{"title":"Hero","chapters":["1",null,2]}"#),
+            (jsonArray, array, #"["1",null,2]"#),
+            (jsonPrimitive, first, #""1""#),
+            (jsonPrimitive, numberElement, "2"),
+            ("Lkotlinx/serialization/json/JsonNull;", nullElement, "null"),
+        ] {
+            XCTAssertEqual(vmStringValue(try call(
+                descriptor, "toString",
+                prototype: "()Ljava/lang/String;",
+                args: [value]
+            )), expected)
+        }
+
+        let entries = try call(
+            "Ljava/util/Map;", "entrySet",
+            prototype: "()Ljava/util/Set;",
+            args: [object]
+        )
+        let entryIterator = try call(
+            "Ljava/lang/Iterable;", "iterator",
+            prototype: "()Ljava/util/Iterator;",
+            args: [entries]
+        )
+        for expected in ["title", "chapters"] {
+            let entry = try next(entryIterator)
+            XCTAssertEqual(vmStringValue(try call(
+                "Ljava/util/Map$Entry;", "getKey",
+                prototype: "()Ljava/lang/Object;",
+                args: [entry]
+            )), expected)
+        }
+
+        let values = try call(
+            jsonObject, "values",
+            prototype: "()Ljava/util/Collection;",
+            args: [object]
+        )
+        let valueIterator = try call(
+            "Ljava/lang/Iterable;", "iterator",
+            prototype: "()Ljava/util/Iterator;",
+            args: [values]
+        )
+        let firstValue = try next(valueIterator)
+        let secondValue = try next(valueIterator)
+        guard case let .obj(firstValueObject) = firstValue,
+              case let .obj(secondValueObject) = secondValue else {
+            return XCTFail("expected concrete JSON object values")
+        }
+        XCTAssertEqual(firstValueObject.dexType, jsonPrimitive)
+        XCTAssertEqual(secondValueObject.dexType, jsonArray)
+
+        let constructorList = try call(
+            "Lkotlin/collections/CollectionsKt;", "listOf",
+            prototype: "([Ljava/lang/Object;)Ljava/util/List;",
+            args: [.arr(ArrInstance(
+                elemDescriptor: jsonElement,
+                elements: [first, nullElement]
+            ))],
+            isStatic: true
+        )
+        let arrayCopy = RVal.obj(ObjInstance(dexType: jsonArray, isHost: true))
+        _ = try call(
+            jsonArray, "<init>",
+            prototype: "(Ljava/util/List;)V",
+            args: [arrayCopy, constructorList]
+        )
+        XCTAssertEqual(try intValue(try call(
+            jsonArray, "size",
+            prototype: "()I",
+            args: [arrayCopy]
+        )), 2)
+
+        let rawMap = RVal.obj(ObjInstance(
+            dexType: "Ljava/util/LinkedHashMap;",
+            isHost: true
+        ))
+        _ = try call(
+            "Ljava/util/LinkedHashMap;", "<init>",
+            prototype: "()V",
+            args: [rawMap]
+        )
+        _ = try call(
+            "Ljava/util/Map;", "put",
+            prototype: "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+            args: [rawMap, HostBridge.string("title"), first]
+        )
+        _ = try call(
+            "Ljava/util/Map;", "put",
+            prototype: "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+            args: [rawMap, HostBridge.string("chapters"), array]
+        )
+        let objectCopy = RVal.obj(ObjInstance(dexType: jsonObject, isHost: true))
+        _ = try call(
+            jsonObject, "<init>",
+            prototype: "(Ljava/util/Map;)V",
+            args: [objectCopy, rawMap]
+        )
+        XCTAssertEqual(try intValue(try call(
+            "Ljava/util/Map;", "size",
+            prototype: "()I",
+            args: [objectCopy]
+        )), 2)
+        let copiedArray = try call(
+            elementKt, "getJsonArray",
+            prototype: "(Lkotlinx/serialization/json/JsonElement;)\(jsonArray)",
+            args: [try call(
+                jsonObject, "get",
+                prototype: "(Ljava/lang/Object;)Ljava/lang/Object;",
+                args: [objectCopy, HostBridge.string("chapters")]
+            )],
+            isStatic: true
+        )
+        XCTAssertEqual(try intValue(try call(
+            jsonArray, "size",
+            prototype: "()I",
+            args: [copiedArray]
+        )), 3)
+
+        XCTAssertThrowsError(try call(
+            jsonArray, "get",
+            prototype: arrayGet,
+            args: [array, .int(3)]
+        )) { error in
+            guard let throwable = error as? DEXThrowable,
+                  case let .obj(object) = throwable.value else {
+                return XCTFail("expected JsonArray bounds failure, got \(error)")
+            }
+            XCTAssertEqual(object.dexType, "Ljava/lang/IndexOutOfBoundsException;")
+        }
+
+        // The ordered scanner must retain the response parser's resource
+        // limits, including repeated keys that collapse to one map entry.
+        let rejectedInputs: [(String, CompatHTMLPolicy)] = [
+            (#"{"x":[1,]}"#, .init()),
+            (#"{"x":"\u12"}"#, .init()),
+            ("[1,[2]]", .init(maximumDepth: 2)),
+            ("[0,1]", .init(maximumNodes: 2)),
+            (#"{"x":0,"x":1}"#, .init(maximumAttributes: 1)),
+        ]
+        for (text, policy) in rejectedInputs {
+            let (limitedVM, limitedBridge) = try makeVM(htmlPolicy: policy)
+            XCTAssertThrowsError(try invoke(
+                limitedBridge, limitedVM,
+                class: "Lkotlinx/serialization/json/Json;", "parseToJsonElement",
+                prototype: "(Ljava/lang/String;)\(jsonElement)",
+                args: [json, HostBridge.string(text)]
+            )) { error in
+                guard let throwable = error as? DEXThrowable,
+                      case let .obj(object) = throwable.value else {
+                    return XCTFail("expected bounded JSON failure, got \(error)")
+                }
+                XCTAssertEqual(object.dexType, "Lkotlinx/serialization/SerializationException;")
+            }
+        }
+    }
+
     func testChapterScanlatorBridgePreservesTheCombinedPizzaReaderCredit() throws {
         let (vm, bridge) = try makeVM()
         let chapter = HostBridge.chapterValue(from: SChapterCompat(

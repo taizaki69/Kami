@@ -132,7 +132,8 @@ MihonCompatKit, never in the app.
 
 The executable catalog is deliberately exact rather than heuristic. It
 currently contains BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1,
-Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10, and Mangas-Origines.fr 1.6.58.
+Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10, Mangas-Origines.fr 1.6.58,
+Komikcast/VoraToon 1.6.83, and Yomu Comics/SSSCanlator 1.6.59.
 Baozi is admitted only when
 the APK's SHA-256
 (`7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec`), signer
@@ -160,21 +161,25 @@ authenticated manifest, and source ID (`4803238581797687746`) match. Its
 tested scope is metadata, seven static filters, ordered POST popular/latest/
 search, details, chapters, pages, and page-URL image requests carrying
 `Referer`/`Origin`; it has no source-executed image-interceptor capability.
-The remaining 13 current lib 1.6 measurement artifacts are measurement
+Komikcast and Yomu add exact dynamic genre filter paths. Yomu also proves
+its `pt-BR` metadata, Next.js RSC extraction, URL-shaped search, decoy-list
+rejection, and 30-result pagination. Both preserve the same exact hash, signer,
+manifest, and source-ID gates; Yomu uses the ordinary page-URL image path.
+The remaining 11 current lib 1.6 measurement artifacts are measurement
 evidence, not automatic admission or a compatibility percentage. For the
 downloaded path, the exact source-ID set is checked before DEX construction
 and again after
 profile construction; `SourceRegistry` removal is package-owner scoped, so
 disabling one extension cannot remove another package's source ID.
 
-The locked corpus currently contains 27 artifacts: 8 execution, 13 measurement,
+The locked corpus currently contains 27 artifacts: 10 execution, 11 measurement,
 and 6 AOSP conformance fixtures; 19 are current lib 1.6 artifacts. The current
-measurement audit covers 13/13 artifacts and reports 9 structural candidates,
-4 stable-wrapper blockers, 511 unique unregistered external method surfaces,
-0 omitted invocations, and 0 unsupported opcodes. Komikcast (42 unresolved
-surfaces) is only a prioritization signal for the next measured candidate.
-Current Windows verification is 254/254 MihonCompatKit tests and 17/17 KamiCore
-tests.
+measurement audit covers 11/11 artifacts and reports 7 structural candidates,
+4 stable-wrapper blockers, 432 unique unregistered external method surfaces,
+0 omitted invocations, and 0 unsupported opcodes. Static ranking guides the
+next probe without granting admission. Current Windows verification is
+262/262 MihonCompatKit tests and 18/18 portable KamiCore tests; exact-head
+macOS/iOS evidence is recorded in HANDOFF.md.
 
 ## Concurrency model
 - UI: SwiftUI + `@MainActor` observable models.

@@ -19,17 +19,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 - [x] `compat-audit` CLI (inspect/missing/index/methods/disasm/opcodes/plan/gaps) —
       deterministic file and directory inspection, run on the locked corpus
 - [x] SHA/URL-locked behavior-stratified current lib 1.6 measurement corpus —
-      12 measurement-only Keiyoushi APKs under `Tests/corpus/measurement/`,
-      alongside 9 execution and 6 AOSP conformance fixtures (27 total; 19
-      current lib 1.6 artifacts). The current measurement audit covers all 12/12
-      remaining measurement APKs: 8 structural candidates with 484 unique
+      11 measurement-only Keiyoushi APKs under `Tests/corpus/measurement/`,
+      alongside 10 execution and 6 AOSP conformance fixtures (27 total; 19
+      current lib 1.6 artifacts). The current measurement audit covers all 11/11
+      remaining measurement APKs: 7 structural candidates with 432 unique
       unregistered external method surfaces, zero omitted invocations, and zero
       unsupported opcodes. This is prioritization evidence, not a statistical
       sample or execution/admission proof. Current Windows verification through
-      the checked-in helper passes 255/255 MihonCompatKit and 18/18 portable
+      the checked-in helper passes 262/262 MihonCompatKit and 18/18 portable
       KamiCore tests; historical test counts remain documented in the
-      compatibility-matrix evidence. Komikcast is now an exact execution profile
-      rather than a measurement candidate.
+      compatibility-matrix evidence. Komikcast and Yomu Comics are now exact
+      execution profiles rather than measurement candidates.
 
 ## P0 — App foundation
 
@@ -62,7 +62,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 - [~] Kotlin/Java class library M2 — Object/String/StringBuilder, core Kotlin
       ABI, bounded collections, atomics, reflection, and Mihon filters cover
       the pinned BatCave, Kawii, MangaMelon, Baozi, TuttoAnimeManga,
-      Mangas-Origines.fr, and Komikcast/VoraToon request paths; bounded
+      Mangas-Origines.fr, Komikcast/VoraToon, and Yomu request paths; bounded
       form/header/URL/cache/request/
       call models, Kotlin duration shims, async frame resumption, source-scoped
       transport, response/body/Okio values, bounded Jsoup document/element/CSS
@@ -81,19 +81,21 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       page-URL image requests with `Referer`/`Origin`; Komikcast/VoraToon
       additionally proves static `Sort`/`Sort Order`/`Status`/`Format`/`Type`
       filters plus bounded dynamic `Genre` fetch/retry/cache/concurrency and
-      exact custom image headers through its JSON API. Its source-private
-      in-memory virtual cache preserves logical zstd stream identity only; it
-      is not native zstd or persistent cross-launch storage. Arbitrary dynamic
+      exact custom image headers through its JSON API; Yomu additionally proves
+      bounded dynamic `Gênero` refresh, Next.js RSC parsing, URL-shaped search,
+      strict-majority decoy filtering, and page-URL image headers. The dynamic
+      caches are source-private and in-memory; their logical stream identities
+      are not native zstd or persistent cross-launch storage. Arbitrary dynamic
       filters and the measured long tail remain open.
 - [~] tachiyomix API bridge M3 (`HttpSource` → `KamiSource`) — the exact pinned
       BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, Baozi Manhua
-      1.6.29, TuttoAnimeManga 1.6.10, Mangas-Origines.fr 1.6.58, and
-      Komikcast/VoraToon 1.6.83 profiles
+      1.6.29, TuttoAnimeManga 1.6.10, Mangas-Origines.fr 1.6.58,
+      Komikcast/VoraToon 1.6.83, and Yomu Comics 1.6.59 profiles
       implement the measured app-facing contract through stable
       public wrappers; static
       `Sort`/`Select` filters, Baozi's bounded scalar preferences and interpreted
       custom image request, Mangas-Origines.fr's seven-filter/page-URL path, and
-      Komikcast's bounded dynamic `Genre` path
+      Komikcast's and Yomu's bounded dynamic genre paths
       are proven; arbitrary dynamic/network-backed filters, production preference
       UI/persistence, source-executed image interceptors for page-URL profiles,
       and broader runtime coverage remain open
@@ -137,8 +139,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       discovery checks manifest identity, supported lib version, single-source
       and single-DEX shape, absence of native `.so` entries, entry placement,
       and stable public wrappers without executing or admitting unknown APKs;
-      the seven exact profiles and all 12 remaining measurement APKs produce
-      deterministic results: 8 measurement candidates, 484 unique
+      the eight exact profiles and all 11 remaining measurement APKs produce
+      deterministic results: 7 measurement candidates, 432 unique
       unregistered surfaces, zero omitted invocations, zero unsupported
       opcodes, and four stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx,
       and XCOMIC); legacy lib 1.4 specimens remain explicit blockers
@@ -186,6 +188,21 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       not native zstd or persistent cross-launch storage. Live-site,
       Cloudflare/challenge, source-scoped image-interceptor/transform, and
       arbitrary dynamic-filter compatibility remain unclaimed.
+- [x] Expand the exact catalog with an eighth current extension — Yomu Comics /
+      SSSCanlator 1.6.59 (metadata identity `Yomu Comics` / `pt-BR` /
+      `https://yomu.com.br`) is admitted by exact package
+      `eu.kanade.tachiyomi.extension.pt.sssscanlator`, version code `59`,
+      SHA-256
+      `2d7dfad2d4d293c58414b8905c6bcf454bcfb1a2bb6650a50d7480b0b9597883`,
+      v2 signer
+      `9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`,
+      manifest, and source ID `1497838059713668619`. Deterministic real-APK
+      regressions prove metadata, popular/latest/text and edited-filter search,
+      dynamic `Gênero` refresh, Next.js RSC details/chapters/pages, URL-shaped
+      search, strict-majority decoy filtering, exact pagination, and inherited
+      page-URL image headers. Live-site, Cloudflare/challenge, custom image
+      transforms, source-scoped reader interceptors, and arbitrary dynamic-filter
+      compatibility remain unclaimed.
 - [x] Execute source-defined OkHttp application and network interceptors for
       source operations through a bounded source-scoped chain. It preserves
       exact DEX `Request` identity/tags and registration/unwind order, enforces

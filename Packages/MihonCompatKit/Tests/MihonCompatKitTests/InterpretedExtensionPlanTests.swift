@@ -60,6 +60,13 @@ final class InterpretedExtensionPlanTests: XCTestCase {
                 83,
                 "Leu/kanade/tachiyomi/extension/id/komikcast/ExtensionGenerated;"
             ),
+            (
+                "sssscanlator",
+                "eu.kanade.tachiyomi.extension.pt.sssscanlator",
+                "1.6.59",
+                59,
+                "Lu;"
+            ),
         ]
         let inspector = InterpretedExtensionPlanInspector()
 

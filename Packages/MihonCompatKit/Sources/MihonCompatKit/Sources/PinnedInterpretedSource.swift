@@ -305,6 +305,38 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         )
     }
 
+    /// Loads the exact current Yomu Comics/SSSCanlator 1.6.59 artifact through production transport.
+    public static func yomuComics1659(
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        let profile = PinnedInterpretedProfile.yomuComics1659
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: profile.networkIdentity,
+            policy: transportPolicy
+        )
+        return try Self(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
+    /// Injection seam for deterministic Yomu Comics/SSSCanlator tests.
+    public static func yomuComics1659(
+        apkBytes: [UInt8],
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        try Self(
+            profile: .yomuComics1659,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
     /// Injection seam for deterministic Mangas-Origines.fr tests.
     public static func mangasOriginesFR1658(
         apkBytes: [UInt8],
@@ -514,6 +546,7 @@ public enum InterpretedExtensionProfileCatalog {
             .tuttoAnimeManga1610,
             .mangasOriginesFR1658,
             .komikcast1683,
+            .yomuComics1659,
         ]
         return profiles.first {
             $0.packageName == packageName &&
@@ -677,6 +710,20 @@ private struct PinnedInterpretedProfile: Sendable {
         filterSupport: .dynamicList(expectedBlockDescriptor: "Ll0;", maximumJobs: 3),
         preferenceSupport: .none,
         imageRequestSupport: .interpreted
+    )
+
+    static let yomuComics1659 = PinnedInterpretedProfile(
+        identifier: "yomu-comics-1.6.59",
+        sha256: "2d7dfad2d4d293c58414b8905c6bcf454bcfb1a2bb6650a50d7480b0b9597883",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+        maximumAPKBytes: 64 * 1024 * 1024,
+        packageName: "eu.kanade.tachiyomi.extension.pt.sssscanlator",
+        versionName: "1.6.59",
+        versionCode: 59,
+        expectedSourceID: 1_497_838_059_713_668_619,
+        filterSupport: .dynamicList(expectedBlockDescriptor: "Lt;", maximumJobs: 3),
+        preferenceSupport: .none,
+        imageRequestSupport: .pageURL
     )
 }
 
@@ -1383,11 +1430,7 @@ private actor PinnedInterpretedRuntime {
     private static func validMetadata(name: String, language: String, baseURL: String) -> Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               name.utf8.count <= 4_096,
-              !language.isEmpty,
-              language.utf8.count <= 32,
-              language.utf8.allSatisfy({
-                  ($0 >= 0x61 && $0 <= 0x7a) || $0 == 0x2d
-              }),
+              validLanguageIdentifier(language),
               baseURL.utf8.count <= 8_192,
               let components = URLComponents(string: baseURL),
               let scheme = components.scheme?.lowercased(),
@@ -1396,6 +1439,26 @@ private actor PinnedInterpretedRuntime {
               components.user == nil,
               components.password == nil else { return false }
         return true
+    }
+
+    /// Mihon source languages use either a lowercase catalog identifier such
+    /// as `all` or a compact BCP-47-style tag such as `pt-BR`. Keep the
+    /// boundary ASCII-only and structurally bounded while preserving the
+    /// source's exact casing for display and catalog matching.
+    private static func validLanguageIdentifier(_ language: String) -> Bool {
+        guard !language.isEmpty, language.utf8.count <= 32 else { return false }
+        let subtags = language.split(separator: "-", omittingEmptySubsequences: false)
+        guard !subtags.isEmpty, subtags.allSatisfy({ (1...8).contains($0.utf8.count) }) else {
+            return false
+        }
+        return subtags.enumerated().allSatisfy { index, subtag in
+            subtag.utf8.allSatisfy { byte in
+                let isLetter = (byte >= 0x41 && byte <= 0x5a) ||
+                    (byte >= 0x61 && byte <= 0x7a)
+                let isDigit = byte >= 0x30 && byte <= 0x39
+                return isLetter || (index > 0 && isDigit)
+            }
+        }
     }
 
     private static func sha256Hex(_ bytes: [UInt8]) -> String {

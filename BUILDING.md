@@ -4,11 +4,15 @@
 
 | Component | Verified how |
 |---|---|
-| MihonCompatKit (parsers, VM, repo client, backup reader) | Current local `swift test` on Windows/Swift 6.3.3 passes **254/254**; the suite includes corpus-lock and APK-signature regressions, real-APK constructor/source-path coverage across eight execution fixtures, deterministic structural-plan and privacy-safe diagnostics regressions, bounded OkHttp interceptor-chain regressions, adapter/admission tests, and the end-to-end Baozi, TuttoAnimeManga, and Mangas-Origines.fr profiles |
-| compat-audit CLI | optimized build plus deterministic directory-level `plan` and `gaps` behavior verified on Windows; the locked corpus reports current candidates, legacy blockers, ranked unregistered external invocations, and unsupported opcodes, continues past malformed files, omits local paths/filenames/request secrets, and returns failure after all artifacts; exact implementation-head Swift CI uploaded the optimized CLI |
-| KamiCore (models, SQLite store, install/admission/factory, source registry, reader image pipeline) | Current portable Windows `swift test` passes **17/17**, including exact Baozi, TuttoAnimeManga, and Mangas-Origines.fr factory admission; exact implementation-head macOS Swift CI passes all **28/28** tests covering bounded reader settings/prefetch, exact image headers, in-flight deduplication/cache, response rejection, Browse routing, SQLite migration, extension installation/restoration/factory, and registry lifecycle coverage |
+| MihonCompatKit (parsers, VM, repo client, backup reader) | Current local `swift test` on Windows/Swift 6.3.3 passes **262/262**; the suite includes corpus-lock and APK-signature regressions, real-APK constructor/source-path coverage across ten execution fixtures, deterministic structural-plan and privacy-safe diagnostics regressions, bounded OkHttp interceptor-chain regressions, adapter/admission tests, and the end-to-end Baozi, TuttoAnimeManga, Mangas-Origines.fr, Komikcast, and Yomu profiles |
+| compat-audit CLI | Current optimized build plus deterministic directory-level `plan` and `gaps` behavior is verified on Windows; the locked corpus reports current candidates, legacy blockers, ranked unregistered external invocations, and unsupported opcodes, continues past malformed files, omits local paths/filenames/request secrets, and returns failure after all artifacts; the previous exact implementation-head Swift CI uploaded the optimized CLI, while the Yomu continuation's exact-head workflow remains pending final commit/push |
+| KamiCore (models, SQLite store, install/admission/factory, source registry, reader image pipeline) | Current portable Windows `swift test` passes **18/18**, including exact Baozi, TuttoAnimeManga, Mangas-Origines.fr, Komikcast, and Yomu factory admission; the previous exact implementation-head macOS Swift CI passed all **28/28** tests covering bounded reader settings/prefetch, exact image headers, in-flight deduplication/cache, response rejection, Browse routing, SQLite migration, extension installation/restoration/factory, and registry lifecycle coverage |
 | App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |
 | IPA packaging | the `IPA Package` workflow builds a real Release `Kami.app`, packages `Kami-unsigned.ipa`, and uploads `Kami-unsigned-ipa` |
+
+The Yomu continuation passes the complete local suites, including bounded
+JSON parsing and source-order-preserving RSC traversal. Exact-head Swift CI,
+iOS Build, and IPA Package links will be recorded after the commit and push.
 
 ## macOS (full build)
 
@@ -44,11 +48,11 @@ swift run --package-path Packages/MihonCompatKit compat-audit gaps path/to/apks
 bash scripts/fetch_corpus.sh
 ```
 
-The lock contains 27 APK artifacts: eight real Keiyoushi execution fixtures (two
-legacy lib 1.4 and six current lib 1.6), 13 current lib 1.6 Keiyoushi
+The lock contains 27 APK artifacts: ten real Keiyoushi execution fixtures (two
+legacy lib 1.4 and eight current lib 1.6), 11 current lib 1.6 Keiyoushi
 measurement-only fixtures under `Tests/corpus/measurement/`, and six tiny AOSP
 apksig conformance fixtures. Thus 19 locked artifacts are current lib 1.6
-(six execution plus 13 measurement). The measurement set is
+(eight execution plus 11 measurement). The measurement set is
 behavior-stratified, not statistical. The historical pre-promotion 16-artifact
 measurement run occupied 1.24 MB (1,242,086 bytes) before Baozi moved into the
 execution role. It analyzed 16/16 with zero errors, found 12 structural
@@ -61,16 +65,16 @@ audited only; membership never grants signer trust, admission, installation,
 execution, or compatibility proof. Run the non-executing audit with
 `compat-audit gaps Tests/corpus/measurement`.
 
-The current locked measurement baseline is 13/13 analyzed artifacts, 9
-structural candidates, four stable-wrapper blockers, 511 unique unregistered
+The current locked measurement baseline is 11/11 analyzed artifacts, 7
+structural candidates, four stable-wrapper blockers, 432 unique unregistered
 external method surfaces, zero omitted invocations, and zero unsupported
 opcodes. These are static prioritization results, not a compatibility percentage
 or runtime proof.
 
 With the corpus present, the current local Windows/Swift 6.3.3
-`MihonCompatKit` suite passes 254/254 tests, including the Baozi,
-TuttoAnimeManga, and Mangas-Origines.fr real-APK regressions. Exact
-Mangas-Origines.fr implementation head `0abc7f8` passes
+`MihonCompatKit` suite passes 262/262 tests, including the Baozi,
+TuttoAnimeManga, Mangas-Origines.fr, Komikcast, and Yomu real-APK regressions.
+The historical exact Mangas-Origines.fr implementation head `0abc7f8` passes
 [Swift CI](https://github.com/taizaki69/Kami/actions/runs/33817169918),
 [iOS Build](https://github.com/taizaki69/Kami/actions/runs/33817169894), and
 [IPA Package](https://github.com/taizaki69/Kami/actions/runs/33817169856).
@@ -80,9 +84,9 @@ they are not linked into or shipped by the iOS app. Their attribution is in
 `Tests/corpus/KEIYOUSHI-EXTENSIONS-NOTICE.md`. The AOSP fixtures are likewise
 vendored at a pinned source revision with the upstream Apache-2.0 license. This
 keeps CI independent of Keiyoushi release rotation and Gitiles availability.
-The signer regression explicitly authenticates all eight real Keiyoushi execution
+The signer regression explicitly authenticates all ten real Keiyoushi execution
 APKs (Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, Baozi Manhua,
-TuttoAnimeManga, and Mangas-Origines.fr);
+TuttoAnimeManga, Mangas-Origines.fr, Komikcast, and Yomu Comics);
 the six AOSP files are separate conformance fixtures.
 The script verifies every SHA-256 in `Tests/corpus/manifest.json` and only uses
 the recorded upstream URL as a best-effort fallback for a missing or
@@ -125,6 +129,39 @@ and page-URL image requests with `Referer`/`Origin` headers. This exact profile
 has no source-executed image-interceptor capability; the evidence is limited to
 the locked APK and its proven page-URL image path.
 
+The Komikcast/VoraToon execution fixture is
+`Tests/corpus/komikcast.apk`. Its exact 1.6.83 profile requires package
+`eu.kanade.tachiyomi.extension.id.komikcast`, version code 83, SHA-256
+`9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac`, v2 signer
+fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, matching
+manifest identity, and declared source ID `972717448578983812`. Deterministic
+real-APK regressions cover metadata, popular/latest/text and filtered search,
+details, chapters, pages, exact custom image headers, the series-URL route,
+static `Sort`/`Sort Order`/`Status`/`Format`/`Type` filters, dynamic `Genre`
+fetch/retry/cache/concurrency, and fail-closed tamper/schema/preferences.
+Its dynamic cache is source-private and in memory; the logical zstd stream is
+not native zstd or persistent cross-launch storage. Live-site,
+Cloudflare/challenge, source-scoped image-interceptor/transform, and arbitrary
+dynamic-filter compatibility remain unclaimed.
+
+The Yomu Comics/SSSCanlator execution fixture is
+`Tests/corpus/sssscanlator.apk`. Its exact 1.6.59 profile requires package
+`eu.kanade.tachiyomi.extension.pt.sssscanlator`, version code 59, SHA-256
+`2d7dfad2d4d293c58414b8905c6bcf454bcfb1a2bb6650a50d7480b0b9597883`, v2 signer
+fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, matching
+manifest identity, and declared source ID `1497838059713668619`. Deterministic
+real-APK regressions cover `pt-BR` metadata, popular/latest/text and edited
+filter search, the five-entry filter schema with dynamic `Gênero` refresh and
+bounded retry/fallback, Next.js RSC details/chapters/pages, `/obra`/`/ler`
+URL-search normalization, strict-majority decoy rejection, the 30-result
+pagination boundary, and inherited `Referer`/`Origin` image headers. Opposing
+JSON property orders prove that recursive RSC extraction selects the first
+matching result in source order. It does not claim live-site, Cloudflare/challenge,
+arbitrary dynamic-filter, custom image-transform, or source-scoped
+reader-interceptor compatibility.
+
 For downloaded execution, the factory preflights the exact profile source-ID set
 before DEX construction and postvalidates the IDs returned by the constructed
 source. `SourceRegistry` removes downloaded IDs only when their recorded package
@@ -162,8 +199,8 @@ cross-origin.
 - `IPA Package`: unsigned device build and downloadable IPA artifact.
 
 The repository became public on 2026-08-23, so its standard GitHub-hosted
-runners now dispatch without consuming private-repository minutes. Exact
-Mangas-Origines.fr implementation head `0abc7f8` passes
+runners now dispatch without consuming private-repository minutes. Historical
+exact Mangas-Origines.fr implementation head `0abc7f8` passes
 [Swift CI 33817169918](https://github.com/taizaki69/Kami/actions/runs/33817169918)
 with 254 MihonCompatKit and 28 macOS KamiCore tests plus the optimized CLI
 artifact,

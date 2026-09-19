@@ -10,6 +10,7 @@ final class ExtensionSourceFactoryTests: XCTestCase {
     private static let tuttoAnimeMangaSourceID: Int64 = 2_102_507_871_480_604_746
     private static let mangasOriginesFRSourceID: Int64 = 4_803_238_581_797_687_746
     private static let komikcastSourceID: Int64 = 972_717_448_578_983_812
+    private static let yomuComicsSourceID: Int64 = 1_497_838_059_713_668_619
     private static let keiyoushiFingerprint =
         "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
 
@@ -210,35 +211,81 @@ final class ExtensionSourceFactoryTests: XCTestCase {
         XCTAssertNil(imageRequest?.sourceExecutionID)
     }
 
-    func testFactoryAdmitsExactKomikcastProfile() async throws {
-        let bytes = try corpus("komikcast")
-        let temporary = try temporaryAPK(bytes)
-        defer { try? FileManager.default.removeItem(at: temporary.directory) }
-        let admission = ExtensionAdmission(
-            packageName: "eu.kanade.tachiyomi.extension.id.komikcast",
-            versionName: "1.6.83",
-            versionCode: 83,
-            apkPath: temporary.apk.path,
-            apkSHA256: APKSignatureVerifier.apkSHA256(bytes),
-            signingIdentity: try APKSignatureVerifier().verify(apkBytes: bytes),
-            trustSource: .user(fingerprint: Self.keiyoushiFingerprint),
-            sourceIDs: [Self.komikcastSourceID]
-        )
+    func testFactoryAdmitsExactDynamicFilterProfiles() throws {
+        let profiles: [(
+            corpus: String,
+            package: String,
+            version: String,
+            code: Int64,
+            hash: String,
+            sourceID: Int64,
+            name: String,
+            language: String,
+            baseURL: String,
+            filterCount: Int
+        )] = [
+            (
+                "komikcast",
+                "eu.kanade.tachiyomi.extension.id.komikcast",
+                "1.6.83",
+                83,
+                "9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac",
+                Self.komikcastSourceID,
+                "VoraToon",
+                "id",
+                "https://v1.voratoon.com",
+                7
+            ),
+            (
+                "sssscanlator",
+                "eu.kanade.tachiyomi.extension.pt.sssscanlator",
+                "1.6.59",
+                59,
+                "2d7dfad2d4d293c58414b8905c6bcf454bcfb1a2bb6650a50d7480b0b9597883",
+                Self.yomuComicsSourceID,
+                "Yomu Comics",
+                "pt-BR",
+                "https://yomu.com.br",
+                5
+            ),
+        ]
 
-        let sources = try ExtensionSourceFactory().makeSources(
-            admission: admission,
-            transport: NoNetworkTransport()
-        )
-        let source = try XCTUnwrap(sources.first)
-        XCTAssertEqual(sources.count, 1)
-        XCTAssertEqual(source.id, Self.komikcastSourceID)
-        XCTAssertEqual(source.name, "VoraToon")
-        XCTAssertEqual(source.language, "id")
-        XCTAssertEqual(source.baseURL, "https://v1.voratoon.com")
-        XCTAssertTrue(source.supportsLatest)
-        XCTAssertTrue(source.supportsFilterFetching)
-        XCTAssertEqual(source.getFilterList().count, 7)
-        XCTAssertFalse(source.transportPolicy.allowsInsecureHTTP)
+        for profile in profiles {
+            let bytes = try corpus(profile.corpus)
+            XCTAssertEqual(APKSignatureVerifier.apkSHA256(bytes), profile.hash)
+            let signingIdentity = try APKSignatureVerifier().verify(apkBytes: bytes)
+            XCTAssertEqual(
+                signingIdentity.signers.map(\.currentFingerprint),
+                [Self.keiyoushiFingerprint]
+            )
+            let temporary = try temporaryAPK(bytes)
+            defer { try? FileManager.default.removeItem(at: temporary.directory) }
+            let admission = ExtensionAdmission(
+                packageName: profile.package,
+                versionName: profile.version,
+                versionCode: profile.code,
+                apkPath: temporary.apk.path,
+                apkSHA256: profile.hash,
+                signingIdentity: signingIdentity,
+                trustSource: .user(fingerprint: Self.keiyoushiFingerprint),
+                sourceIDs: [profile.sourceID]
+            )
+
+            let sources = try ExtensionSourceFactory().makeSources(
+                admission: admission,
+                transport: NoNetworkTransport()
+            )
+            let source = try XCTUnwrap(sources.first)
+            XCTAssertEqual(sources.count, 1)
+            XCTAssertEqual(source.id, profile.sourceID)
+            XCTAssertEqual(source.name, profile.name)
+            XCTAssertEqual(source.language, profile.language)
+            XCTAssertEqual(source.baseURL, profile.baseURL)
+            XCTAssertTrue(source.supportsLatest)
+            XCTAssertTrue(source.supportsFilterFetching)
+            XCTAssertEqual(source.getFilterList().count, profile.filterCount)
+            XCTAssertFalse(source.transportPolicy.allowsInsecureHTTP)
+        }
     }
 
     func testFactoryAdmitsExactBaoziProfileThroughRepositoryAdmission() async throws {

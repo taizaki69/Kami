@@ -9,7 +9,7 @@ measured status.
 
 Created and maintained by [taizaki69](https://github.com/taizaki69).
 
-**Honest status (2026-09-03):** the pure-Swift extension pipeline now covers
+**Honest status (2026-09-18):** the pure-Swift extension pipeline now covers
 store indexes, APK download, bounded ZIP/DEFLATE and binary-manifest parsing,
 validated DEX parsing, compatibility analysis, and an initial interpreter with
 a bounded pre-execution geometry/control-flow, exception-table, register-bounds,
@@ -19,7 +19,8 @@ catch types. Runtime dispatch resolves virtual overrides, lexical
 `invoke-super`, and maximally specific interface defaults across the parsed DEX
 class graph while leaving incomplete external graphs explicitly unresolved.
 Pinned real-APK tests execute the Akuma, MangaDex, BatCave, Kawii Manga,
-MangaMelon, Baozi Manhua, TuttoAnimeManga, and Mangas-Origines.fr entry
+MangaMelon, Baozi Manhua, TuttoAnimeManga, Mangas-Origines.fr,
+Komikcast/VoraToon, and Yomu Comics entry
 constructors plus BatCave's `getBaseUrl`,
 `getLang`, `getName`, and `getId`
 methods. BatCave's real popular-manga path now runs through Kotlin class
@@ -147,11 +148,28 @@ offline assertions and do not claim live-site, Cloudflare/challenge,
 source-scoped image-interceptor, image-transform, or arbitrary dynamic-filter
 compatibility.
 
-The corpus now also locks 12 current lib 1.6 Keiyoushi APKs under
-`Tests/corpus/measurement/` for measurement only. Together with the nine
-execution fixtures (two legacy lib 1.4 and seven current lib 1.6),
+The eighth exact app-facing profile is Yomu Comics/SSSCanlator 1.6.59
+(`eu.kanade.tachiyomi.extension.pt.sssscanlator`, version code 59). Admission
+is pinned to SHA-256
+`2d7dfad2d4d293c58414b8905c6bcf454bcfb1a2bb6650a50d7480b0b9597883`, v2
+signer fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, the
+authenticated manifest, and source ID `1497838059713668619`. Deterministic
+real-APK fixtures prove `pt-BR` metadata, popular/latest/text and edited-filter
+search, combined details and chapters, direct page images, inherited
+`Referer`/`Origin` headers, and the dynamic `Gênero` list from `/api/genres`.
+They also cover `/obra`/`/ler` URL-search normalization, the exact 30-result
+pagination boundary, and the source's strict-majority filtering of decoy list
+entries. The profile preserves JSON property order when selecting the first
+matching nested RSC result. It uses bounded descriptor traversal and a
+page-URL image projection; it does not claim a custom image transform,
+source-specific image interceptor, or live-site/Cloudflare success.
+
+The corpus now also locks 11 current lib 1.6 Keiyoushi APKs under
+`Tests/corpus/measurement/` for measurement only. Together with the ten
+execution fixtures (two legacy lib 1.4 and eight current lib 1.6),
 and six AOSP apksig conformance fixtures, the lock contains 27 artifacts; 19 are
-current lib 1.6 artifacts (seven execution fixtures plus the 12 measurement
+current lib 1.6 artifacts (eight execution fixtures plus the 11 measurement
 fixtures). The measurement set is behavior-stratified, not a statistical sample.
 The former pre-promotion 16-artifact set occupied 1.24 MB (1,242,086 bytes); its
 static run analyzed all 16 measurement APKs with zero errors, found 12
@@ -159,11 +177,11 @@ structural candidates and four stable-wrapper blockers (Komga, MangaPlus,
 NHentai.xxx, and XCOMIC), and reported 626 unique unregistered external method
 surfaces with zero unsupported opcodes. That aggregate is historical to the
 former 16-artifact measurement role and is not a compatibility rate. The current
-deterministic measurement run analyzed 12/12 artifacts, with 8 structural
-candidates, four stable-wrapper blockers, 484 unique unregistered external
+deterministic measurement run analyzed 11/11 artifacts, with 7 structural
+candidates, four stable-wrapper blockers, 432 unique unregistered external
 method surfaces, zero omitted invocations, and zero unsupported opcodes. These
 are static prioritization results, not a compatibility percentage or runtime
-proof. The current 12 measurement artifacts continue to be parsed and statically
+proof. The current 11 measurement artifacts continue to be parsed and statically
 audited only;
 membership never grants signer trust, admission, installation, execution, or
 compatibility proof.
@@ -174,9 +192,9 @@ rotation, and signature-stripping protection. KamiCore binds the verified
 package/version/APK hash and signer history to persisted repository or explicit
 user trust; downgrades, same-version byte replacement, unrelated signers, and
 unadmitted source IDs are rejected before downloaded-source registration.
-The signer regression includes all nine real Keiyoushi execution APKs (Akuma,
+The signer regression includes all ten real Keiyoushi execution APKs (Akuma,
 MangaDex, BatCave, Kawii Manga, MangaMelon, Baozi Manhua, TuttoAnimeManga,
-Mangas-Origines.fr, and Komikcast);
+Mangas-Origines.fr, Komikcast, and Yomu Comics);
 the tiny AOSP fixtures are separate signature-conformance inputs.
 
 The app now completes that trust path: it persists extension repositories and
@@ -206,11 +224,11 @@ The first reusable profile-discovery seam is now shared by that exact runtime
 and `compat-audit plan`. Without executing DEX or granting trust, the bounded
 inspector either produces a deterministic lib 1.6 structural plan or explicit
 blockers for manifest identity, factories, DEX layout, native `.so` entries,
-entry-class placement, and stable public wrappers. The seven current profiles
+entry-class placement, and stable public wrappers. The eight current profiles
 produce the same plans on repeated inspection; the two legacy lib 1.4 corpus
-artifacts are reported unsupported instead of guessed. The remaining 12
-measurement APKs produce 8 structural candidates and four stable-wrapper
-blockers, with 484 unique unregistered external method surfaces, zero omitted
+artifacts are reported unsupported instead of guessed. The remaining 11
+measurement APKs produce 7 structural candidates and four stable-wrapper
+blockers, with 432 unique unregistered external method surfaces, zero omitted
 invocations, and zero unsupported opcodes. A structural plan is
 only a description: it is not signer authentication, catalog admission, or
 proof that an extension's operations will execute.
@@ -289,14 +307,14 @@ cross-origin image URLs.
 This is still not a claim of broad extension execution: the runtime profile
 catalog recognizes only the exact measured BatCave 1.6.9, Kawii Manga 1.6.1,
 MangaMelon 1.6.1, Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10,
-Mangas-Origines.fr 1.6.58, and Komikcast/VoraToon 1.6.83 builds. The remaining
-12 current-lib-1.6 artifacts are
+Mangas-Origines.fr 1.6.58, Komikcast/VoraToon 1.6.83, and Yomu Comics 1.6.59
+builds. The remaining 11 current-lib-1.6 artifacts are
 a non-executing measurement set, not
 an admitted profile catalog.
 Automatic profile admission beyond that exact catalog, arbitrary
 dynamic/network-backed filter lists, and much of the Kotlin/Java surface remain
-open; bounded dynamic Genre publication is supported only for this exact
-Komikcast profile
+open; bounded dynamic genre publication is supported only for the exact
+Komikcast and Yomu Comics profiles
 (`docs/EXTENSION_RUNTIME.md`). Baozi's bounded preferences are accepted by the
 profile, but production preference UI/persistence is not wired. Because its
 default banner remover requires unavailable Android Bitmap/pixel/JPEG APIs,
@@ -340,9 +358,9 @@ security boundaries, and the recommended next implementation sequence.
 
 The compatibility kit runs locally on Windows with Swift 6.3 through
 `scripts/windows_dev_test.bat`, including the Baozi, TuttoAnimeManga,
-Mangas-Origines.fr, and Komikcast real-APK regressions and portable KamiCore
-coverage. The current local suites pass 255/255 MihonCompatKit tests and 18/18
-portable KamiCore tests. Historical local and CI checkpoints, with their test
+Mangas-Origines.fr, Komikcast, and Yomu real-APK regressions and portable
+KamiCore coverage. The current local suites pass 262/262 MihonCompatKit tests
+and 18/18 portable KamiCore tests. Historical local and CI checkpoints, with their test
 counts, remain listed below. The historical Mangas-Origines.fr implementation
 head `0abc7f8` passed
 [Swift CI](https://github.com/taizaki69/Kami/actions/runs/33817169918) with all

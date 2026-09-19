@@ -8,7 +8,7 @@
       "dexCount": 1,
       "codeMethodCount": 102,
       "instructionCount": 2470,
-      "uniqueUnregisteredExternalMethodCount": 73,
+      "uniqueUnregisteredExternalMethodCount": 68,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -19,7 +19,7 @@
       "dexCount": 1,
       "codeMethodCount": 287,
       "instructionCount": 8258,
-      "uniqueUnregisteredExternalMethodCount": 123,
+      "uniqueUnregisteredExternalMethodCount": 113,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -30,7 +30,7 @@
       "dexCount": 1,
       "codeMethodCount": 339,
       "instructionCount": 8142,
-      "uniqueUnregisteredExternalMethodCount": 88,
+      "uniqueUnregisteredExternalMethodCount": 82,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -41,7 +41,7 @@
       "dexCount": 1,
       "codeMethodCount": 141,
       "instructionCount": 4938,
-      "uniqueUnregisteredExternalMethodCount": 79,
+      "uniqueUnregisteredExternalMethodCount": 71,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -52,7 +52,7 @@
       "dexCount": 1,
       "codeMethodCount": 437,
       "instructionCount": 19350,
-      "uniqueUnregisteredExternalMethodCount": 107,
+      "uniqueUnregisteredExternalMethodCount": 98,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -63,7 +63,7 @@
       "dexCount": 1,
       "codeMethodCount": 244,
       "instructionCount": 5480,
-      "uniqueUnregisteredExternalMethodCount": 77,
+      "uniqueUnregisteredExternalMethodCount": 68,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -74,7 +74,7 @@
       "dexCount": 1,
       "codeMethodCount": 245,
       "instructionCount": 6291,
-      "uniqueUnregisteredExternalMethodCount": 69,
+      "uniqueUnregisteredExternalMethodCount": 67,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -85,18 +85,7 @@
       "dexCount": 1,
       "codeMethodCount": 452,
       "instructionCount": 13787,
-      "uniqueUnregisteredExternalMethodCount": 146,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.pt.sssscanlator@1.6.59(59)",
-      "structuralCandidate": true,
-      "planBlockers": [],
-      "dexCount": 1,
-      "codeMethodCount": 161,
-      "instructionCount": 4954,
-      "uniqueUnregisteredExternalMethodCount": 72,
+      "uniqueUnregisteredExternalMethodCount": 105,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -107,7 +96,7 @@
       "dexCount": 1,
       "codeMethodCount": 190,
       "instructionCount": 7098,
-      "uniqueUnregisteredExternalMethodCount": 109,
+      "uniqueUnregisteredExternalMethodCount": 101,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -118,7 +107,7 @@
       "dexCount": 1,
       "codeMethodCount": 164,
       "instructionCount": 6027,
-      "uniqueUnregisteredExternalMethodCount": 119,
+      "uniqueUnregisteredExternalMethodCount": 110,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -129,49 +118,49 @@
       "dexCount": 1,
       "codeMethodCount": 127,
       "instructionCount": 3389,
-      "uniqueUnregisteredExternalMethodCount": 87,
+      "uniqueUnregisteredExternalMethodCount": 84,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     }
   ],
   "aggregate": {
-    "extensionCount": 12,
-    "structuralCandidateCount": 8,
+    "extensionCount": 11,
+    "structuralCandidateCount": 7,
     "planBlockers": [
       {
         "summary": "the source class chain is missing the required stable Mihon wrappers",
         "extensionCount": 4
       }
     ],
-    "uniqueUnregisteredExternalMethodCount": 484,
+    "uniqueUnregisteredExternalMethodCount": 432,
     "omittedExternalInvocationCount": 0,
     "unsupportedOpcodeCount": 0,
     "topLimit": 5,
     "topUnregisteredExternalInvocations": [
       {
         "surface": "direct Ljava/lang/IllegalStateException;-><init>(Ljava/lang/String;)V",
-        "extensionCount": 12,
-        "invocationCount": 250
+        "extensionCount": 11,
+        "invocationCount": 234
       },
       {
         "surface": "direct Ljava/lang/UnsupportedOperationException;-><init>()V",
-        "extensionCount": 12,
-        "invocationCount": 192
+        "extensionCount": 11,
+        "invocationCount": 176
       },
       {
         "surface": "virtual Leu/kanade/tachiyomi/source/online/HttpSource;->getBaseUrl()Ljava/lang/String;",
-        "extensionCount": 12,
-        "invocationCount": 116
+        "extensionCount": 11,
+        "invocationCount": 113
       },
       {
         "surface": "virtual Leu/kanade/tachiyomi/source/online/HttpSource;->getId()J",
-        "extensionCount": 12,
-        "invocationCount": 18
+        "extensionCount": 11,
+        "invocationCount": 17
       },
       {
         "surface": "super Leu/kanade/tachiyomi/source/online/HttpSource;->fetchChapterList(Leu/kanade/tachiyomi/source/model/SManga;)Lrx/Observable;",
-        "extensionCount": 12,
-        "invocationCount": 12
+        "extensionCount": 11,
+        "invocationCount": 11
       }
     ]
   }

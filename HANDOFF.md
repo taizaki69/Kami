@@ -1,6 +1,6 @@
 # Kami Continuation Handoff
 
-Last updated: 2026-09-03 (America/Lima)
+Last updated: 2026-09-18 (America/Lima)
 
 This is the durable continuation point for moving Kami development to another
 computer. The previous GLM 5.3 session stopped because its usage quota was
@@ -27,6 +27,9 @@ and all three exact-head GitHub Actions pass.
 The exact Komikcast/VoraToon 1.6.83 promotion is implemented at
 `fcf1b3019959089fcd4bea73e8cccaed8eef608e`; exact-head local and GitHub
 evidence is recorded below.
+The current continuation adds the exact Yomu Comics/SSSCanlator 1.6.59 profile;
+its local promotion evidence is recorded below, while its exact-head workflows
+remain pending.
 
 ## Start here
 
@@ -105,8 +108,9 @@ evidence is recorded below.
 - Original Phase 2 baseline: `6f9de0719f057646e228f14620806326840e5c75`
 - Expected state after cloning: clean `main`, tracking `origin/main`
 
-Always continue from the latest `origin/main`. The latest implementation head
-is `fcf1b30`; the previous exact Mangas-Origines.fr head is `0abc7f8`, the
+Always continue from the latest `origin/main`. The latest pushed implementation
+head is `fcf1b30`; the current Yomu continuation is uncommitted; the previous exact
+Mangas-Origines.fr head is `0abc7f8`, the
 previous exact Tutto head is `cf02c77`; the first-gap diagnostics baseline is
 `b1cd246`, the observable reader-image baseline is `c9d62f1`, the retained
 source-execution baseline is `5535435`, the bounded source-operation interceptor
@@ -116,55 +120,59 @@ continuation commit may be newer than the implementation head.
 
 ## Current resume point
 
-Current verified state on 2026-09-03 (America/Lima):
+Current verified state on 2026-09-18 (America/Lima):
 
-- Commit `fcf1b3019959089fcd4bea73e8cccaed8eef608e` is pushed to `main`. It
-  promotes the exact Komikcast/VoraToon 1.6.83 APK as the seventh current
-  app-facing profile after exact SHA-256, Keiyoushi signer,
-  manifest/package/version, source-ID, and structural-plan checks. The exact
-  identity is package `eu.kanade.tachiyomi.extension.id.komikcast`, SHA-256
-  `9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac`, v2
+- The current working tree adds the eighth exact app-facing profile, Yomu
+  Comics/SSSCanlator 1.6.59, after exact SHA-256, Keiyoushi signer,
+  manifest/package/version, source-ID, and structural-plan checks. Its exact
+  identity is package `eu.kanade.tachiyomi.extension.pt.sssscanlator`, version
+  code `59`, SHA-256
+  `2d7dfad2d4d293c58414b8905c6bcf454bcfb1a2bb6650a50d7480b0b9597883`, v2
   signer `9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`,
-  and source ID `972717448578983812`. Its base URL is
-  `https://v1.voratoon.com` and its JSON API is `https://api.voratoon.com`.
+  and source ID `1497838059713668619`. Its base URL is
+  `https://yomu.com.br` and its language is `pt-BR`.
 - Its unmodified DEX deterministically executes metadata, popular, latest,
-  text and filtered search, details, chapters, pages, exact custom image
-  headers, and the exact VoraToon series-URL search route
-  (`https://v1.voratoon.com/series/demo` through the bounded API detail path).
-  Static `Sort`, `Sort Order`, `Status`, `Format`, and `Type` filters plus the
-  bounded dynamic `Genre` fetch/retry/cache/concurrency/queued-search path are
-  proven. Tampered bytes, altered schemas, and unexpected preferences fail
-  closed before transport. The exact image headers include `Referer`, `Origin`,
-  AVIF/WebP-capable `Accept`, and Indonesian-locale `Accept-language` values.
-  This does not claim live-site or Cloudflare/challenge compatibility,
-  persistent cross-launch cache, native zstd semantics, arbitrary dynamic
-  filters, or Komikcast source-scoped image interceptors/transforms.
+  text and edited-filter search, dynamic `Gênero` refresh, combined details and
+  chapters, Next.js RSC pages, direct page images, `/obra`/`/ler` URL-search
+  normalization, strict-majority decoy rejection, and the exact 30-result
+  pagination boundary. It inherits `Referer`/`Origin` page-image headers and
+  rejects altered filters, preferences, or APK bytes before transport. This
+  does not claim live-site or Cloudflare/challenge compatibility, custom image
+  transforms, source-scoped reader interceptors, or arbitrary dynamic filters.
+- JSON objects retain their response member order through parsing, generated
+  serializers, map views, and rendering. This fixes Yomu's recursive RSC search
+  selecting an arbitrary matching DTO when several nested candidates exist.
+  Opposing-order real-APK responses prove first-match selection. Two host
+  scenarios cover generated descriptor/nullable decoding and concrete JSON
+  views/rendering, plus malformed JSON and depth/node/member limits.
 - The runtime routes app-facing virtual entries through the receiver hierarchy
   and preserves one instruction budget across synchronous or asynchronous
   re-entry from a suspended host operation. Receiver identity, hierarchy
   assignability, inherited overrides, and the shared budget have focused
   regressions.
-- The corpus remains 27 artifacts but is now split into nine execution, 12
+- The corpus remains 27 artifacts but is now split into ten execution, 11
   measurement-only, and six conformance fixtures. Nineteen artifacts are
-  current lib 1.6: seven execution and 12 measurement. The refreshed static
-  audit is 12/12 analyzed, eight candidates, four blockers, 484 unique
+  current lib 1.6: eight execution and 11 measurement. The refreshed static
+  audit is 11/11 analyzed, seven candidates, four blockers, 432 unique
   unregistered method surfaces, zero omitted invocations, and zero unsupported
   opcodes. These are static prioritization results, not runtime compatibility
   proof.
-- Local Windows/Swift 6.3.3 verification passes 255/255 MihonCompatKit tests,
-  18/18 portable KamiCore tests, and the release `compat-audit` build. Exact-head
-  [Swift CI 33823193000](https://github.com/taizaki69/Kami/actions/runs/33823193000)
-  passes 255/255 MihonCompatKit and 29/29 macOS KamiCore tests, builds the
-  optimized `compat-audit` artifact, and uploads it;
-  [iOS Build 33823193047](https://github.com/taizaki69/Kami/actions/runs/33823193047)
-  passes the Simulator and unsigned-device targets; and
-  [IPA Package 33823193038](https://github.com/taizaki69/Kami/actions/runs/33823193038)
-  builds and uploads the unsigned IPA.
+- Local Windows/Swift 6.3.3 verification passes 262/262 MihonCompatKit tests
+  with zero skips, 18/18 portable KamiCore tests, the release `compat-audit`
+  build, and the full Yomu factory admission test. Two optimized measurement
+  runs are byte-identical (SHA-256
+  `de90a99a291f3f849348386d5e9d416cbda993ab9298b206f28998b9646fc610`) with
+  11/11 artifacts analyzed, 7 structural candidates, 432 unique unregistered
+  surfaces, 0 omitted invocations, and 0 unsupported opcodes. Exact-head
+  Swift CI, iOS Build, and IPA Package workflows for this Yomu continuation are
+  pending the commit and push.
 - The conservative test audit removed 10 duplicate/helper-only tests while
   preserving distinct admission, parser, security, runtime, transport, and
   source-behavior coverage. Next work should be selected from the remaining
-  eight structural candidates and four wrapper blockers using the current
-  evidence, not by returning to the completed Komikcast promotion.
+  seven structural candidates and four wrapper blockers using the current
+  evidence. EternalMangas 1.6.28 is the next probe recommendation: its
+  structural plan has no blockers or unsupported opcodes and its 67 unique
+  unregistered external surfaces are the fewest among the remaining candidates.
 
 Historical verified milestone ledger through 2026-08-30:
 
@@ -649,7 +657,7 @@ selected extension store + declared signing identity
 
 Issue #3's valid, tampered, wrong-signer, rotated-signer, unsigned, and stripped
 fixtures plus the install/restore/factory regressions enforce this order. Stable
-public wrapper discovery and seven current lib 1.6 profiles are now complete;
+public wrapper discovery and eight current lib 1.6 profiles are now complete;
 MangaMelon proves the first exact static filtered-search path, while Baozi adds
 bounded scalar preferences, its exact static filter graph, core source
 operations, and a DEX-defined image-request rewrite. TuttoAnimeManga adds an
@@ -668,15 +676,17 @@ without exception probing, so every BatCave source request now carries its exact
 `Referer` and `Origin` headers. Komikcast/VoraToon adds exact metadata,
 popular/latest/text and URL-shaped series search, filtered search, details,
 chapters, pages, and custom image headers. Its static Sort, Sort Order, Status,
-Format, and Type filters plus bounded dynamic Genre fetch/retry/cache/
-concurrency/queued-search behavior are covered by deterministic fixtures. It is
-the first current profile with a bounded runtime-published dynamic filter schema;
-arbitrary dynamic filters remain outside the exact catalog. Corpus locking
-remains rooted at `35e4435`/`a376064`; after the Komikcast/VoraToon promotion
-the behavior-stratified snapshot has 9 execution, 12 measurement-only current
-lib 1.6, and 6 AOSP conformance artifacts, with 12/12 measurement APKs parsed.
-The current static audit has 8 candidates, 4 stable-wrapper blockers, and 484
-unique unregistered surfaces.
+  Format, and Type filters plus bounded dynamic Genre fetch/retry/cache/
+  concurrency/queued-search behavior are covered by deterministic fixtures. It is
+  the first current profile with a bounded runtime-published dynamic filter schema;
+  Yomu Comics/SSSCanlator adds a second exact dynamic `Gênero` path with bounded
+  retry/fallback, Next.js RSC parsing, URL-shaped search, and strict-majority decoy
+  filtering. Arbitrary dynamic filters remain outside the exact catalog. Corpus
+  locking remains rooted at `35e4435`/`a376064`; the current Yomu continuation's
+  behavior-stratified snapshot has 10 execution, 11 measurement-only current
+  lib 1.6, and 6 AOSP conformance artifacts, with 11/11 measurement APKs parsed.
+  The current static audit has 7 candidates, 4 stable-wrapper blockers, and 432
+  unique unregistered surfaces.
 
 The bounded source-operation OkHttp application/network interceptor seam and
 the source-scoped reader-image execution seam are complete. They preserve DEX
@@ -722,7 +732,7 @@ nested `Tests/corpus/measurement` command should complete successfully after
 the vendored corpus is verified.
 
 On this Windows checkout, use the checked-in helper for the test command if
-needed. Keep real extension execution offline and limited to the nine
+needed. Keep real extension execution offline and limited to the ten
 `Tests/corpus/*.apk` execution fixtures. The nested
 `Tests/corpus/measurement/*.apk` fixtures are for static analysis only and
 must never be executed. Only `ExtensionAdmissionService` may turn downloaded
@@ -802,7 +812,7 @@ CI verification. Run:
 bash scripts/fetch_corpus.sh
 ```
 
-The script verifies nine SHA-256-pinned Keiyoushi execution fixtures, 12
+The script verifies ten SHA-256-pinned Keiyoushi execution fixtures, 11
 SHA-256-pinned current lib 1.6 measurement fixtures under the nested
 `Tests/corpus/measurement/` directory, and six AOSP conformance fixtures against
 `Tests/corpus/manifest.json`. A recorded upstream URL is only a best-effort
@@ -823,9 +833,9 @@ they must not be admitted or executed.
 Never commit `.env` files, Apple certificates, provisioning profiles, P12
 files, passwords, cookies, or signing credentials.
 
-## Known-good verification checkpoint
+## Previous exact-head verification checkpoint (Komikcast/VoraToon)
 
-Current exact-head Komikcast/VoraToon promotion evidence, based on the durable
+The previous exact-head Komikcast/VoraToon promotion evidence, based on the durable
 corpus established by `35e4435`/`a376064`: the behavior-stratified lock and fetch
 round trip cover 27 artifacts (9 execution, 12 measurement-only current lib 1.6,
 and 6 AOSP conformance; 19 current lib 1.6 total). The static measurement
@@ -1571,15 +1581,15 @@ Proven today:
 - Real store-index parsing for protobuf and legacy JSON formats.
 - Bounded APK archive, manifest, and DEX structural parsing.
 - Compatibility analysis and the `compat-audit` CLI.
-- Deterministic, non-executing structural plans for the seven current lib 1.6
+- Deterministic, non-executing structural plans for the eight current lib 1.6
   execution profiles, explicit blockers for legacy/unsupported shapes, and
   directory reporting that preserves later results after per-file errors. This
   is shape discovery only, not authentication, admission, or runtime proof.
-- Committed corpus evidence locks and vendors 27 artifacts in 9 execution, 12
+- Corpus evidence locks and vendors 27 artifacts in 10 execution, 11
   measurement-only current lib 1.6, and 6 AOSP conformance roles. Baozi,
-  TuttoAnimeManga, Mangas-Origines.fr, and Komikcast/VoraToon are in the
-  execution role; the remaining measurement set is still parsed and statically
-  audited only. Its membership does not grant signer trust,
+  TuttoAnimeManga, Mangas-Origines.fr, Komikcast/VoraToon, and Yomu Comics are
+  in the execution role; the remaining measurement set is still parsed and
+  statically audited only. Its membership does not grant signer trust,
   admission, installation, DEX execution, or compatibility proof.
 - Exact execution of the pinned constructors/getters listed above and
   BatCave's interpreted popular, paginated text-search, latest-updates, and core
@@ -1620,8 +1630,17 @@ Proven today:
   Cloudflare/challenge compatibility, persistent cross-launch cache, native zstd
   semantics, arbitrary dynamic filters, or Komikcast source image interceptors/
   transforms. The virtual zstd stream is source-internal logical identity only.
-- The locked BatCave, Kawii, MangaMelon, Baozi, Tutto, Mangas-Origines.fr, and
-  Komikcast/VoraToon profiles expose their
+- The locked Yomu Comics/SSSCanlator 1.6.59 profile independently exposes exact
+  metadata, popular/latest/text and edited-filter search, dynamic `Gênero`
+  refresh with bounded retry/fallback and caching, Next.js RSC popular/latest
+  responses, combined details/chapters, `/obra`/`/ler` URL-shaped search,
+  direct page images with inherited `Referer`/`Origin` headers, and strict
+  majority-based decoy rejection. Altered filters, preferences, or APK bytes
+  fail before transport. This evidence is deterministic and does not claim
+  live-site, Cloudflare/challenge, arbitrary dynamic-filter, or custom image
+  transform compatibility.
+- The locked BatCave, Kawii, MangaMelon, Baozi, Tutto, Mangas-Origines.fr,
+  Komikcast/VoraToon, and Yomu Comics profiles expose their
   measured operations through `KamiSource`; source-scoped actor ownership
   serializes VM entry, and KamiCore's existing registry accepts an admitted
   measured source.
@@ -1645,10 +1664,11 @@ Proven today:
 Not proven or implemented:
 
 - A general downloaded-extension-to-`KamiSource` bridge beyond the exact
-  BatCave, Kawii, MangaMelon, Baozi, Tutto, Mangas-Origines.fr, and
-  Komikcast/VoraToon profiles, arbitrary dynamic/network-backed filter lists
-  beyond Komikcast's bounded `Genre` schema, or arbitrary custom image-request
-  behavior beyond the bounded source-scoped execution capability.
+  BatCave, Kawii, MangaMelon, Baozi, Tutto, Mangas-Origines.fr,
+  Komikcast/VoraToon, and Yomu Comics profiles, arbitrary dynamic/network-backed
+  filter lists beyond the bounded Komikcast `Genre` and Yomu `Gênero` schemas,
+  or arbitrary custom image-request behavior beyond the bounded source-scoped
+  execution capability.
 - Baozi's bounded scalar preferences are accepted by the exact profile and
   exercised by the runtime tests, but the production app has no preference UI
   or persistence path. App construction explicitly defaults
@@ -1674,12 +1694,12 @@ Not proven or implemented:
   dispatch, maximally specific interface defaults, and lexical class/interface
   `invoke-super` across parsed DEX graphs are working. Equivalent resolution
   across incomplete external hierarchy data remains open.
-- Automatic safe profile admission beyond the seven-entry exact catalog.
+- Automatic safe profile admission beyond the eight-entry exact catalog.
 - A signed installation on a physical iPhone or iPad.
 - App-facing Diagnostics/file export/share or a final distribution/licensing
   model.
 
-Do not generalize the seven pinned adapters into broad extension support.
+Do not generalize the eight pinned adapters into broad extension support.
 
 ## Security and trust boundary
 
@@ -1745,15 +1765,15 @@ The rest of the product backlog is in `TODO.md`.
 
 ## Recommended next implementation sequence
 
-1. Probe SSSCanlator 1.6.59 first: its current evidence shows one stable Lu
-   source/DEX path, no plan blockers or opcode gaps, and 72 unregistered
-   surfaces. Start with construction, metadata, `getFilterList`, and its
-   dynamic/network behavior; this is a probe target, not a compatibility claim.
-   Then use the remaining 12-artifact measurement evidence and
-   `compat-audit promote-gap` tooling to choose among the other structural
-   candidates: Doctruyen3q, EternalMangas, FoolSlide Customizable, Hayalistic,
-   MangaPandaOnl, PixivComic, and ReadManga. The four stable-wrapper blockers
-   remain explicit blockers; never infer execution from static ranking alone.
+1. Probe EternalMangas 1.6.28 first: its current evidence shows one stable
+   source/DEX path, no plan blockers or opcode gaps, and 67 unregistered external
+   surfaces, the fewest among the remaining candidates. Start with construction,
+   metadata, `getFilterList`, and its source operations; this is a probe target,
+   not a compatibility claim. Then use the remaining 11-artifact measurement
+   evidence and `compat-audit promote-gap` tooling to choose among the other
+   structural candidates: FoolSlide Customizable, MangaPandaOnl, Doctruyen3q,
+   ReadManga, PixivComic, and Hayalistic. The four stable-wrapper blockers remain
+   explicit blockers; never infer execution from static ranking alone.
 2. Add issue #4's app-facing user-selected report export/share flow while
    preserving the same local-only redaction contract.
 3. Add production preference UI and persistence for the exact bounded scalar

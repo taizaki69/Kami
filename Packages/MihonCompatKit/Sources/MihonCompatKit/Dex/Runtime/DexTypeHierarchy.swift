@@ -297,6 +297,10 @@ struct DexTypeHierarchy {
         interfaceType("Ljava/util/Set;", extends: ["Ljava/util/Collection;"])
         interfaceType("Ljava/util/Map;")
         interfaceType("Ljava/util/Map$Entry;")
+        interfaceType("Lkotlin/reflect/KClassifier;")
+        interfaceType("Lkotlin/reflect/KType;")
+        interfaceType("Lkotlin/reflect/KClass;", extends: ["Lkotlin/reflect/KClassifier;"])
+        interfaceType("Lkotlinx/serialization/descriptors/SerialDescriptor;")
 
         classType(throwable)
         classType("Ljava/lang/Exception;", superclass: throwable)
@@ -399,6 +403,31 @@ struct DexTypeHierarchy {
         classType("Ljava/util/LinkedHashSet;", superclass: "Ljava/util/HashSet;")
         classType("Ljava/util/HashMap;", superclass: "Ljava/util/AbstractMap;", interfaces: [cloneable, serializable])
         classType("Ljava/util/LinkedHashMap;", superclass: "Ljava/util/HashMap;")
+        classType("Lkotlin/ranges/IntRange;", interfaces: ["Ljava/lang/Iterable;"])
+        classType(
+            "Lkotlinx/serialization/internal/PluginGeneratedSerialDescriptor;",
+            interfaces: ["Lkotlinx/serialization/descriptors/SerialDescriptor;"]
+        )
+
+        classType("Lkotlinx/serialization/json/JsonElement;")
+        classType(
+            "Lkotlinx/serialization/json/JsonArray;",
+            superclass: "Lkotlinx/serialization/json/JsonElement;",
+            interfaces: ["Ljava/util/List;"]
+        )
+        classType(
+            "Lkotlinx/serialization/json/JsonObject;",
+            superclass: "Lkotlinx/serialization/json/JsonElement;",
+            interfaces: ["Ljava/util/Map;"]
+        )
+        classType(
+            "Lkotlinx/serialization/json/JsonPrimitive;",
+            superclass: "Lkotlinx/serialization/json/JsonElement;"
+        )
+        classType(
+            "Lkotlinx/serialization/json/JsonNull;",
+            superclass: "Lkotlinx/serialization/json/JsonPrimitive;"
+        )
 
         return result
     }()

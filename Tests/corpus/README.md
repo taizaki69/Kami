@@ -3,17 +3,17 @@
 `manifest.json` is the authoritative lock for three deliberately separate
 roles:
 
-- `execution` fixtures are the nine real APKs used by constructor,
+- `execution` fixtures are the ten real APKs used by constructor,
   signature, and interpreted-operation tests.
-- `measurement` fixtures are the remaining 12 current lib 1.6 release APKs used
+- `measurement` fixtures are the remaining 11 current lib 1.6 release APKs used
   only for bounded parsing, structural planning, and static compatibility-gap
   ranking.
 - `conformance` fixtures are small AOSP apksig inputs, including intentionally
   invalid and unsigned APKs.
 
-The lock contains 27 APK artifacts: 9 execution, 12 measurement, and 6
-conformance fixtures. Thus 19 locked artifacts are current lib 1.6 (7 execution
-and 12 measurement).
+The lock contains 27 APK artifacts: 10 execution, 11 measurement, and 6
+conformance fixtures. Thus 19 locked artifacts are current lib 1.6 (8 execution
+and 11 measurement).
 
 The measurement set is behavior-stratified, not statistically sampled. It
 covers dominant generated families, custom/API-heavy sources, preferences,
@@ -24,12 +24,12 @@ the release signatures as parser conformance, but exact trust and admission
 remain in Kami's separate repository-key and install-admission policy, and
 executable profiles remain an explicit fail-closed catalog.
 
-The seven exact current-lib-1.6 executable profiles are BatCave, Kawii Manga,
-MangaMelon, Baozi Manhua, TuttoAnimeManga, Mangas-Origines.fr, and
-Komikcast/VoraToon. The current deterministic measurement baseline analyzed
-12/12 remaining artifacts, with 8 structural candidates, four stable-wrapper
-blockers, 484 unique unregistered external method surfaces, 0 omitted
-invocations, and 0 unsupported opcodes. These are static prioritization
+The eight exact current-lib-1.6 executable profiles are BatCave, Kawii Manga,
+MangaMelon, Baozi Manhua, TuttoAnimeManga, Mangas-Origines.fr,
+Komikcast/VoraToon, and Yomu Comics/SSSCanlator. The current deterministic
+measurement baseline analyzed 11/11 remaining artifacts, with 7 structural
+candidates, four stable-wrapper blockers, 432 unique unregistered external
+method surfaces, 0 omitted invocations, and 0 unsupported opcodes. These are static prioritization
 results, not a compatibility percentage or runtime proof.
 
 The fourth exact current-lib executable profile is Baozi Manhua 1.6.29
@@ -99,6 +99,23 @@ cross-launch storage. The profile does not claim live-site,
 Cloudflare/challenge, source-scoped image-interceptor/transform, or arbitrary
 dynamic-filter compatibility.
 
+The eighth exact current-lib executable profile is Yomu Comics/SSSCanlator
+1.6.59 (`eu.kanade.tachiyomi.extension.pt.sssscanlator`, version code 59).
+Its exact fixture is `sssscanlator.apk`, admitted only for SHA-256
+`2d7dfad2d4d293c58414b8905c6bcf454bcfb1a2bb6650a50d7480b0b9597883`, v2 signer
+fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, matching
+manifest identity, and declared source ID `1497838059713668619`. Deterministic
+real-APK regressions cover `pt-BR` metadata, popular/latest/text and edited
+filter search, the five-entry filter schema with dynamic `Gênero` refresh and
+bounded retry/fallback, Next.js RSC details/chapters/pages, `/obra`/`/ler`
+URL-search normalization, strict-majority decoy rejection, the 30-result
+pagination boundary, and inherited `Referer`/`Origin` image headers. Opposing
+JSON property orders prove that recursive RSC extraction selects the first
+matching result in source order. This exact offline evidence does not claim live-site,
+Cloudflare/challenge, arbitrary dynamic-filter, custom image-transform, or
+source-scoped reader-interceptor compatibility.
+
 On the downloaded-app path, the source factory preflights the exact profile
 source-ID set before DEX construction and postvalidates the IDs returned by the
 constructed source. Raw exact-profile constructors are intentionally limited to
@@ -127,9 +144,9 @@ All 27 exact APK fixtures are vendored so clean clones and CI remain
 deterministic even when upstream rotates release objects. The 21 Keiyoushi APKs
 are Apache-2.0 test inputs with attribution in
 `KEIYOUSHI-EXTENSIONS-NOTICE.md`; they are not linked into or shipped by the
-iOS app. The signer regression covers all nine real Keiyoushi execution APKs:
+iOS app. The signer regression covers all ten real Keiyoushi execution APKs:
 Akuma, MangaDex, BatCave, Kawii Manga, MangaMelon, Baozi Manhua,
-TuttoAnimeManga, Mangas-Origines.fr, and Komikcast.
+TuttoAnimeManga, Mangas-Origines.fr, Komikcast, and Yomu Comics.
 Verify every pinned byte sequence with:
 
 ```sh

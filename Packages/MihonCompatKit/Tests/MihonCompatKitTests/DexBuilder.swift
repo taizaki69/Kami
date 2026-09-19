@@ -546,11 +546,11 @@ enum Insn {
     static func newArray(_ dst: Int, _ size: Int, _ typeIdx: Int) -> [UInt16] {
         [0x23 | UInt16(size << 12) | UInt16(dst << 8), UInt16(typeIdx)]
     }
-    static func aput(_ value: Int, _ array: Int, _ index: Int) -> [UInt16] {
-        [0x4b | UInt16(value << 8), UInt16(array) | UInt16(index << 8)]
+    static func aput(_ value: Int, _ array: Int, _ index: Int, object: Bool = false) -> [UInt16] {
+        [(object ? 0x4d : 0x4b) | UInt16(value << 8), UInt16(array) | UInt16(index << 8)]
     }
-    static func aget(_ dst: Int, _ array: Int, _ index: Int) -> [UInt16] {
-        [0x44 | UInt16(dst << 8), UInt16(array) | UInt16(index << 8)]
+    static func aget(_ dst: Int, _ array: Int, _ index: Int, object: Bool = false) -> [UInt16] {
+        [(object ? 0x46 : 0x44) | UInt16(dst << 8), UInt16(array) | UInt16(index << 8)]
     }
     static func arrayLength(_ dst: Int, _ array: Int) -> [UInt16] {
         [0x21 | UInt16(array << 12) | UInt16(dst << 8)]
@@ -561,8 +561,8 @@ enum Insn {
     static func iget(_ dst: Int, _ obj: Int, _ fieldIdx: Int) -> [UInt16] {
         [0x52 | UInt16(obj << 12) | UInt16(dst << 8), UInt16(fieldIdx)]
     }
-    static func sget(_ dst: Int, _ fieldIdx: Int) -> [UInt16] {
-        [0x60 | UInt16(dst << 8), UInt16(fieldIdx)]
+    static func sget(_ dst: Int, _ fieldIdx: Int, object: Bool = false) -> [UInt16] {
+        [(object ? 0x62 : 0x60) | UInt16(dst << 8), UInt16(fieldIdx)]
     }
     static func sput(_ src: Int, _ fieldIdx: Int) -> [UInt16] {
         [0x67 | UInt16(src << 8), UInt16(fieldIdx)]
