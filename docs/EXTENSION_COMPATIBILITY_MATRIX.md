@@ -301,6 +301,15 @@ report above for current prioritization.
   ten deleted tests were duplicate metadata/construction smokes or helper-only
   checks already covered by stronger raw-DEX, app-facing, transport, and signer
   regressions; no distinct compatibility or safety boundary was removed.
+- Exact reader-retry checkpoint `fd15d76` passes
+  [Swift CI 35416577528](https://github.com/taizaki69/Kami/actions/runs/35416577528)
+  with 262/262 MihonCompatKit and 30/30 macOS KamiCore tests, all 27 fixtures,
+  and the optimized CLI upload. The six reader tests include ImageIO decode
+  recovery after bypassing invalid cached bytes and controlled concurrent
+  reloads. [iOS Build 35416577530](https://github.com/taizaki69/Kami/actions/runs/35416577530)
+  passes simulator and unsigned device, and
+  [IPA Package 35416577529](https://github.com/taizaki69/Kami/actions/runs/35416577529)
+  uploads the unsigned IPA. Physical-device interaction remains unverified.
 - Exact Yomu implementation head `966256a` passes
   [Swift CI 35414803631](https://github.com/taizaki69/Kami/actions/runs/35414803631)
   with 262/262 MihonCompatKit and 29/29 macOS KamiCore tests, all 27 fixtures,

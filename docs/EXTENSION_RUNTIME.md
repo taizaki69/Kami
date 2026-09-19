@@ -619,6 +619,17 @@ compatibility.
 
 ## Verification
 
+Exact reader-retry checkpoint `fd15d76` passes
+[Swift CI 35416577528](https://github.com/taizaki69/Kami/actions/runs/35416577528)
+with 262/262 MihonCompatKit and 30/30 macOS KamiCore tests, all 27 fixtures, and
+the optimized CLI upload. The reader regressions exercise cached invalid-body
+replacement followed by actual ImageIO decoding, exact changed headers,
+prefetch replacement, shared reloads, and caller cancellation. Its
+[iOS Build 35416577530](https://github.com/taizaki69/Kami/actions/runs/35416577530)
+passes simulator and unsigned device, and
+[IPA Package 35416577529](https://github.com/taizaki69/Kami/actions/runs/35416577529)
+uploads the unsigned IPA. Physical-device interaction remains unverified.
+
 The current local Windows/Swift 6.3.3 suites pass 262/262 MihonCompatKit tests
 and 19/19 portable KamiCore tests with the complete corpus present. The three
 `CorpusLockTests` regressions cover separated corpus roles, SHA/URL/fetcher and

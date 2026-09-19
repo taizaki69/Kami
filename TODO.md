@@ -225,14 +225,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       it into `ReaderImagePipeline`, initial URL/headers are validated before
       injected or production transport, HTTPS is the default, and HTTP requires
       explicit source opt-in. Redirects use the same source-scoped policy.
-- [~] On reader-image retry, regenerate and revalidate the source's
+- [x] On reader-image retry, regenerate and revalidate the source's
       `ImageRequest`, replace that page's request without resetting progress,
       and bypass cached bytes or superseded prefetches. Concurrent reloads must
       deduplicate. Requests are URL/header snapshots; explicit Retry refreshes
       them without merging old headers. There is no generic TTL or automatic
       authentication renewal. Local verification passes 262 MihonCompatKit and
-      19 portable KamiCore tests, with six focused reader regressions passing
-      after final fixture edits. Exact-head CI is pending.
+      19 portable KamiCore tests. Exact checkpoint `fd15d76` passes all 262
+      compatibility and 30 macOS core tests, including ImageIO decode recovery,
+      plus simulator/device builds and unsigned IPA packaging; see HANDOFF.md
+      for the three workflow runs. Physical-device interaction remains open.
 - [ ] Harden regex execution with a bounded or demonstrably linear-time
       matcher (or an explicit match-step budget). Current `NSRegularExpression`
       use is bounded by pattern/input/output sizes but not by worst-case match

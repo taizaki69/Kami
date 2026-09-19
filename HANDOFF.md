@@ -30,6 +30,9 @@ evidence is recorded below.
 The exact Yomu Comics/SSSCanlator 1.6.59 promotion and bounded ordered JSON/RSC
 traversal are implemented at `966256a8dee735acfe68d09b5ff31b30bbb059d5`;
 local verification and all three exact-head workflows pass as recorded below.
+Reader-image request regeneration, cache-bypassing Retry, and shared reload
+coverage are implemented through `fd15d76505220a5e9f267a7f97efc6e50194c04c`;
+local verification and all three exact-head workflows pass as recorded below.
 
 ## Start here
 
@@ -46,6 +49,11 @@ local verification and all three exact-head workflows pass as recorded below.
   `LICENSES.md` and issue #5.
 - Default branch: `main`
 - Current verified pushed implementation checkpoint:
+  `fd15d76505220a5e9f267a7f97efc6e50194c04c` (per-page source request
+  regeneration, exact-identity cache bypass, replacement of ordinary prefetch,
+  shared reloads, and ImageIO decode-recovery coverage). Local and exact-head
+  GitHub verification are complete below.
+- Previous verified exact Yomu checkpoint:
   `966256a8dee735acfe68d09b5ff31b30bbb059d5` (the eighth exact current
   profile, Yomu Comics/SSSCanlator 1.6.59, bounded generated JSON descriptors
   and decoding, and source-order-preserving JSON/RSC first-match traversal).
@@ -110,7 +118,8 @@ local verification and all three exact-head workflows pass as recorded below.
 - Expected state after cloning: clean `main`, tracking `origin/main`
 
 Always continue from the latest `origin/main`. The latest pushed implementation
-head is `966256a`; the previous exact Komikcast head is `fcf1b30`, the previous
+head is `fd15d76`; all three exact-head workflows pass. The previous exact
+Yomu head is `966256a`; the previous exact Komikcast head is `fcf1b30`, the previous
 exact Mangas-Origines.fr head is `0abc7f8`, the
 previous exact Tutto head is `cf02c77`; the first-gap diagnostics baseline is
 `b1cd246`, the observable reader-image baseline is `c9d62f1`, the retained
@@ -123,9 +132,9 @@ continuation commit may be newer than the implementation head.
 
 Current verified state on 2026-09-18 (America/Lima):
 
-- Reader-image Retry now regenerates the source's URL/header snapshot, replaces
-  only that page's request, and bypasses its compressed cache or ordinary
-  prefetch. Concurrent retries for the same identity share a reload. Generation
+- Reader-image Retry at `fd15d76` now regenerates the source's URL/header
+  snapshot, replaces only that page's request, and bypasses its compressed cache
+  or ordinary prefetch. Concurrent retries for the same identity share a reload. Generation
   and cancellation guards reject stale publication, hidden execution UUIDs
   retain source isolation, and chapter progress/history are preserved. There
   is no generic request TTL or automatic credential renewal.
@@ -134,8 +143,17 @@ Current verified state on 2026-09-18 (America/Lima):
   fixture changes. The tests cover invalid-body cache recovery, exact changed
   headers, controlled prefetch replacement, shared retries, and cancellation
   of the initiating caller. Baozi's real-APK scenario also proves a fresh
-  source-execution UUID on request regeneration. Exact-head macOS/iOS/IPA CI
-  for this change is pending; physical-device interaction is unverified.
+  source-execution UUID on request regeneration.
+- Exact reader-retry head `fd15d76` passes
+  [Swift CI 35416577528](https://github.com/taizaki69/Kami/actions/runs/35416577528)
+  with 262/262 MihonCompatKit and 30/30 macOS KamiCore tests, all 27 locked
+  fixtures, the optimized CLI, and its uploaded artifact under Xcode 16.4 /
+  Swift 6.1.2. The six reader tests include actual ImageIO rejection of the
+  invalid cached bytes and successful decoding of the replacement PNG.
+  [iOS Build 35416577530](https://github.com/taizaki69/Kami/actions/runs/35416577530)
+  passes simulator and unsigned device, and
+  [IPA Package 35416577529](https://github.com/taizaki69/Kami/actions/runs/35416577529)
+  uploads `Kami-unsigned-ipa`. Physical-device interaction remains unverified.
 - Commit `966256a` adds the eighth exact app-facing profile, Yomu
   Comics/SSSCanlator 1.6.59, after exact SHA-256, Keiyoushi signer,
   manifest/package/version, source-ID, and structural-plan checks. Its exact

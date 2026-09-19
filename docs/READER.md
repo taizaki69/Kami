@@ -100,6 +100,15 @@ execution UUIDs remain part of request identity. Requests have no generic TTL;
 explicit Retry is the refresh trigger and does not imply automatic login,
 OAuth, challenge, or credential renewal.
 
+All six reader regressions pass locally on Windows. At exact checkpoint
+`fd15d76`, [Swift CI](https://github.com/taizaki69/Kami/actions/runs/35416577528)
+passes them on macOS and proves ImageIO rejects the invalid cached body and decodes the replacement
+PNG. [iOS Build](https://github.com/taizaki69/Kami/actions/runs/35416577530)
+passes simulator and unsigned-device compilation, and
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/35416577529)
+uploads the unsigned app. Physical-device interaction and performance remain
+unverified.
+
 ## Tracked next
 
 1. Previous/next chapter navigation, end-of-chapter behavior, and configurable
