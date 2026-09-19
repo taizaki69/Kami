@@ -97,7 +97,11 @@ final class ReaderSupportTests: XCTestCase {
         XCTAssertEqual(refreshedCachedData, validImage)
         XCTAssertEqual(changedHeadersData, Data([5, 6]))
         #if canImport(ImageIO)
-        XCTAssertNil(CGImageSourceCreateWithData(cachedData as CFData, nil))
+        // ImageIO may create a source for unrecognized bytes. Actual image
+        // decoding, rather than source creation, determines reader usability.
+        let invalidSource = CGImageSourceCreateWithData(cachedData as CFData, nil)
+        let invalidImage = invalidSource.flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+        XCTAssertNil(invalidImage)
         let imageSource = try XCTUnwrap(CGImageSourceCreateWithData(refreshedData as CFData, nil))
         let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(imageSource, 0, nil))
         XCTAssertEqual(image.width, 1)
