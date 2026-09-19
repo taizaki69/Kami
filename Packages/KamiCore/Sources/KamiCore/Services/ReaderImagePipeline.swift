@@ -18,6 +18,13 @@ public enum ReaderImagePipelineError: Error, LocalizedError, Sendable, Equatable
     }
 }
 
+/// Controls whether one reader image load may reuse compressed bytes already
+/// cached for the same public and source-scoped request identity.
+public enum ReaderImageLoadPolicy: Sendable {
+    case useCache
+    case reload
+}
+
 /// Source-scoped, bounded compressed-image loading for the reader. Production
 /// requests reuse MihonCompatKit's streaming transport, redirect policy,
 /// header validation, body limit, and isolated cookie jar. Interpreted sources
@@ -34,6 +41,8 @@ public actor ReaderImagePipeline {
     private struct InFlightRequest {
         let id: UUID
         let task: Task<Data, Error>
+        let isReload: Bool
+        var waiterCount = 1
     }
 
     private let transport: any CompatHTTPTransport
@@ -72,18 +81,15 @@ public actor ReaderImagePipeline {
         )
     }
 
-    public func data(for imageRequest: ImageRequest) async throws -> Data {
-        let key = Self.cacheKey(for: imageRequest)
-        if var entry = cache[key] {
-            accessCounter &+= 1
-            entry.lastAccess = accessCounter
-            cache[key] = entry
-            return entry.data
-        }
-        if let existing = inFlight[key] {
-            return try await existing.task.value
-        }
+    public func data(
+        for imageRequest: ImageRequest,
+        policy: ReaderImageLoadPolicy = .useCache
+    ) async throws -> Data {
+        try Task.checkCancellation()
 
+        // Validate every public projection before cache or in-flight lookup.
+        // This keeps a newly regenerated request subject to the same URL and
+        // header policy even when an older request used the same cache key.
         let request = CompatHTTPRequest(
             url: imageRequest.url,
             method: "GET",
@@ -95,10 +101,56 @@ public actor ReaderImagePipeline {
                 .map { CompatHTTPHeader(name: $0.key, value: $0.value) }
         )
         try transportPolicy.validate(request: request)
+        try Task.checkCancellation()
+
+        let key = Self.cacheKey(for: imageRequest)
+
+        switch policy {
+        case .useCache:
+            if var entry = cache[key] {
+                try Task.checkCancellation()
+                accessCounter &+= 1
+                entry.lastAccess = accessCounter
+                cache[key] = entry
+                return entry.data
+            }
+        case .reload:
+            // A retry must not replay a successful but undecodable 200 body.
+            // If an ordinary prefetch is using this exact identity, cancel it
+            // before replacing the in-flight entry. An already active reload
+            // remains the shared flight for concurrent reload callers.
+            try Task.checkCancellation()
+            if let existing = inFlight[key], !existing.isReload {
+                existing.task.cancel()
+                inFlight.removeValue(forKey: key)
+            }
+            if let previous = cache.removeValue(forKey: key) {
+                cachedBytes -= previous.data.count
+            }
+        }
+
+        if var existing = inFlight[key] {
+            existing.waiterCount += 1
+            inFlight[key] = existing
+            defer {
+                if inFlight[key]?.id == existing.id {
+                    inFlight[key]?.waiterCount -= 1
+                }
+            }
+            return try await existing.task.value
+        }
+
+        try Task.checkCancellation()
         let transport = self.transport
         let maximumImageBytes = self.maximumImageBytes
         let requestID = UUID()
+        let isReload: Bool
+        switch policy {
+        case .useCache: isReload = false
+        case .reload: isReload = true
+        }
         let task = Task<Data, Error> {
+            try Task.checkCancellation()
             let response: CompatHTTPResponse
             if let sourceResponse = try await imageRequest.executeSourceRequest() {
                 response = sourceResponse
@@ -117,12 +169,15 @@ public actor ReaderImagePipeline {
             }
             return Data(response.body)
         }
-        inFlight[key] = InFlightRequest(id: requestID, task: task)
+        inFlight[key] = InFlightRequest(id: requestID, task: task, isReload: isReload)
 
         do {
             let data = try await task.value
             if inFlight[key]?.id == requestID {
                 inFlight.removeValue(forKey: key)
+                // The shared flight may still serve other callers after this
+                // waiter is canceled. clear()/reload supersede it by ID; the
+                // flight itself checks cancellation before returning bytes.
                 insert(data, for: key)
             }
             return data
@@ -153,8 +208,8 @@ public actor ReaderImagePipeline {
         cachedBytes = 0
     }
 
-    func cacheStatistics() -> (entries: Int, bytes: Int) {
-        (cache.count, cachedBytes)
+    func cacheStatistics() -> (entries: Int, bytes: Int, inFlightWaiters: Int) {
+        (cache.count, cachedBytes, inFlight.values.reduce(0) { $0 + $1.waiterCount })
     }
 
     private func insert(_ data: Data, for key: String) {

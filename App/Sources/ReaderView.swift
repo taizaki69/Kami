@@ -7,6 +7,7 @@ import KamiCore
 /// Page bytes flow through ReaderImagePipeline so source headers, redirect
 /// policy, streamed limits, isolated cookies, cache bounds, and prefetching are
 /// shared across every visible page in this chapter.
+@MainActor
 struct ReaderView: View {
     let mangaTitle: String
     let chapter: Chapter
@@ -171,13 +172,17 @@ struct ReaderView: View {
             ForEach(pages.indices, id: \.self) { index in
                 ReaderPageImage(
                     pageNumber: index + 1,
+                    page: pages[index],
+                    source: source,
                     request: imageRequest(at: index),
+                    requestGeneration: loadGeneration,
                     store: imageStore,
                     layout: .paged,
                     isActive: abs(index - currentIndex) <= 1,
                     background: backgroundColor,
                     foreground: foregroundColor,
-                    onSingleTap: handlePagedTap
+                    onSingleTap: handlePagedTap,
+                    onRequestRefresh: imageRequestPublisher(at: index)
                 )
                 .tag(index)
             }
@@ -210,13 +215,17 @@ struct ReaderView: View {
                         ForEach(pages.indices, id: \.self) { index in
                             ReaderPageImage(
                                 pageNumber: index + 1,
+                                page: pages[index],
+                                source: source,
                                 request: imageRequest(at: index),
+                                requestGeneration: loadGeneration,
                                 store: imageStore,
                                 layout: .webtoon,
                                 isActive: true,
                                 background: backgroundColor,
                                 foreground: foregroundColor,
-                                onSingleTap: { _ in toggleChrome() }
+                                onSingleTap: { _ in toggleChrome() },
+                                onRequestRefresh: imageRequestPublisher(at: index)
                             )
                             .id(index)
                             .background {
@@ -266,6 +275,17 @@ struct ReaderView: View {
     private func imageRequest(at index: Int) -> ImageRequest? {
         guard imageRequests.indices.contains(index) else { return nil }
         return imageRequests[index]
+    }
+
+    private func imageRequestPublisher(at index: Int) -> @MainActor (ImageRequest?) -> Bool {
+        let generation = loadGeneration
+        return { request in
+            guard !Task.isCancelled,
+                  generation == loadGeneration,
+                  imageRequests.indices.contains(index) else { return false }
+            imageRequests[index] = request
+            return true
+        }
     }
 
     private func handlePagedTap(_ horizontalFraction: CGFloat) {

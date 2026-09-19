@@ -178,7 +178,7 @@ measurement audit covers 11/11 artifacts and reports 7 structural candidates,
 4 stable-wrapper blockers, 432 unique unregistered external method surfaces,
 0 omitted invocations, and 0 unsupported opcodes. Static ranking guides the
 next probe without granting admission. Current Windows verification is
-262/262 MihonCompatKit tests and 18/18 portable KamiCore tests; exact-head
+262/262 MihonCompatKit tests and 19/19 portable KamiCore tests; exact-head
 macOS/iOS evidence is recorded in HANDOFF.md.
 
 ## Concurrency model

@@ -82,10 +82,23 @@ downloaded-source factory explicitly defaults `BAOZI_BANNER=0`; explicit modes
 1/2 keep the safe URL/header path. General source-operation and non-GET OkHttp
 follow-up semantics remain outside this measured reader seam.
 
-Per-page image retry currently restarts the image task with the same resolved
-`ImageRequest`; it does not regenerate the request from the source or define
-expiry/credential-refresh behavior. Retry-time request regeneration and expiry
-semantics are explicitly deferred.
+Explicit per-page Retry asks the source for a fresh `ImageRequest` and replaces
+that page's URL/header snapshot without merging old headers or changing chapter
+progress/history. A nil result fails without falling back to the old request.
+Generation and cancellation checks prevent late source resolutions from
+publishing into another chapter load. Ordinary page reactivation reuses the
+latest snapshot; a retry interrupted before its image fetch completes keeps its
+cache bypass pending.
+
+The pipeline validates each public request before cache or in-flight reuse.
+Retry removes the exact identity's compressed cache entry, including a 200 body
+that later failed ImageIO decoding, and replaces any ordinary prefetch for that
+identity. Concurrent retries share an active reload. UUID guards prevent a
+superseded flight from clearing or populating the new flight's cache entry, and
+canceling the initiating caller does not discard a shared result. Source-owned
+execution UUIDs remain part of request identity. Requests have no generic TTL;
+explicit Retry is the refresh trigger and does not imply automatic login,
+OAuth, challenge, or credential renewal.
 
 ## Tracked next
 

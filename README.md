@@ -273,8 +273,8 @@ remain open; see `docs/READER.md`.
 Chapter retry is driven by a structured `.task(id: reloadID)`; changing the
 reload ID restarts the chapter load. Dismissing the reader runs its disappearance
 cleanup, increments the load generation, and prevents an in-flight page list or
-image-request resolution from publishing stale state. Per-page image retry is
-still deferred from regenerating an `ImageRequest` or defining request expiry.
+image-request resolution from publishing stale state. Per-page image retry
+regenerates the source request under the same generation and cancellation guards.
 
 For Baozi, `ReaderView` resolves each page's exact DEX-backed `ImageRequest`
 asynchronously. An opaque source-owned capability keeps the mutable DEX
@@ -303,6 +303,14 @@ explicitly configured for it; the same policy continues to govern redirects.
 For ordinary page-URL profiles, source-derived credentials remain bound to the
 source origin while safe CDN headers such as `Referer` and `Origin` can follow
 cross-origin image URLs.
+
+Explicit page-image Retry asks the source for a fresh URL/header snapshot and
+reloads that image instead of reusing cached bytes, including a previously
+cached 200 response that failed image decoding. Concurrent retries for the same
+request share a load, while a superseded prefetch cannot overwrite the refreshed
+cache entry. The refreshed request replaces only that page's request; chapter
+position and history are retained. Requests have no generic expiry timestamp,
+and this does not imply automatic login or credential renewal.
 
 This is still not a claim of broad extension execution: the runtime profile
 catalog recognizes only the exact measured BatCave 1.6.9, Kawii Manga 1.6.1,
@@ -360,7 +368,9 @@ The compatibility kit runs locally on Windows with Swift 6.3 through
 `scripts/windows_dev_test.bat`, including the Baozi, TuttoAnimeManga,
 Mangas-Origines.fr, Komikcast, and Yomu real-APK regressions and portable
 KamiCore coverage. The current local suites pass 262/262 MihonCompatKit tests
-and 18/18 portable KamiCore tests. Exact Yomu implementation head `966256a`
+and 19/19 portable KamiCore tests. The reader retry regression additionally
+passes all six focused reader tests after the final fixture changes. Exact
+Yomu implementation head `966256a`
 passes [Swift CI](https://github.com/taizaki69/Kami/actions/runs/35414803631)
 with 262/262 MihonCompatKit and 29/29 macOS KamiCore tests, all 27 fixtures,
 and the optimized CLI upload;

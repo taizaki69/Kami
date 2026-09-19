@@ -544,10 +544,22 @@ non-GET retries do not yet use this response-sequence seam.
 Reader chapter retry is driven by a structured `.task(id: reloadID)`; changing
 the reload identity restarts the cancellable chapter load. Reader dismissal
 runs disappearance cleanup and increments the load generation, so stale page
-lists or image-request resolutions cannot publish after teardown. Per-page
-image retry currently reuses the resolved `ImageRequest`; regenerating and
-revalidating that request, including expiry and credential-refresh semantics,
-is explicitly deferred. Reader image fetching inherits each source's admitted
+lists or image-request resolutions cannot publish after teardown. Explicit
+per-page Retry calls `getImageRequest(page:)` again, publishes the new optional
+snapshot only while its chapter generation is current, and reloads the image
+without resetting the page index. A failed refresh never falls back to the old
+request. Page reactivation reuses the latest snapshot instead of repeating the
+source call; an interrupted retry retains its pending cache bypass.
+
+The image pipeline validates the new public URL and headers before cache lookup
+or source execution. Reload bypasses that request identity's cached bytes,
+replaces an ordinary in-flight prefetch, and joins an already-running reload.
+Request IDs prevent superseded completions from changing the refreshed cache.
+This also recovers from nonempty 200 responses rejected later by image decoding.
+Source execution UUIDs remain part of the cache identity. `ImageRequest` is a
+URL/header snapshot with no generic TTL: explicit Retry is the refresh trigger,
+headers are replaced rather than merged, and login/OAuth/Cloudflare renewal is
+not inferred. Reader image fetching inherits each source's admitted
 transport policy, defaults to HTTPS-only, validates the initial URL/headers
 before injected or production transport, permits HTTP only through explicit
 source opt-in, and applies the same policy to redirects.
@@ -608,7 +620,7 @@ compatibility.
 ## Verification
 
 The current local Windows/Swift 6.3.3 suites pass 262/262 MihonCompatKit tests
-and 18/18 portable KamiCore tests with the complete corpus present. The three
+and 19/19 portable KamiCore tests with the complete corpus present. The three
 `CorpusLockTests` regressions cover separated corpus roles, SHA/URL/fetcher and
 manifest/signature checks, and the deterministic static measurement baseline.
 The signer regressions exercise all ten real Keiyoushi execution APKs:

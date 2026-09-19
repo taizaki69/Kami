@@ -297,7 +297,7 @@ report above for current prioritization.
 ## Test evidence
 
 - The current local Windows/Swift 6.3.3 suites pass 262/262 MihonCompatKit tests
-  and 18/18 portable KamiCore tests with all 27 corpus fixtures present. The
+  and 19/19 portable KamiCore tests with all 27 corpus fixtures present. The
   ten deleted tests were duplicate metadata/construction smokes or helper-only
   checks already covered by stronger raw-DEX, app-facing, transport, and signer
   regressions; no distinct compatibility or safety boundary was removed.
@@ -498,8 +498,12 @@ the exact APK now follows that rewritten source-host URL to final image bytes.
 Banner cropping, general source-operation response sequences, and non-GET
 follow-up semantics remain unproven. Remaining
 reader chapter retry uses a structured `.task(id: reloadID)` and dismissal
-invalidates the load generation; per-page retry still reuses its resolved
-`ImageRequest`, so retry-time request regeneration/expiry remains deferred.
+invalidates the load generation. Explicit per-page Retry regenerates the source
+`ImageRequest`, publishes it only for the current chapter generation, and
+bypasses cached image bytes without resetting page progress. Concurrent reloads
+deduplicate; a superseded prefetch cannot overwrite the refreshed cache.
+Ordinary page reactivation keeps the latest request snapshot. Generic TTL-based
+expiry and automatic authentication renewal are not part of this contract.
 Reader image fetching now inherits each source's admitted transport policy,
 defaults to HTTPS-only, validates initial URL/headers before transport, and
 permits HTTP only through explicit source opt-in; redirects use the same

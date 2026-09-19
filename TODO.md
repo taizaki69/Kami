@@ -26,7 +26,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       unregistered external method surfaces, zero omitted invocations, and zero
       unsupported opcodes. This is prioritization evidence, not a statistical
       sample or execution/admission proof. Current Windows verification through
-      the checked-in helper passes 262/262 MihonCompatKit and 18/18 portable
+      the checked-in helper passes 262/262 MihonCompatKit and 19/19 portable
       KamiCore tests; historical test counts remain documented in the
       compatibility-matrix evidence. Komikcast and Yomu Comics are now exact
       execution profiles rather than measurement candidates.
@@ -225,10 +225,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
       it into `ReaderImagePipeline`, initial URL/headers are validated before
       injected or production transport, HTTPS is the default, and HTTP requires
       explicit source opt-in. Redirects use the same source-scoped policy.
-- [ ] On reader-image retry, regenerate and revalidate the source's
-      `ImageRequest`, and define request/header expiry and credential-refresh
-      semantics. The current retry task reuses the request resolved during page
-      loading.
+- [~] On reader-image retry, regenerate and revalidate the source's
+      `ImageRequest`, replace that page's request without resetting progress,
+      and bypass cached bytes or superseded prefetches. Concurrent reloads must
+      deduplicate. Requests are URL/header snapshots; explicit Retry refreshes
+      them without merging old headers. There is no generic TTL or automatic
+      authentication renewal. Local verification passes 262 MihonCompatKit and
+      19 portable KamiCore tests, with six focused reader regressions passing
+      after final fixture edits. Exact-head CI is pending.
 - [ ] Harden regex execution with a bounded or demonstrably linear-time
       matcher (or an explicit match-step budget). Current `NSRegularExpression`
       use is bounded by pattern/input/output sizes but not by worst-case match

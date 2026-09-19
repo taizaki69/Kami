@@ -123,6 +123,19 @@ continuation commit may be newer than the implementation head.
 
 Current verified state on 2026-09-18 (America/Lima):
 
+- Reader-image Retry now regenerates the source's URL/header snapshot, replaces
+  only that page's request, and bypasses its compressed cache or ordinary
+  prefetch. Concurrent retries for the same identity share a reload. Generation
+  and cancellation guards reject stale publication, hidden execution UUIDs
+  retain source isolation, and chapter progress/history are preserved. There
+  is no generic request TTL or automatic credential renewal.
+- Local verification for the reader change passes all 262 MihonCompatKit and
+  19 portable KamiCore tests; all six focused reader tests pass after final
+  fixture changes. The tests cover invalid-body cache recovery, exact changed
+  headers, controlled prefetch replacement, shared retries, and cancellation
+  of the initiating caller. Baozi's real-APK scenario also proves a fresh
+  source-execution UUID on request regeneration. Exact-head macOS/iOS/IPA CI
+  for this change is pending; physical-device interaction is unverified.
 - Commit `966256a` adds the eighth exact app-facing profile, Yomu
   Comics/SSSCanlator 1.6.59, after exact SHA-256, Keiyoushi signer,
   manifest/package/version, source-ID, and structural-plan checks. Its exact
@@ -158,7 +171,7 @@ Current verified state on 2026-09-18 (America/Lima):
   unregistered method surfaces, zero omitted invocations, and zero unsupported
   opcodes. These are static prioritization results, not runtime compatibility
   proof.
-- Local Windows/Swift 6.3.3 verification passes 262/262 MihonCompatKit tests
+- The Yomu checkpoint's local Windows/Swift 6.3.3 verification passed 262/262 MihonCompatKit tests
   with zero skips, 18/18 portable KamiCore tests, the release `compat-audit`
   build, and the full Yomu factory admission test. Two optimized measurement
   runs are byte-identical (SHA-256
@@ -167,7 +180,7 @@ Current verified state on 2026-09-18 (America/Lima):
   surfaces, 0 omitted invocations, and 0 unsupported opcodes. Both reports are
   74,123 bytes, match the debug output, and contain none of the checked local
   path or request-secret markers.
-- Exact implementation-head [Swift CI 35414803631](https://github.com/taizaki69/Kami/actions/runs/35414803631)
+- Exact Yomu implementation-head [Swift CI 35414803631](https://github.com/taizaki69/Kami/actions/runs/35414803631)
   passes with all 27 locked fixtures, 262/262 MihonCompatKit tests, 29/29
   macOS KamiCore tests, the optimized CLI, and its uploaded artifact under
   Xcode 16.4 / Swift 6.1.2. [iOS Build 35414803726](https://github.com/taizaki69/Kami/actions/runs/35414803726)
@@ -319,9 +332,10 @@ Historical verified milestone ledger through 2026-08-30:
   admission and the sole factory. Source-model outputs are bounded at the host
   seam (2,048 manga/page entries, 20,000 chapters per update, and 8 KiB `Page`
   URL/image URL fields). Chapter retry uses structured `.task(id: reloadID)` and
-  dismissal cleanup invalidates its load generation; retry-time image-request
-  regeneration/expiry and bounded or linear-time regex hardening remain deferred
-  TODOs. Reader image fetching now inherits the source's admitted transport
+  dismissal cleanup invalidates its load generation. Retry-time image-request
+  regeneration was deferred at this checkpoint and is implemented at the
+  current resume point above; bounded or linear-time regex hardening remains
+  open. Reader image fetching now inherits the source's admitted transport
   policy, defaults to HTTPS-only, validates URL/headers before injected or
   production transport, and permits HTTP only through explicit source opt-in;
   redirect policy remains source-scoped as well. Ordinary page-URL profiles

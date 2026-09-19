@@ -20,8 +20,11 @@ final class ReaderImageStore: ObservableObject {
         )
     }
 
-    func data(for request: ImageRequest) async throws -> Data {
-        try await pipeline.data(for: request)
+    func data(
+        for request: ImageRequest,
+        policy: ReaderImageLoadPolicy = .useCache
+    ) async throws -> Data {
+        try await pipeline.data(for: request, policy: policy)
     }
 
     func prefetch(_ requests: [ImageRequest]) {
@@ -50,6 +53,7 @@ final class ReaderImageStore: ObservableObject {
     }
 }
 
+@MainActor
 struct ReaderPageImage: View {
     enum Layout {
         case paged
@@ -57,18 +61,24 @@ struct ReaderPageImage: View {
     }
 
     let pageNumber: Int
+    let page: PageCompat
+    let source: (any KamiSource)?
     let request: ImageRequest?
+    let requestGeneration: Int
     @ObservedObject var store: ReaderImageStore
     let layout: Layout
     let isActive: Bool
     let background: Color
     let foreground: Color
     let onSingleTap: (CGFloat) -> Void
+    let onRequestRefresh: @MainActor (ImageRequest?) -> Bool
 
     @State private var image: UIImage?
     @State private var loading = true
     @State private var errorText: String?
     @State private var attempt = 0
+    @State private var lastResolvedAttempt = 0
+    @State private var lastLoadedAttempt = 0
 
     var body: some View {
         Group {
@@ -119,7 +129,7 @@ struct ReaderPageImage: View {
                     Text(errorText ?? "Failed to load page \(pageNumber)")
                         .font(.footnote)
                         .multilineTextAlignment(.center)
-                    Button("Retry") { attempt += 1 }
+                    Button("Retry") { attempt &+= 1 }
                         .buttonStyle(.bordered)
                 }
                 .foregroundStyle(foreground)
@@ -130,10 +140,11 @@ struct ReaderPageImage: View {
     }
 
     private var loadID: String {
-        "\(attempt):\(isActive)"
+        "\(requestGeneration):\(attempt):\(isActive)"
     }
 
     private func loadImage() async {
+        guard !Task.isCancelled else { return }
         guard isActive else {
             image = nil
             loading = false
@@ -143,13 +154,30 @@ struct ReaderPageImage: View {
         loading = true
         errorText = nil
         image = nil
-        guard let request else {
+        var resolvedRequest = request
+        let requestedAttempt = attempt
+        if requestedAttempt != lastResolvedAttempt {
+            // Retry obtains a new source-owned URL/header snapshot. Ordinary
+            // page reactivation keeps the most recently published request.
+            resolvedRequest = await source?.getImageRequest(page: page)
+            guard !Task.isCancelled,
+                  onRequestRefresh(resolvedRequest) else { return }
+            lastResolvedAttempt = requestedAttempt
+        }
+        guard let resolvedRequest else {
             errorText = "The source did not provide a valid image request."
             loading = false
             return
         }
         do {
-            let data = try await store.data(for: request)
+            // Keep a canceled retry's cache bypass pending across page
+            // reactivation, without resolving the source snapshot again.
+            let policy: ReaderImageLoadPolicy = requestedAttempt == lastLoadedAttempt
+                ? .useCache
+                : .reload
+            let data = try await store.data(for: resolvedRequest, policy: policy)
+            try Task.checkCancellation()
+            lastLoadedAttempt = requestedAttempt
             let decoded = try await ReaderImageDecoder.decode(
                 data,
                 maximumPixelDimension: layout == .paged ? 6_144 : 4_096

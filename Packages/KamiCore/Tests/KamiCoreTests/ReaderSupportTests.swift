@@ -1,6 +1,9 @@
 import Foundation
 import XCTest
 import MihonCompatKit
+#if canImport(ImageIO)
+import ImageIO
+#endif
 @testable import KamiCore
 
 final class ReaderSupportTests: XCTestCase {
@@ -38,17 +41,34 @@ final class ReaderSupportTests: XCTestCase {
     }
 
     func testImagePipelineForwardsHeadersDeduplicatesAndCaches() async throws {
+        // A complete one-pixel RGBA PNG, so Apple-hosted verification also
+        // proves that the replacement response reaches a working image decode.
+        let validImage = try XCTUnwrap(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg=="
+        ))
         let transport = RecordingImageTransport(responses: [
             CompatHTTPResponse(
                 finalURL: "https://cdn.example/page.jpg",
                 statusCode: 200,
-                body: [1, 2, 3, 4]
+                // Transport accepts these bytes; the app-level image decoder
+                // would reject them. A retry must not replay this cache entry.
+                body: [0, 1, 2, 3]
+            ),
+            CompatHTTPResponse(
+                finalURL: "https://cdn.example/page.jpg",
+                statusCode: 200,
+                body: Array(validImage)
+            ),
+            CompatHTTPResponse(
+                finalURL: "https://cdn.example/page.jpg",
+                statusCode: 200,
+                body: [5, 6]
             ),
         ])
         let pipeline = ReaderImagePipeline(
             sourceID: "42",
-            maximumImageBytes: 16,
-            maximumCacheBytes: 16,
+            maximumImageBytes: 128,
+            maximumCacheBytes: 256,
             transport: transport
         )
         let imageRequest = ImageRequest(
@@ -60,21 +80,143 @@ final class ReaderSupportTests: XCTestCase {
         async let second = pipeline.data(for: imageRequest)
         let (firstData, secondData) = try await (first, second)
         let cachedData = try await pipeline.data(for: imageRequest)
-        XCTAssertEqual(firstData, Data([1, 2, 3, 4]))
-        XCTAssertEqual(secondData, Data([1, 2, 3, 4]))
-        XCTAssertEqual(cachedData, Data([1, 2, 3, 4]))
+        let refreshedData = try await pipeline.data(
+            for: imageRequest,
+            policy: .reload
+        )
+        let refreshedCachedData = try await pipeline.data(for: imageRequest)
+        let changedHeadersRequest = ImageRequest(
+            url: imageRequest.url,
+            headers: ["Referer": "https://reader.example", "X-App": "refreshed"]
+        )
+        let changedHeadersData = try await pipeline.data(for: changedHeadersRequest)
+        XCTAssertEqual(firstData, Data([0, 1, 2, 3]))
+        XCTAssertEqual(secondData, Data([0, 1, 2, 3]))
+        XCTAssertEqual(cachedData, Data([0, 1, 2, 3]))
+        XCTAssertEqual(refreshedData, validImage)
+        XCTAssertEqual(refreshedCachedData, validImage)
+        XCTAssertEqual(changedHeadersData, Data([5, 6]))
+        #if canImport(ImageIO)
+        XCTAssertNil(CGImageSourceCreateWithData(cachedData as CFData, nil))
+        let imageSource = try XCTUnwrap(CGImageSourceCreateWithData(refreshedData as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(imageSource, 0, nil))
+        XCTAssertEqual(image.width, 1)
+        XCTAssertEqual(image.height, 1)
+        #endif
 
         let requests = await transport.recordedRequests()
-        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.count, 3)
         XCTAssertEqual(requests[0].url, imageRequest.url)
         XCTAssertEqual(requests[0].method, "GET")
         XCTAssertEqual(requests[0].headers, [
             CompatHTTPHeader(name: "Referer", value: "https://reader.example"),
             CompatHTTPHeader(name: "X-App", value: "kami"),
         ])
+        XCTAssertEqual(requests[1].headers, requests[0].headers)
+        XCTAssertEqual(requests[2].headers, [
+            CompatHTTPHeader(name: "Referer", value: "https://reader.example"),
+            CompatHTTPHeader(name: "X-App", value: "refreshed"),
+        ])
         let statistics = await pipeline.cacheStatistics()
-        XCTAssertEqual(statistics.entries, 1)
-        XCTAssertEqual(statistics.bytes, 4)
+        XCTAssertEqual(statistics.entries, 2)
+        XCTAssertEqual(statistics.bytes, validImage.count + 2)
+    }
+
+    func testImagePipelineReloadReplacesOrdinaryFlightAndDeduplicatesReloads() async throws {
+        let ordinaryStarted = expectation(description: "ordinary image request started")
+        let reloadStarted = expectation(description: "reload image request started")
+        let transport = GatedImageTransport(fallbackResponse: CompatHTTPResponse(
+            finalURL: "https://cdn.example/gated.jpg",
+            statusCode: 200,
+            body: [9, 8, 7]
+        ), onRequest: { count in
+            if count == 1 { ordinaryStarted.fulfill() }
+            if count == 2 { reloadStarted.fulfill() }
+        })
+        defer { Task { await transport.finish() } }
+        let pipeline = ReaderImagePipeline(
+            sourceID: "reload-gate",
+            maximumImageBytes: 16,
+            maximumCacheBytes: 16,
+            transport: transport
+        )
+        let imageRequest = ImageRequest(url: "https://cdn.example/gated.jpg")
+
+        let ordinary = Task<Data, Error> {
+            try await pipeline.data(for: imageRequest)
+        }
+        guard await XCTWaiter.fulfillment(of: [ordinaryStarted], timeout: 5) == .completed else {
+            ordinary.cancel()
+            XCTFail("ordinary image request did not start")
+            return
+        }
+
+        let reload = Task<Data, Error> {
+            try await pipeline.data(for: imageRequest, policy: .reload)
+        }
+        guard await XCTWaiter.fulfillment(of: [reloadStarted], timeout: 5) == .completed else {
+            ordinary.cancel()
+            reload.cancel()
+            XCTFail("reload did not replace the ordinary flight")
+            return
+        }
+
+        // A canceled transport may finish late. Its completion must not remove
+        // the replacement flight that is still waiting for its own response.
+        await transport.resumeNext(with: CompatHTTPResponse(
+            finalURL: imageRequest.url,
+            statusCode: 200,
+            body: [1, 2, 3]
+        ))
+        do {
+            _ = try await ordinary.value
+            XCTFail("ordinary prefetch should be canceled by reload")
+        } catch is CancellationError {
+            // Expected: the stale ordinary flight must not publish its body.
+        }
+
+        // Keep the replacement flight suspended while the second reload call
+        // enters the actor. It must join the active reload instead of causing a
+        // third exchange.
+        let concurrentReload = Task<Data, Error> {
+            try await pipeline.data(for: imageRequest, policy: .reload)
+        }
+        let joined = expectation(description: "concurrent retry joined the reload")
+        let observer = Task {
+            while !Task.isCancelled {
+                if await pipeline.cacheStatistics().inFlightWaiters == 2 {
+                    joined.fulfill()
+                    return
+                }
+                await Task.yield()
+            }
+        }
+        let joinResult = await XCTWaiter.fulfillment(of: [joined], timeout: 5)
+        observer.cancel()
+        guard joinResult == .completed else {
+            reload.cancel()
+            concurrentReload.cancel()
+            XCTFail("concurrent retry did not join the active reload")
+            return
+        }
+
+        // Canceling the initiating caller must not discard the shared result
+        // needed by the other retry or by a later ordinary cache lookup.
+        reload.cancel()
+        await transport.resumeNext(with: CompatHTTPResponse(
+            finalURL: imageRequest.url,
+            statusCode: 200,
+            body: [9, 8, 7]
+        ))
+
+        _ = try? await reload.value
+        let concurrentlyReloaded = try await concurrentReload.value
+        XCTAssertEqual(concurrentlyReloaded, Data([9, 8, 7]))
+
+        let cached = try await pipeline.data(for: imageRequest)
+        XCTAssertEqual(cached, Data([9, 8, 7]))
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 2)
     }
 
     func testImagePipelineUsesSourceScopedExecutionAndSeparatesHiddenCacheIdentity() async throws {
@@ -227,6 +369,56 @@ private actor SourceImageExecutionProbe {
     }
 
     func executionCount() -> Int { count }
+}
+
+private actor GatedImageTransport: CompatHTTPTransport {
+    nonisolated let sourceID = "reader-gated-test"
+    private let fallbackResponse: CompatHTTPResponse
+    private let onRequest: @Sendable (Int) -> Void
+    private var requests: [CompatHTTPRequest] = []
+    private var responseWaiters: [CheckedContinuation<CompatHTTPResponse, any Error>] = []
+    private var isFinished = false
+
+    init(
+        fallbackResponse: CompatHTTPResponse,
+        onRequest: @escaping @Sendable (Int) -> Void
+    ) {
+        self.fallbackResponse = fallbackResponse
+        self.onRequest = onRequest
+    }
+
+    func execute(_ request: CompatHTTPRequest) async throws -> CompatHTTPResponse {
+        guard !isFinished else { throw CancellationError() }
+        requests.append(request)
+        onRequest(requests.count)
+        // A third exchange means the second reload missed the active reload
+        // flight. Return a response immediately so the assertion can report
+        // the duplicate without leaving a suspended continuation behind.
+        if requests.count > 2 {
+            return fallbackResponse
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            responseWaiters.append(continuation)
+        }
+    }
+
+    func resumeNext(with response: CompatHTTPResponse) {
+        guard !responseWaiters.isEmpty else { return }
+        responseWaiters.removeFirst().resume(returning: response)
+    }
+
+    func finish() {
+        isFinished = true
+        let pending = responseWaiters
+        responseWaiters.removeAll()
+        for waiter in pending {
+            waiter.resume(throwing: CancellationError())
+        }
+    }
+
+    func recordedRequests() -> [CompatHTTPRequest] {
+        requests
+    }
 }
 
 private actor RecordingImageTransport: CompatHTTPTransport {

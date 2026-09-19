@@ -134,8 +134,11 @@ locations; the real Baozi fixture proves redirect-domain rewriting to final
 image bytes. The app does not yet persist the profile's preference values, and
 banner cropping or missing-image behavior remain unproven through reader image
 loads. Reader chapter retry uses a structured `.task(id: reloadID)` restart, and
-dismissal cleanup invalidates the load generation. Retry-time request
-regeneration/expiry is deferred. Reader image fetching inherits the source's
+dismissal cleanup invalidates the load generation. Explicit per-page Retry
+regenerates the source request and bypasses cached bytes or an ordinary
+prefetch; the Baozi fixture proves that regeneration retains its exact public
+projection while creating a fresh source-execution UUID. Requests have no
+generic TTL or automatic credential renewal. Reader image fetching inherits the source's
 admitted transport policy, defaults to HTTPS-only, validates URL/headers before
 transport, and allows HTTP only through explicit source opt-in; redirects remain
 governed by the same policy.

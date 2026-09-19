@@ -209,14 +209,23 @@ final class BaoziManhuaInterpretedSourceTests: XCTestCase {
             )
         )
 
-        let generated = await source.getImageRequest(page: PageCompat(
+        let page = PageCompat(
             index: 0,
             imageURL: "https://static.baozicdn.com/chapter/001.jpg"
-        ))
+        )
+        let generated = await source.getImageRequest(page: page)
         let imageRequest = try XCTUnwrap(generated)
         XCTAssertNotNil(imageRequest.sourceExecutionID)
+        let regenerated = await source.getImageRequest(page: page)
+        let refreshedRequest = try XCTUnwrap(regenerated)
+        XCTAssertEqual(refreshedRequest.url, imageRequest.url)
+        XCTAssertEqual(refreshedRequest.headers, imageRequest.headers)
+        XCTAssertNotNil(refreshedRequest.sourceExecutionID)
+        XCTAssertNotEqual(refreshedRequest.sourceExecutionID, imageRequest.sourceExecutionID)
         let executed = try await imageRequest.executeSourceRequest()
         let response = try XCTUnwrap(executed)
+        let refreshedResponse = try await refreshedRequest.executeSourceRequest()
+        XCTAssertEqual(refreshedResponse, executed)
 
         XCTAssertEqual(response.statusCode, 302)
         XCTAssertEqual(response.body, [1, 2, 3])
@@ -231,8 +240,8 @@ final class BaoziManhuaInterpretedSourceTests: XCTestCase {
             "preserved"
         )
         let requests = await transport.snapshot()
-        XCTAssertEqual(requests.count, 1)
-        XCTAssertEqual(requests.first?.url, imageURL)
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.allSatisfy { $0.url == imageURL })
         XCTAssertTrue(source.compatibilityReport().findings.isEmpty)
     }
 

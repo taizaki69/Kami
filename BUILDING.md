@@ -6,7 +6,7 @@
 |---|---|
 | MihonCompatKit (parsers, VM, repo client, backup reader) | Current local `swift test` on Windows/Swift 6.3.3 passes **262/262**; the suite includes corpus-lock and APK-signature regressions, real-APK constructor/source-path coverage across ten execution fixtures, deterministic structural-plan and privacy-safe diagnostics regressions, bounded OkHttp interceptor-chain regressions, adapter/admission tests, and the end-to-end Baozi, TuttoAnimeManga, Mangas-Origines.fr, Komikcast, and Yomu profiles |
 | compat-audit CLI | Current optimized build plus deterministic directory-level `plan` and `gaps` behavior is verified on Windows; the locked corpus reports current candidates, legacy blockers, ranked unregistered external invocations, and unsupported opcodes, continues past malformed files, omits local paths/filenames/request secrets, and returns failure after all artifacts; exact Yomu implementation-head Swift CI built and uploaded the optimized CLI |
-| KamiCore (models, SQLite store, install/admission/factory, source registry, reader image pipeline) | Current portable Windows `swift test` passes **18/18**, including exact Baozi, TuttoAnimeManga, Mangas-Origines.fr, Komikcast, and Yomu factory admission; exact Yomu implementation-head macOS Swift CI passed all **29/29** tests covering bounded reader settings/prefetch, exact image headers, in-flight deduplication/cache, response rejection, Browse routing, SQLite migration, extension installation/restoration/factory, and registry lifecycle coverage |
+| KamiCore (models, SQLite store, install/admission/factory, source registry, reader image pipeline) | Current portable Windows `swift test` passes **19/19**, including cache-bypassing reader retries, shared reloads, and exact Baozi, TuttoAnimeManga, Mangas-Origines.fr, Komikcast, and Yomu factory admission; exact Yomu implementation-head macOS Swift CI passed all **29/29** tests covering bounded reader settings/prefetch, exact image headers, in-flight deduplication/cache, response rejection, Browse routing, SQLite migration, extension installation/restoration/factory, and registry lifecycle coverage |
 | App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |
 | IPA packaging | the `IPA Package` workflow builds a real Release `Kami.app`, packages `Kami-unsigned.ipa`, and uploads `Kami-unsigned-ipa` |
 
@@ -178,8 +178,11 @@ The compatibility host bounds source-model outputs before they cross the
 app-facing seam: manga-page and page-list collections are capped at 2,048
 entries, manga updates at 20,000 chapters, and `Page` URL/image-URL fields at
 8 KiB. `ReaderView` retries chapter loading via `.task(id: reloadID)` and its
-dismissal cleanup invalidates the load generation. Reader-image retry request
-regeneration/expiry remains deferred. Reader image fetching inherits the
+dismissal cleanup invalidates the load generation. Explicit per-page Retry
+regenerates the source request, replaces its URL/header snapshot, and bypasses
+that request's compressed cache entry or ordinary prefetch. Concurrent retries
+for the same identity share the reload; there is no generic request TTL or
+automatic credential renewal. Reader image fetching inherits the
 source's admitted transport policy, defaults to HTTPS-only, validates the
 initial URL/headers before any injected or production transport call, and
 allows HTTP only through explicit source opt-in; redirect policy remains

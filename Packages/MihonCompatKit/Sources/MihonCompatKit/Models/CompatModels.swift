@@ -212,6 +212,10 @@ public protocol KamiSource: Sendable {
     func getChapterList(manga: SMangaCompat) async throws -> [SChapterCompat]
     func getMangaUpdate(manga: SMangaCompat) async throws -> SMangaUpdateCompat
     func getPageList(chapter: SChapterCompat) async throws -> [PageCompat]
+    /// Produces a URL/header snapshot for a page. The reader calls this again
+    /// on explicit Retry and uses the new snapshot without merging old headers.
+    /// Sources may reuse their own client/cookie state, but this contract does
+    /// not imply automatic authentication renewal or a time-based expiry.
     func getImageRequest(page: PageCompat) async -> ImageRequest?
     func getFilterList() -> [SourceFilter]
     /// Refreshes source-provided filter metadata when it is network-backed.
