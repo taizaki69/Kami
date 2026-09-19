@@ -360,7 +360,14 @@ The compatibility kit runs locally on Windows with Swift 6.3 through
 `scripts/windows_dev_test.bat`, including the Baozi, TuttoAnimeManga,
 Mangas-Origines.fr, Komikcast, and Yomu real-APK regressions and portable
 KamiCore coverage. The current local suites pass 262/262 MihonCompatKit tests
-and 18/18 portable KamiCore tests. Historical local and CI checkpoints, with their test
+and 18/18 portable KamiCore tests. Exact Yomu implementation head `966256a`
+passes [Swift CI](https://github.com/taizaki69/Kami/actions/runs/35414803631)
+with 262/262 MihonCompatKit and 29/29 macOS KamiCore tests, all 27 fixtures,
+and the optimized CLI upload;
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/35414803726) for
+simulator and unsigned device; and
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/35414803650) with
+the uploaded unsigned IPA. Historical local and CI checkpoints, with their test
 counts, remain listed below. The historical Mangas-Origines.fr implementation
 head `0abc7f8` passed
 [Swift CI](https://github.com/taizaki69/Kami/actions/runs/33817169918) with all

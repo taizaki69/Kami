@@ -301,6 +301,15 @@ report above for current prioritization.
   ten deleted tests were duplicate metadata/construction smokes or helper-only
   checks already covered by stronger raw-DEX, app-facing, transport, and signer
   regressions; no distinct compatibility or safety boundary was removed.
+- Exact Yomu implementation head `966256a` passes
+  [Swift CI 35414803631](https://github.com/taizaki69/Kami/actions/runs/35414803631)
+  with 262/262 MihonCompatKit and 29/29 macOS KamiCore tests, all 27 fixtures,
+  and the optimized CLI upload. Its
+  [iOS Build 35414803726](https://github.com/taizaki69/Kami/actions/runs/35414803726)
+  passes simulator and unsigned device, and
+  [IPA Package 35414803650](https://github.com/taizaki69/Kami/actions/runs/35414803650)
+  uploads the unsigned IPA. These checks do not establish live-site behavior
+  or physical-device installation.
 - An earlier local checkpoint recorded 254/254 MihonCompatKit tests on
   Windows/Swift 6.3.3 with the corpus present, before Komikcast moved into the
   exact catalog; that count is historical, not a current-suite total. Three

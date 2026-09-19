@@ -27,9 +27,9 @@ and all three exact-head GitHub Actions pass.
 The exact Komikcast/VoraToon 1.6.83 promotion is implemented at
 `fcf1b3019959089fcd4bea73e8cccaed8eef608e`; exact-head local and GitHub
 evidence is recorded below.
-The current continuation adds the exact Yomu Comics/SSSCanlator 1.6.59 profile;
-its local promotion evidence is recorded below, while its exact-head workflows
-remain pending.
+The exact Yomu Comics/SSSCanlator 1.6.59 promotion and bounded ordered JSON/RSC
+traversal are implemented at `966256a8dee735acfe68d09b5ff31b30bbb059d5`;
+local verification and all three exact-head workflows pass as recorded below.
 
 ## Start here
 
@@ -46,11 +46,12 @@ remain pending.
   `LICENSES.md` and issue #5.
 - Default branch: `main`
 - Current verified pushed implementation checkpoint:
-  `fcf1b3019959089fcd4bea73e8cccaed8eef608e` (the seventh exact current
-  profile, Komikcast/VoraToon 1.6.83, plus the preceding hierarchy-aware
-  app-entry dispatch, shared nested-async instruction budgeting, and only the
-  measured Kotlin/Java/HTML surfaces required by deterministic operations).
+  `966256a8dee735acfe68d09b5ff31b30bbb059d5` (the eighth exact current
+  profile, Yomu Comics/SSSCanlator 1.6.59, bounded generated JSON descriptors
+  and decoding, and source-order-preserving JSON/RSC first-match traversal).
   Local and exact-head GitHub verification are complete below.
+- Previous verified exact Komikcast/VoraToon checkpoint:
+  `fcf1b3019959089fcd4bea73e8cccaed8eef608e`.
 - Previous verified exact Mangas-Origines.fr checkpoint:
   `0abc7f85637e36606acc75b516dc82b61e9682b4`.
 - Previous verified exact TuttoAnimeManga checkpoint:
@@ -109,8 +110,8 @@ remain pending.
 - Expected state after cloning: clean `main`, tracking `origin/main`
 
 Always continue from the latest `origin/main`. The latest pushed implementation
-head is `fcf1b30`; the current Yomu continuation is uncommitted; the previous exact
-Mangas-Origines.fr head is `0abc7f8`, the
+head is `966256a`; the previous exact Komikcast head is `fcf1b30`, the previous
+exact Mangas-Origines.fr head is `0abc7f8`, the
 previous exact Tutto head is `cf02c77`; the first-gap diagnostics baseline is
 `b1cd246`, the observable reader-image baseline is `c9d62f1`, the retained
 source-execution baseline is `5535435`, the bounded source-operation interceptor
@@ -122,7 +123,7 @@ continuation commit may be newer than the implementation head.
 
 Current verified state on 2026-09-18 (America/Lima):
 
-- The current working tree adds the eighth exact app-facing profile, Yomu
+- Commit `966256a` adds the eighth exact app-facing profile, Yomu
   Comics/SSSCanlator 1.6.59, after exact SHA-256, Keiyoushi signer,
   manifest/package/version, source-ID, and structural-plan checks. Its exact
   identity is package `eu.kanade.tachiyomi.extension.pt.sssscanlator`, version
@@ -163,9 +164,16 @@ Current verified state on 2026-09-18 (America/Lima):
   runs are byte-identical (SHA-256
   `de90a99a291f3f849348386d5e9d416cbda993ab9298b206f28998b9646fc610`) with
   11/11 artifacts analyzed, 7 structural candidates, 432 unique unregistered
-  surfaces, 0 omitted invocations, and 0 unsupported opcodes. Exact-head
-  Swift CI, iOS Build, and IPA Package workflows for this Yomu continuation are
-  pending the commit and push.
+  surfaces, 0 omitted invocations, and 0 unsupported opcodes. Both reports are
+  74,123 bytes, match the debug output, and contain none of the checked local
+  path or request-secret markers.
+- Exact implementation-head [Swift CI 35414803631](https://github.com/taizaki69/Kami/actions/runs/35414803631)
+  passes with all 27 locked fixtures, 262/262 MihonCompatKit tests, 29/29
+  macOS KamiCore tests, the optimized CLI, and its uploaded artifact under
+  Xcode 16.4 / Swift 6.1.2. [iOS Build 35414803726](https://github.com/taizaki69/Kami/actions/runs/35414803726)
+  passes both simulator and unsigned device targets. [IPA Package 35414803650](https://github.com/taizaki69/Kami/actions/runs/35414803650)
+  builds and uploads `Kami-unsigned-ipa`. Physical-device installation and
+  live-site behavior remain unverified.
 - The conservative test audit removed 10 duplicate/helper-only tests while
   preserving distinct admission, parser, security, runtime, transport, and
   source-behavior coverage. Next work should be selected from the remaining

@@ -5,14 +5,19 @@
 | Component | Verified how |
 |---|---|
 | MihonCompatKit (parsers, VM, repo client, backup reader) | Current local `swift test` on Windows/Swift 6.3.3 passes **262/262**; the suite includes corpus-lock and APK-signature regressions, real-APK constructor/source-path coverage across ten execution fixtures, deterministic structural-plan and privacy-safe diagnostics regressions, bounded OkHttp interceptor-chain regressions, adapter/admission tests, and the end-to-end Baozi, TuttoAnimeManga, Mangas-Origines.fr, Komikcast, and Yomu profiles |
-| compat-audit CLI | Current optimized build plus deterministic directory-level `plan` and `gaps` behavior is verified on Windows; the locked corpus reports current candidates, legacy blockers, ranked unregistered external invocations, and unsupported opcodes, continues past malformed files, omits local paths/filenames/request secrets, and returns failure after all artifacts; the previous exact implementation-head Swift CI uploaded the optimized CLI, while the Yomu continuation's exact-head workflow remains pending final commit/push |
-| KamiCore (models, SQLite store, install/admission/factory, source registry, reader image pipeline) | Current portable Windows `swift test` passes **18/18**, including exact Baozi, TuttoAnimeManga, Mangas-Origines.fr, Komikcast, and Yomu factory admission; the previous exact implementation-head macOS Swift CI passed all **28/28** tests covering bounded reader settings/prefetch, exact image headers, in-flight deduplication/cache, response rejection, Browse routing, SQLite migration, extension installation/restoration/factory, and registry lifecycle coverage |
+| compat-audit CLI | Current optimized build plus deterministic directory-level `plan` and `gaps` behavior is verified on Windows; the locked corpus reports current candidates, legacy blockers, ranked unregistered external invocations, and unsupported opcodes, continues past malformed files, omits local paths/filenames/request secrets, and returns failure after all artifacts; exact Yomu implementation-head Swift CI built and uploaded the optimized CLI |
+| KamiCore (models, SQLite store, install/admission/factory, source registry, reader image pipeline) | Current portable Windows `swift test` passes **18/18**, including exact Baozi, TuttoAnimeManga, Mangas-Origines.fr, Komikcast, and Yomu factory admission; exact Yomu implementation-head macOS Swift CI passed all **29/29** tests covering bounded reader settings/prefetch, exact image headers, in-flight deduplication/cache, response rejection, Browse routing, SQLite migration, extension installation/restoration/factory, and registry lifecycle coverage |
 | App UI + xcodeproj | generated with xcodegen and compiled with Xcode 16.4 for generic iOS Simulator and unsigned generic iOS device |
 | IPA packaging | the `IPA Package` workflow builds a real Release `Kami.app`, packages `Kami-unsigned.ipa`, and uploads `Kami-unsigned-ipa` |
 
-The Yomu continuation passes the complete local suites, including bounded
-JSON parsing and source-order-preserving RSC traversal. Exact-head Swift CI,
-iOS Build, and IPA Package links will be recorded after the commit and push.
+The Yomu implementation head `966256a` passes the complete local suites,
+including bounded JSON parsing and source-order-preserving RSC traversal.
+It also passes [Swift CI](https://github.com/taizaki69/Kami/actions/runs/35414803631)
+with 262/262 MihonCompatKit and 29/29 macOS KamiCore tests and the optimized CLI
+upload, [iOS Build](https://github.com/taizaki69/Kami/actions/runs/35414803726)
+for simulator and unsigned device, and
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/35414803650) with
+the unsigned IPA upload.
 
 ## macOS (full build)
 
