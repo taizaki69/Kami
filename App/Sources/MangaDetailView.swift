@@ -71,6 +71,7 @@ struct MangaDetailView: View {
                     NavigationLink {
                         ReaderView(mangaTitle: detail?.title ?? manga.title,
                                    chapter: chapter,
+                                   chapters: chapters,
                                    source: model.source(id: manga.sourceId))
                     } label: {
                         HStack {

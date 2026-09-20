@@ -10,7 +10,8 @@ import KamiCore
 @MainActor
 struct ReaderView: View {
     let mangaTitle: String
-    let chapter: Chapter
+    let chapters: [Chapter]
+    @State private var chapter: Chapter
     let source: (any KamiSource)?
 
     @EnvironmentObject private var model: AppModel
@@ -33,14 +34,17 @@ struct ReaderView: View {
     @State private var previousIdleTimerDisabled: Bool?
     @State private var loadGeneration = 0
     @State private var reloadID = 0
+    @State private var pendingStartAtEnd = false
 
     init(
         mangaTitle: String,
         chapter: Chapter,
+        chapters: [Chapter] = [],
         source: (any KamiSource)?
     ) {
         self.mangaTitle = mangaTitle
-        self.chapter = chapter
+        self.chapters = chapters
+        _chapter = State(initialValue: chapter)
         self.source = source
         _imageStore = StateObject(wrappedValue: ReaderImageStore(
             sourceID: String(source?.id ?? 0),
@@ -77,6 +81,23 @@ struct ReaderView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+                }
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    Button {
+                        goToNeighborChapter(-1)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .disabled(neighborChapter(-1) == nil)
+                    .accessibilityLabel("Previous chapter")
+
+                    Button {
+                        goToNeighborChapter(1)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                    }
+                    .disabled(neighborChapter(1) == nil)
+                    .accessibilityLabel("Next chapter")
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
@@ -307,13 +328,39 @@ struct ReaderView: View {
     }
 
     private func advancePage() {
-        guard currentIndex + 1 < pages.count else { return }
-        withAnimation(.easeInOut(duration: 0.2)) { currentIndex += 1 }
+        if currentIndex + 1 < pages.count {
+            withAnimation(.easeInOut(duration: 0.2)) { currentIndex += 1 }
+        } else if let next = neighborChapter(1) {
+            goToChapter(next, startAtEnd: false)
+        }
     }
 
     private func retreatPage() {
-        guard currentIndex > 0 else { return }
-        withAnimation(.easeInOut(duration: 0.2)) { currentIndex -= 1 }
+        if currentIndex > 0 {
+            withAnimation(.easeInOut(duration: 0.2)) { currentIndex -= 1 }
+        } else if let previous = neighborChapter(-1) {
+            goToChapter(previous, startAtEnd: true)
+        }
+    }
+
+    private func neighborChapter(_ offset: Int) -> Chapter? {
+        guard let index = chapters.firstIndex(where: {
+            $0.id == chapter.id && $0.url == chapter.url
+        }) else { return nil }
+        let neighbor = chapters.index(index, offsetBy: offset)
+        guard chapters.indices.contains(neighbor) else { return nil }
+        return chapters[neighbor]
+    }
+
+    private func goToNeighborChapter(_ offset: Int) {
+        guard let neighbor = neighborChapter(offset) else { return }
+        goToChapter(neighbor, startAtEnd: offset < 0)
+    }
+
+    private func goToChapter(_ neighbor: Chapter, startAtEnd: Bool) {
+        pendingStartAtEnd = startAtEnd
+        chapter = neighbor
+        reloadID &+= 1
     }
 
     private func toggleChrome() {
@@ -399,7 +446,12 @@ struct ReaderView: View {
             guard generation == loadGeneration else { return }
             pages = loadedPages
             imageRequests = loadedImageRequests
-            currentIndex = min(chapter.lastPageRead, max(loadedPages.count - 1, 0))
+            if pendingStartAtEnd {
+                currentIndex = max(loadedPages.count - 1, 0)
+                pendingStartAtEnd = false
+            } else {
+                currentIndex = min(chapter.lastPageRead, max(loadedPages.count - 1, 0))
+            }
             loading = false
             if loadedPages.isEmpty {
                 errorText = "This chapter has no pages."
