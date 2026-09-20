@@ -1,175 +1,211 @@
 {
-  "formatVersion": 1,
-  "artifacts": [
-    {
-      "identity": "eu.kanade.tachiyomi.extension.all.foolslidecustomizable@1.6.6(6)",
-      "structuralCandidate": true,
-      "planBlockers": [],
-      "dexCount": 1,
-      "codeMethodCount": 102,
-      "instructionCount": 2470,
-      "uniqueUnregisteredExternalMethodCount": 68,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.all.komga@1.6.69(69)",
-      "structuralCandidate": false,
-      "planBlockers": [
-        "the source class chain is missing the required stable Mihon wrappers"
-      ],
-      "dexCount": 1,
-      "codeMethodCount": 287,
-      "instructionCount": 8258,
-      "uniqueUnregisteredExternalMethodCount": 111,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.all.mangaplus@1.6.65(65)",
-      "structuralCandidate": false,
-      "planBlockers": [
-        "the source class chain is missing the required stable Mihon wrappers"
-      ],
-      "dexCount": 1,
-      "codeMethodCount": 339,
-      "instructionCount": 8142,
-      "uniqueUnregisteredExternalMethodCount": 72,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.all.nhentaixxx@1.6.10(10)",
-      "structuralCandidate": false,
-      "planBlockers": [
-        "the source class chain is missing the required stable Mihon wrappers"
-      ],
-      "dexCount": 1,
-      "codeMethodCount": 141,
-      "instructionCount": 4938,
-      "uniqueUnregisteredExternalMethodCount": 68,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.all.xcomic@1.6.4(4)",
-      "structuralCandidate": false,
-      "planBlockers": [
-        "the source class chain is missing the required stable Mihon wrappers"
-      ],
-      "dexCount": 1,
-      "codeMethodCount": 437,
-      "instructionCount": 19350,
-      "uniqueUnregisteredExternalMethodCount": 95,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.en.mangapandaonl@1.6.36(36)",
-      "structuralCandidate": true,
-      "planBlockers": [],
-      "dexCount": 1,
-      "codeMethodCount": 244,
-      "instructionCount": 5480,
-      "uniqueUnregisteredExternalMethodCount": 64,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.es.eternalmangas@1.6.28(28)",
-      "structuralCandidate": true,
-      "planBlockers": [],
-      "dexCount": 1,
-      "codeMethodCount": 245,
-      "instructionCount": 6291,
-      "uniqueUnregisteredExternalMethodCount": 42,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.ja.pixivcomic@1.6.4(4)",
-      "structuralCandidate": true,
-      "planBlockers": [],
-      "dexCount": 1,
-      "codeMethodCount": 452,
-      "instructionCount": 13787,
-      "uniqueUnregisteredExternalMethodCount": 100,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.ru.readmanga@1.6.89(89)",
-      "structuralCandidate": true,
-      "planBlockers": [],
-      "dexCount": 1,
-      "codeMethodCount": 190,
-      "instructionCount": 7098,
-      "uniqueUnregisteredExternalMethodCount": 97,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.tr.hayalistic@1.6.59(59)",
-      "structuralCandidate": true,
-      "planBlockers": [],
-      "dexCount": 1,
-      "codeMethodCount": 164,
-      "instructionCount": 6027,
-      "uniqueUnregisteredExternalMethodCount": 96,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    },
-    {
-      "identity": "eu.kanade.tachiyomi.extension.vi.doctruyen3q@1.6.38(38)",
-      "structuralCandidate": true,
-      "planBlockers": [],
-      "dexCount": 1,
-      "codeMethodCount": 127,
-      "instructionCount": 3389,
-      "uniqueUnregisteredExternalMethodCount": 74,
-      "omittedExternalInvocationCount": 0,
-      "unsupportedOpcodes": []
-    }
-  ],
-  "aggregate": {
-    "extensionCount": 11,
-    "structuralCandidateCount": 7,
-    "planBlockers": [
+  "aggregate" : {
+    "extensionCount" : 11,
+    "omittedExternalInvocationCount" : 0,
+    "planBlockers" : [
       {
-        "summary": "the source class chain is missing the required stable Mihon wrappers",
-        "extensionCount": 4
+        "extensionCount" : 4,
+        "summary" : "the source class chain is missing the required stable Mihon wrappers"
       }
     ],
-    "uniqueUnregisteredExternalMethodCount": 404,
-    "omittedExternalInvocationCount": 0,
-    "unsupportedOpcodeCount": 0,
-    "topLimit": 5,
-    "topUnregisteredExternalInvocations": [
+    "structuralCandidateCount" : 7,
+    "topLimit" : 5,
+    "topUnregisteredExternalInvocations" : [
       {
-        "surface": "direct Ljava/lang/IllegalStateException;-><init>(Ljava/lang/String;)V",
-        "extensionCount": 11,
-        "invocationCount": 234
+        "extensionCount" : 11,
+        "invocationCount" : 176,
+        "surface" : "direct Ljava/lang/UnsupportedOperationException;-><init>()V"
       },
       {
-        "surface": "direct Ljava/lang/UnsupportedOperationException;-><init>()V",
-        "extensionCount": 11,
-        "invocationCount": 176
+        "extensionCount" : 11,
+        "invocationCount" : 113,
+        "surface" : "virtual Leu/kanade/tachiyomi/source/online/HttpSource;->getBaseUrl()Ljava/lang/String;"
       },
       {
-        "surface": "virtual Leu/kanade/tachiyomi/source/online/HttpSource;->getBaseUrl()Ljava/lang/String;",
-        "extensionCount": 11,
-        "invocationCount": 113
+        "extensionCount" : 11,
+        "invocationCount" : 17,
+        "surface" : "virtual Leu/kanade/tachiyomi/source/online/HttpSource;->getId()J"
       },
       {
-        "surface": "virtual Leu/kanade/tachiyomi/source/online/HttpSource;->getId()J",
-        "extensionCount": 11,
-        "invocationCount": 17
+        "extensionCount" : 11,
+        "invocationCount" : 11,
+        "surface" : "super Leu/kanade/tachiyomi/source/online/HttpSource;->fetchChapterList(Leu/kanade/tachiyomi/source/model/SManga;)Lrx/Observable;"
       },
       {
-        "surface": "super Leu/kanade/tachiyomi/source/online/HttpSource;->fetchChapterList(Leu/kanade/tachiyomi/source/model/SManga;)Lrx/Observable;",
-        "extensionCount": 11,
-        "invocationCount": 11
+        "extensionCount" : 11,
+        "invocationCount" : 11,
+        "surface" : "super Leu/kanade/tachiyomi/source/online/HttpSource;->fetchImageUrl(Leu/kanade/tachiyomi/source/model/Page;)Lrx/Observable;"
       }
-    ]
-  }
+    ],
+    "uniqueUnregisteredExternalMethodCount" : 387,
+    "unsupportedOpcodeCount" : 0
+  },
+  "artifacts" : [
+    {
+      "codeMethodCount" : 102,
+      "dexCount" : 1,
+      "identity" : "eu.kanade.tachiyomi.extension.all.foolslidecustomizable@1.6.6(6)",
+      "instructionCount" : 2470,
+      "omittedExternalInvocationCount" : 0,
+      "planBlockers" : [
+
+      ],
+      "structuralCandidate" : true,
+      "uniqueUnregisteredExternalMethodCount" : 65,
+      "unsupportedOpcodes" : [
+
+      ]
+    },
+    {
+      "codeMethodCount" : 287,
+      "dexCount" : 1,
+      "identity" : "eu.kanade.tachiyomi.extension.all.komga@1.6.69(69)",
+      "instructionCount" : 8258,
+      "omittedExternalInvocationCount" : 0,
+      "planBlockers" : [
+        "the source class chain is missing the required stable Mihon wrappers"
+      ],
+      "structuralCandidate" : false,
+      "uniqueUnregisteredExternalMethodCount" : 109,
+      "unsupportedOpcodes" : [
+
+      ]
+    },
+    {
+      "codeMethodCount" : 339,
+      "dexCount" : 1,
+      "identity" : "eu.kanade.tachiyomi.extension.all.mangaplus@1.6.65(65)",
+      "instructionCount" : 8142,
+      "omittedExternalInvocationCount" : 0,
+      "planBlockers" : [
+        "the source class chain is missing the required stable Mihon wrappers"
+      ],
+      "structuralCandidate" : false,
+      "uniqueUnregisteredExternalMethodCount" : 68,
+      "unsupportedOpcodes" : [
+
+      ]
+    },
+    {
+      "codeMethodCount" : 141,
+      "dexCount" : 1,
+      "identity" : "eu.kanade.tachiyomi.extension.all.nhentaixxx@1.6.10(10)",
+      "instructionCount" : 4938,
+      "omittedExternalInvocationCount" : 0,
+      "planBlockers" : [
+        "the source class chain is missing the required stable Mihon wrappers"
+      ],
+      "structuralCandidate" : false,
+      "uniqueUnregisteredExternalMethodCount" : 63,
+      "unsupportedOpcodes" : [
+
+      ]
+    },
+    {
+      "codeMethodCount" : 437,
+      "dexCount" : 1,
+      "identity" : "eu.kanade.tachiyomi.extension.all.xcomic@1.6.4(4)",
+      "instructionCount" : 19350,
+      "omittedExternalInvocationCount" : 0,
+      "planBlockers" : [
+        "the source class chain is missing the required stable Mihon wrappers"
+      ],
+      "structuralCandidate" : false,
+      "uniqueUnregisteredExternalMethodCount" : 91,
+      "unsupportedOpcodes" : [
+
+      ]
+    },
+    {
+      "codeMethodCount" : 244,
+      "dexCount" : 1,
+      "identity" : "eu.kanade.tachiyomi.extension.en.mangapandaonl@1.6.36(36)",
+      "instructionCount" : 5480,
+      "omittedExternalInvocationCount" : 0,
+      "planBlockers" : [
+
+      ],
+      "structuralCandidate" : true,
+      "uniqueUnregisteredExternalMethodCount" : 60,
+      "unsupportedOpcodes" : [
+
+      ]
+    },
+    {
+      "codeMethodCount" : 245,
+      "dexCount" : 1,
+      "identity" : "eu.kanade.tachiyomi.extension.es.eternalmangas@1.6.28(28)",
+      "instructionCount" : 6291,
+      "omittedExternalInvocationCount" : 0,
+      "planBlockers" : [
+
+      ],
+      "structuralCandidate" : true,
+      "uniqueUnregisteredExternalMethodCount" : 41,
+      "unsupportedOpcodes" : [
+
+      ]
+    },
+    {
+      "codeMethodCount" : 452,
+      "dexCount" : 1,
+      "identity" : "eu.kanade.tachiyomi.extension.ja.pixivcomic@1.6.4(4)",
+      "instructionCount" : 13787,
+      "omittedExternalInvocationCount" : 0,
+      "planBlockers" : [
+
+      ],
+      "structuralCandidate" : true,
+      "uniqueUnregisteredExternalMethodCount" : 99,
+      "unsupportedOpcodes" : [
+
+      ]
+    },
+    {
+      "codeMethodCount" : 190,
+      "dexCount" : 1,
+      "identity" : "eu.kanade.tachiyomi.extension.ru.readmanga@1.6.89(89)",
+      "instructionCount" : 7098,
+      "omittedExternalInvocationCount" : 0,
+      "planBlockers" : [
+
+      ],
+      "structuralCandidate" : true,
+      "uniqueUnregisteredExternalMethodCount" : 94,
+      "unsupportedOpcodes" : [
+
+      ]
+    },
+    {
+      "codeMethodCount" : 164,
+      "dexCount" : 1,
+      "identity" : "eu.kanade.tachiyomi.extension.tr.hayalistic@1.6.59(59)",
+      "instructionCount" : 6027,
+      "omittedExternalInvocationCount" : 0,
+      "planBlockers" : [
+
+      ],
+      "structuralCandidate" : true,
+      "uniqueUnregisteredExternalMethodCount" : 91,
+      "unsupportedOpcodes" : [
+
+      ]
+    },
+    {
+      "codeMethodCount" : 127,
+      "dexCount" : 1,
+      "identity" : "eu.kanade.tachiyomi.extension.vi.doctruyen3q@1.6.38(38)",
+      "instructionCount" : 3389,
+      "omittedExternalInvocationCount" : 0,
+      "planBlockers" : [
+
+      ],
+      "structuralCandidate" : true,
+      "uniqueUnregisteredExternalMethodCount" : 57,
+      "unsupportedOpcodes" : [
+
+      ]
+    }
+  ],
+  "formatVersion" : 1
 }

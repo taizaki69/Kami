@@ -369,6 +369,37 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         )
     }
 
+    public static func docTruyen3Q1638(
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        let profile = PinnedInterpretedProfile.docTruyen3Q1638
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: profile.networkIdentity,
+            policy: transportPolicy
+        )
+        return try Self(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
+    /// Injection seam for deterministic DocTruyen3Q tests.
+    public static func docTruyen3Q1638(
+        apkBytes: [UInt8],
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        try Self(
+            profile: .docTruyen3Q1638,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
     /// Injection seam for deterministic Mangas-Origines.fr tests.
     public static func mangasOriginesFR1658(
         apkBytes: [UInt8],
@@ -580,6 +611,7 @@ public enum InterpretedExtensionProfileCatalog {
             .komikcast1683,
             .yomuComics1659,
             .eternalmangas1628,
+            .docTruyen3Q1638,
         ]
         return profiles.first {
             $0.packageName == packageName &&
@@ -608,6 +640,7 @@ private struct PinnedInterpretedProfile: Sendable {
         case none
         case baoziManhua
         case eternalMangas
+        case docTruyen3Q
 
         func validates(_ preferences: InterpretedExtensionPreferences) -> Bool {
             switch self {
@@ -632,6 +665,15 @@ private struct PinnedInterpretedProfile: Sendable {
                 ]
                 return preferences.strings.isEmpty
                     && Set(preferences.booleans.keys).isSubset(of: allowedBooleans)
+            case .docTruyen3Q:
+                let allowedBooleans: Set<String> = ["autoChangeDomain"]
+                let overrideURL = preferences.strings["overrideBaseUrl"]
+                let otherStrings = preferences.strings.filter { $0.key != "overrideBaseUrl" }
+                return otherStrings.isEmpty
+                    && Set(preferences.booleans.keys).isSubset(of: allowedBooleans)
+                    && (overrideURL == nil
+                        || (overrideURL!.hasPrefix("https://")
+                            && overrideURL!.contains("doctruyen3q")))
             }
         }
     }
@@ -780,6 +822,20 @@ private struct PinnedInterpretedProfile: Sendable {
         preferenceSupport: .eternalMangas,
         imageRequestSupport: .pageURL
     )
+
+    static let docTruyen3Q1638 = PinnedInterpretedProfile(
+        identifier: "doctruyen3q-1.6.38",
+        sha256: "3fe67ce34b42c4cb7b193a9536a27ae1b3f41805a866489e82797f56aad4c0a0",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+        maximumAPKBytes: 64 * 1024 * 1024,
+        packageName: "eu.kanade.tachiyomi.extension.vi.doctruyen3q",
+        versionName: "1.6.38",
+        versionCode: 38,
+        expectedSourceID: 6_168_143_505_244_976_507,
+        filterSupport: .dynamicList(expectedBlockDescriptor: "Lv;", maximumJobs: 3),
+        preferenceSupport: .docTruyen3Q,
+        imageRequestSupport: .pageURL
+    )
 }
 
 private actor PinnedInterpretedRuntime {
@@ -882,6 +938,8 @@ private actor PinnedInterpretedRuntime {
         case .baoziManhua:
             extensionPackageName = profile.packageName
         case .eternalMangas:
+            extensionPackageName = profile.packageName
+        case .docTruyen3Q:
             extensionPackageName = profile.packageName
         }
         let bridge = HostBridge.minimal(
