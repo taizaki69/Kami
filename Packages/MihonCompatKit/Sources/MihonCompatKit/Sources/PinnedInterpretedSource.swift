@@ -831,7 +831,8 @@ private actor PinnedInterpretedRuntime {
             transport: transport,
             transportPolicy: transportPolicy,
             extensionPackageName: extensionPackageName,
-            preferences: preferences
+            preferences: preferences,
+            resources: try .localization(from: archive)
         )
         let vm = DexInterpreter(
             dex: dex,
