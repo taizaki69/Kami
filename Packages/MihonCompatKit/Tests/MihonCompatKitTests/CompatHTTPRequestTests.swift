@@ -219,6 +219,44 @@ final class CompatHTTPRequestTests: XCTestCase {
         XCTAssertEqual(rawIterableContains, 0)
         XCTAssertEqual(rawFirstHasNext, 1)
         XCTAssertEqual(rawSecondHasNext, 0)
+
+        let setOf = try XCTUnwrap(bridge.resolve(
+            class: "Lkotlin/collections/SetsKt;", "setOf",
+            prototype: "([Ljava/lang/Object;)Ljava/util/Set;",
+            isStatic: true
+        ))
+        let input = ArrInstance(elemDescriptor: "Ljava/lang/Object;", elements: [
+            HostBridge.string("beta"), .null, HostBridge.string("alpha"),
+            HostBridge.string("beta"), .null,
+        ])
+        let ordered = try setOf(vm, [.arr(input)])
+        input.elements.removeAll()
+        let orderedIterator = try invoke(
+            bridge, vm, class: "Ljava/lang/Iterable;", "iterator",
+            prototype: "()Ljava/util/Iterator;", args: [ordered]
+        )
+        for expected in ["beta", "null", "alpha"] {
+            let value = try invoke(
+                bridge, vm, class: "Ljava/util/Iterator;", "next",
+                prototype: "()Ljava/lang/Object;", args: [orderedIterator]
+            )
+            XCTAssertEqual(vmStringValue(value), expected)
+        }
+        guard case let .int(hasMore) = try invoke(
+            bridge, vm, class: "Ljava/util/Iterator;", "hasNext",
+            prototype: "()Z", args: [orderedIterator]
+        ) else { return XCTFail("expected the set iterator's end state") }
+        XCTAssertEqual(hasMore, 0)
+        XCTAssertThrowsError(try invoke(
+            bridge, vm, class: "Ljava/util/Collection;", "add",
+            prototype: "(Ljava/lang/Object;)Z", args: [ordered, HostBridge.string("later")]
+        ))
+        XCTAssertThrowsError(try setOf(vm, [.arr(ArrInstance(
+            elemDescriptor: "I", elements: [.int(1)]
+        ))]))
+        XCTAssertThrowsError(try setOf(vm, [.arr(ArrInstance(
+            elemDescriptor: "Ljava/lang/Object;", elements: Array(repeating: .null, count: 100_001)
+        ))]))
     }
 
     func testKotlinStatusAndChapterNumberHelpersMatchPizzaReader() throws {
@@ -276,7 +314,7 @@ final class CompatHTTPRequestTests: XCTestCase {
         XCTAssertEqual(try isDigit(0xd800), 0)
     }
 
-    func testStringLowercaseSupportsFrenchLocaleUsedByOrigines() throws {
+    func testLocaleCasingAndCollationPreserveLanguageSpecificBehavior() throws {
         let (vm, bridge) = try makeVM()
         let french = try XCTUnwrap(bridge.staticFields["Ljava/util/Locale;->FRENCH"])
         let result = try invoke(
@@ -286,6 +324,47 @@ final class CompatHTTPRequestTests: XCTestCase {
             args: [HostBridge.string("ÉCOLE ET SCÉNARIO"), french]
         )
         XCTAssertEqual(vmStringValue(result), "école et scénario")
+        func locale(_ tag: String) throws -> RVal {
+            try invoke(bridge, vm, class: "Ljava/util/Locale;", "forLanguageTag",
+                       prototype: "(Ljava/lang/String;)Ljava/util/Locale;", isStatic: true,
+                       args: [HostBridge.string(tag)])
+        }
+        for tag in ["tr", "TR-latn-tr", "tr-TR-!-ignored"] {
+            let turkish = try locale(tag)
+            let lower = try invoke(bridge, vm, class: "Ljava/lang/String;", "toLowerCase",
+                                   prototype: "(Ljava/util/Locale;)Ljava/lang/String;",
+                                   args: [HostBridge.string("Iİ"), turkish])
+            let upper = try invoke(bridge, vm, class: "Ljava/lang/String;", "toUpperCase",
+                                   prototype: "(Ljava/util/Locale;)Ljava/lang/String;",
+                                   args: [HostBridge.string("ıi"), turkish])
+            XCTAssertEqual(vmStringValue(lower), "ıi")
+            XCTAssertEqual(vmStringValue(upper), "Iİ")
+        }
+        let spanish = try invoke(bridge, vm, class: "Ljava/text/Collator;", "getInstance",
+                                 prototype: "(Ljava/util/Locale;)Ljava/text/Collator;", isStatic: true,
+                                 args: [locale("es-ES")])
+        let list = try invoke(bridge, vm, class: "Lkotlin/collections/CollectionsKt;", "listOf",
+                              prototype: "([Ljava/lang/Object;)Ljava/util/List;", isStatic: true,
+                              args: [.arr(ArrInstance(elemDescriptor: "Ljava/lang/Object;", elements:
+                                ["zorro", "ñandú", "árbol", "nube"].map(HostBridge.string)))])
+        let sorted = try invoke(bridge, vm, class: "Lkotlin/collections/CollectionsKt;", "sortedWith",
+                                prototype: "(Ljava/lang/Iterable;Ljava/util/Comparator;)Ljava/util/List;",
+                                isStatic: true, args: [list, spanish])
+        for (index, expected) in ["árbol", "nube", "ñandú", "zorro"].enumerated() {
+            XCTAssertEqual(vmStringValue(try invoke(bridge, vm, class: "Ljava/util/List;", "get",
+                                                   prototype: "(I)Ljava/lang/Object;",
+                                                   args: [sorted, .int(Int32(index))])), expected)
+        }
+        let equivalent = try invoke(bridge, vm, class: "Ljava/text/Collator;", "compare",
+                                    prototype: "(Ljava/lang/String;Ljava/lang/String;)I",
+                                    args: [spanish, HostBridge.string("é"), HostBridge.string("e\u{301}")])
+        guard case .int(0) = equivalent else { return XCTFail("canonical equivalents must collate equally") }
+        for unsupported in ["es-u-co-trad", "x-private", "i-klingon", String(repeating: "a", count: 256)] {
+            XCTAssertThrowsError(try locale(unsupported))
+        }
+        XCTAssertThrowsError(try invoke(bridge, vm, class: "Ljava/text/Collator;", "compare",
+                                        prototype: "(Ljava/lang/Object;Ljava/lang/Object;)I",
+                                        args: [spanish, .null, HostBridge.string("text")]))
     }
 
     func testKotlinStringBuilderVarargAppendMatchesOriginesDescription() throws {

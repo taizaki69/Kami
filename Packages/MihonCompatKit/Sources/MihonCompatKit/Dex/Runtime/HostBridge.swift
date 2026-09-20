@@ -983,7 +983,8 @@ public final class HostBridge {
         transportPolicy: CompatHTTPTransportPolicy = .init(),
         htmlPolicy: CompatHTMLPolicy = .init(),
         extensionPackageName: String? = nil,
-        preferences: InterpretedExtensionPreferences = .init()
+        preferences: InterpretedExtensionPreferences = .init(),
+        resources: InterpretedAPKResources = .init()
     ) -> HostBridge {
         let bridge = HostBridge(
             transport: transport,
@@ -1220,10 +1221,12 @@ public final class HostBridge {
 
         // java.lang.String surface (payload-backed).
         Self.registerStringSurface(bridge)
+        Self.registerLocaleSurface(bridge, maximumStringBytes: htmlPolicy.maximumExtractedStringBytes)
         Self.registerByteEncodingSurface(bridge)
         Self.registerStringBuilder(bridge)
         Self.registerNumberFormatSurface(bridge)
         Self.registerVirtualFileSurface(bridge)
+        Self.registerResourceBundleSurface(bridge, resources: resources)
         Self.registerCoroutineSurface(bridge)
 
         // These abstract tachiyomix base classes are supplied by the host app,
@@ -5145,22 +5148,10 @@ public final class HostBridge {
             prototype: "(Ljava/util/Locale;)Ljava/lang/String;"
         ) { _, args in
             let value = try requiredString(args, 0, "String.toLowerCase")
-            guard case let .obj(localeObject) = try argument(args, 1, "String.toLowerCase"),
-                  localeObject.dexType == locale,
-                  let localeName = localeObject.payload as? String else {
-                throw VMError.verify("String.toLowerCase locale")
-            }
-            let lowered: String
-            switch localeName {
-            case "ROOT":
-                lowered = value.lowercased()
-            case "ENGLISH":
-                lowered = value.lowercased(with: Locale(identifier: "en"))
-            case "FRENCH":
-                lowered = value.lowercased(with: Locale(identifier: "fr"))
-            default:
-                throw VMError.verify("String.toLowerCase unsupported locale")
-            }
+            let requestedLocale = try foundationLocale(
+                from: argument(args, 1, "String.toLowerCase"), operation: "String.toLowerCase"
+            )
+            let lowered = value.lowercased(with: requestedLocale)
             guard lowered.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
                 throw DEXThrowable(string(
                     "IllegalArgumentException: lowercase output is too long"
@@ -5174,22 +5165,10 @@ public final class HostBridge {
             prototype: "(Ljava/util/Locale;)Ljava/lang/String;"
         ) { _, args in
             let value = try requiredString(args, 0, "String.toUpperCase")
-            guard case let .obj(localeObject) = try argument(args, 1, "String.toUpperCase"),
-                  localeObject.dexType == locale,
-                  let localeName = localeObject.payload as? String else {
-                throw VMError.verify("String.toUpperCase locale")
-            }
-            let uppercased: String
-            switch localeName {
-            case "ROOT":
-                uppercased = value.uppercased()
-            case "ENGLISH":
-                uppercased = value.uppercased(with: Locale(identifier: "en"))
-            case "FRENCH":
-                uppercased = value.uppercased(with: Locale(identifier: "fr"))
-            default:
-                throw VMError.verify("String.toUpperCase unsupported locale")
-            }
+            let requestedLocale = try foundationLocale(
+                from: argument(args, 1, "String.toUpperCase"), operation: "String.toUpperCase"
+            )
+            let uppercased = value.uppercased(with: requestedLocale)
             guard uppercased.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
                 throw DEXThrowable(string(
                     "IllegalArgumentException: uppercase output is too long"
@@ -5940,6 +5919,28 @@ public final class HostBridge {
             payload: value,
             isHost: true
         ))
+    }
+
+    private static func hostSet(_ elements: [RVal], operation: String) throws -> RVal {
+        try requireCollectionCapacity(elements.count, operation)
+        var comparisons = 0
+        var result: [RVal] = []
+        result.reserveCapacity(elements.count)
+        for value in elements {
+            var exists = false
+            for existing in result {
+                guard comparisons < 8_000_000 else {
+                    throw VMError.verify("\(operation) exceeds 8000000 equality comparisons")
+                }
+                comparisons += 1
+                if javaValueEquals(existing, value) {
+                    exists = true
+                    break
+                }
+            }
+            if !exists { result.append(value) }
+        }
+        return hostList(result, isMutable: false, descriptor: "Ljava/util/Set;")
     }
 
     private static func boxedLong(_ value: Int64) -> RVal {
@@ -6949,6 +6950,18 @@ public final class HostBridge {
         }
         bridge.register(
             class: sets,
+            "setOf",
+            prototype: "([Ljava/lang/Object;)Ljava/util/Set;",
+            isStatic: true
+        ) { _, args in
+            guard case let .arr(array) = try argument(args, 0, "SetsKt.setOf"),
+                  array.elemDescriptor.hasPrefix("L") || array.elemDescriptor.hasPrefix("[") else {
+                throw VMError.verify("SetsKt.setOf reference array argument")
+            }
+            return try hostSet(array.elements, operation: "SetsKt.setOf")
+        }
+        bridge.register(
+            class: sets,
             "plus",
             prototype: "(Ljava/util/Set;Ljava/lang/Object;)Ljava/util/Set;",
             isStatic: true
@@ -7117,27 +7130,7 @@ public final class HostBridge {
             isStatic: true
         ) { _, args in
             let source = try listBox(args, "CollectionsKt.toSet").elements
-            try requireCollectionCapacity(source.count, "CollectionsKt.toSet")
-            var comparisons = 0
-            var result: [RVal] = []
-            result.reserveCapacity(source.count)
-            for value in source {
-                var exists = false
-                for existing in result {
-                    guard comparisons < 8_000_000 else {
-                        throw VMError.verify(
-                            "CollectionsKt.toSet exceeds 8000000 equality comparisons"
-                        )
-                    }
-                    comparisons += 1
-                    if javaValueEquals(existing, value) {
-                        exists = true
-                        break
-                    }
-                }
-                if !exists { result.append(value) }
-            }
-            return hostList(result, isMutable: false, descriptor: "Ljava/util/Set;")
+            return try hostSet(source, operation: "CollectionsKt.toSet")
         }
         bridge.register(
             class: collections,
