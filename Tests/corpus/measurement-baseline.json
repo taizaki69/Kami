@@ -19,7 +19,7 @@
       "dexCount": 1,
       "codeMethodCount": 287,
       "instructionCount": 8258,
-      "uniqueUnregisteredExternalMethodCount": 113,
+      "uniqueUnregisteredExternalMethodCount": 112,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -30,7 +30,7 @@
       "dexCount": 1,
       "codeMethodCount": 339,
       "instructionCount": 8142,
-      "uniqueUnregisteredExternalMethodCount": 82,
+      "uniqueUnregisteredExternalMethodCount": 73,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -41,7 +41,7 @@
       "dexCount": 1,
       "codeMethodCount": 141,
       "instructionCount": 4938,
-      "uniqueUnregisteredExternalMethodCount": 71,
+      "uniqueUnregisteredExternalMethodCount": 69,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -52,7 +52,7 @@
       "dexCount": 1,
       "codeMethodCount": 437,
       "instructionCount": 19350,
-      "uniqueUnregisteredExternalMethodCount": 98,
+      "uniqueUnregisteredExternalMethodCount": 97,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -63,7 +63,7 @@
       "dexCount": 1,
       "codeMethodCount": 244,
       "instructionCount": 5480,
-      "uniqueUnregisteredExternalMethodCount": 68,
+      "uniqueUnregisteredExternalMethodCount": 67,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -74,7 +74,7 @@
       "dexCount": 1,
       "codeMethodCount": 245,
       "instructionCount": 6291,
-      "uniqueUnregisteredExternalMethodCount": 67,
+      "uniqueUnregisteredExternalMethodCount": 55,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -85,7 +85,7 @@
       "dexCount": 1,
       "codeMethodCount": 452,
       "instructionCount": 13787,
-      "uniqueUnregisteredExternalMethodCount": 105,
+      "uniqueUnregisteredExternalMethodCount": 103,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -96,7 +96,7 @@
       "dexCount": 1,
       "codeMethodCount": 190,
       "instructionCount": 7098,
-      "uniqueUnregisteredExternalMethodCount": 101,
+      "uniqueUnregisteredExternalMethodCount": 98,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -107,7 +107,7 @@
       "dexCount": 1,
       "codeMethodCount": 164,
       "instructionCount": 6027,
-      "uniqueUnregisteredExternalMethodCount": 110,
+      "uniqueUnregisteredExternalMethodCount": 99,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -118,7 +118,7 @@
       "dexCount": 1,
       "codeMethodCount": 127,
       "instructionCount": 3389,
-      "uniqueUnregisteredExternalMethodCount": 84,
+      "uniqueUnregisteredExternalMethodCount": 75,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     }
@@ -132,7 +132,7 @@
         "extensionCount": 4
       }
     ],
-    "uniqueUnregisteredExternalMethodCount": 432,
+    "uniqueUnregisteredExternalMethodCount": 418,
     "omittedExternalInvocationCount": 0,
     "unsupportedOpcodeCount": 0,
     "topLimit": 5,
