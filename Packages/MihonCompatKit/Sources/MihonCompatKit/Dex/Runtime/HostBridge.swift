@@ -6924,6 +6924,16 @@ public final class HostBridge {
         }
         bridge.register(
             class: collections,
+            "toMutableList",
+            prototype: "(Ljava/util/Collection;)Ljava/util/List;",
+            isStatic: true
+        ) { _, args in
+            let source = try listBox(args, "CollectionsKt.toMutableList").elements
+            try requireCollectionCapacity(source.count, "CollectionsKt.toMutableList")
+            return hostList(source, isMutable: true)
+        }
+        bridge.register(
+            class: collections,
             "emptyList",
             prototype: "()Ljava/util/List;",
             isStatic: true
