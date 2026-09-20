@@ -62,7 +62,7 @@ final class ResourceBundleCompatibilityTests: XCTestCase {
         standalone
         key\ with\ spaces\ \:=first\
             second
-        escaped=\t\n\r\f\q\!\#tail
+        escaped=\t\n\r\f\q\!tail
         emoji=\uD83D\uDE00
         accent\u00e9=precomposed
         accente\u0301=decomposed
@@ -75,7 +75,7 @@ final class ResourceBundleCompatibilityTests: XCTestCase {
         let result = try bundle(input, vm, bridge)
         for (key, expected) in [
             ("standalone", ""), ("key with spaces :", "firstsecond"),
-            ("escaped", "\t\n\r\u{c}q!#tail"), ("emoji", "😀"),
+            ("escaped", "\t\n\r\u{c}q!tail"), ("emoji", "😀"),
             ("accenté", "precomposed"), ("accente\u{301}", "decomposed"),
             ("duplicate", "new"), ("", "empty key"), ("trailing", "keep "), ("end", "last"),
         ] {

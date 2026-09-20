@@ -7970,6 +7970,17 @@ public final class HostBridge {
         bridge.register(class: select, "getState", prototype: "()Ljava/lang/Object;") { _, args in
             try filterState(args, "Filter.Select.getState")
         }
+        bridge.register(class: select, "getValues", prototype: "()[Ljava/lang/Object;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Filter.Select.getValues"),
+                  let filter = object.payload as? FilterStateBox,
+                  case .select = filter.kind else {
+                throw VMError.verify("Filter.Select.getValues receiver")
+            }
+            return .arr(ArrInstance(
+                elemDescriptor: "Ljava/lang/Object;",
+                elements: filter.values.map(Self.string)
+            ))
+        }
 
         func registerSortConstructor(_ prototype: String, hasDefaultMask: Bool) {
             bridge.register(class: sort, "<init>", prototype: prototype) { _, args in
