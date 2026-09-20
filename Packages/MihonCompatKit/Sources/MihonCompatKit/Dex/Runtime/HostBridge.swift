@@ -7298,12 +7298,25 @@ public final class HostBridge {
                     var right = middle
                     var destination = start
                     while left < middle && right < end {
-                        let comparison = try vm.call(
-                            classDescriptor: comparator.dexType,
-                            method: "compare",
+                        let comparison: RVal
+                        if let hostCompare = bridge.resolve(
+                            class: comparator.dexType,
+                            "compare",
                             prototype: "(Ljava/lang/Object;Ljava/lang/Object;)I",
-                            args: [.obj(comparator), input[left], input[right]]
-                        )
+                            isStatic: false
+                        ) {
+                            comparison = try hostCompare(
+                                vm,
+                                [.obj(comparator), input[left], input[right]]
+                            )
+                        } else {
+                            comparison = try vm.callVirtualEntry(
+                                receiver: .obj(comparator),
+                                method: "compare",
+                                prototype: "(Ljava/lang/Object;Ljava/lang/Object;)I",
+                                args: [.obj(comparator), input[left], input[right]]
+                            )
+                        }
                         guard case let .int(order) = comparison else {
                             throw VMError.verify("Comparator.compare result")
                         }
@@ -7740,6 +7753,16 @@ public final class HostBridge {
 
         let iterableClasses = [
             "Ljava/lang/Iterable;",
+            "Ljava/util/Collection;",
+            "Ljava/util/List;",
+            "Ljava/util/Set;",
+            "Ljava/util/AbstractCollection;",
+            "Ljava/util/AbstractList;",
+            "Ljava/util/AbstractSet;",
+            "Ljava/util/ArrayList;",
+            "Ljava/util/LinkedList;",
+            "Ljava/util/HashSet;",
+            "Ljava/util/LinkedHashSet;",
             "Ljava/util/concurrent/CopyOnWriteArrayList;",
         ]
         for descriptor in iterableClasses {

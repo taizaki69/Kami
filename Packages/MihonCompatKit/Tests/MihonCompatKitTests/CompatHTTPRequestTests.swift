@@ -255,7 +255,7 @@ final class CompatHTTPRequestTests: XCTestCase {
             elemDescriptor: "I", elements: [.int(1)]
         ))]))
         XCTAssertThrowsError(try setOf(vm, [.arr(ArrInstance(
-            elemDescriptor: "Ljava/lang/Object;", elements: Array(repeating: .null, count: 100_001)
+            elemDescriptor: "Ljava/lang/Object;", elements: Array(repeating: .null, count: 1_000_001)
         ))]))
     }
 
