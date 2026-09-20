@@ -349,7 +349,29 @@ enum CompatHTMLParser {
         } catch {
             throw CompatHTMLError.malformedHTML
         }
+        return try scan(document, policy: policy)
+    }
 
+    static func parse(
+        _ html: String,
+        policy: CompatHTMLPolicy
+    ) throws -> CompatHTMLContext {
+        guard html.utf8.count <= policy.maximumInputBytes else {
+            throw CompatHTMLError.inputTooLarge(limit: policy.maximumInputBytes)
+        }
+        let document: SwiftSoup.Document
+        do {
+            document = try SwiftSoup.parse(html)
+        } catch {
+            throw CompatHTMLError.malformedHTML
+        }
+        return try scan(document, policy: policy)
+    }
+
+    private static func scan(
+        _ document: SwiftSoup.Document,
+        policy: CompatHTMLPolicy
+    ) throws -> CompatHTMLContext {
         var nodeCount = 0
         var attributeCount = 0
         var stack: [(node: SwiftSoup.Node, depth: Int)] = [(document, 0)]

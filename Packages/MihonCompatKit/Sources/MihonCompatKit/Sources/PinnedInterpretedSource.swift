@@ -337,6 +337,38 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         )
     }
 
+    /// Loads the exact current EternalMangas 1.6.28 artifact through production transport.
+    public static func eternalmangas1628(
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        let profile = PinnedInterpretedProfile.eternalmangas1628
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: profile.networkIdentity,
+            policy: transportPolicy
+        )
+        return try Self(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
+    /// Injection seam for deterministic EternalMangas tests.
+    public static func eternalmangas1628(
+        apkBytes: [UInt8],
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        try Self(
+            profile: .eternalmangas1628,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy
+        )
+    }
+
     /// Injection seam for deterministic Mangas-Origines.fr tests.
     public static func mangasOriginesFR1658(
         apkBytes: [UInt8],
@@ -547,6 +579,7 @@ public enum InterpretedExtensionProfileCatalog {
             .mangasOriginesFR1658,
             .komikcast1683,
             .yomuComics1659,
+            .eternalmangas1628,
         ]
         return profiles.first {
             $0.packageName == packageName &&
@@ -574,6 +607,7 @@ private struct PinnedInterpretedProfile: Sendable {
     enum PreferenceSupport: Sendable {
         case none
         case baoziManhua
+        case eternalMangas
 
         func validates(_ preferences: InterpretedExtensionPreferences) -> Bool {
             switch self {
@@ -591,6 +625,13 @@ private struct PinnedInterpretedProfile: Sendable {
                 return preferences.strings.allSatisfy { key, value in
                     allowedStrings[key]?.contains(value) == true
                 } && Set(preferences.booleans.keys).isSubset(of: allowedBooleans)
+            case .eternalMangas:
+                let allowedBooleans: Set<String> = [
+                    "pref_show_locked_chapters",
+                    "pref_use_chapters_api",
+                ]
+                return preferences.strings.isEmpty
+                    && Set(preferences.booleans.keys).isSubset(of: allowedBooleans)
             }
         }
     }
@@ -725,6 +766,20 @@ private struct PinnedInterpretedProfile: Sendable {
         preferenceSupport: .none,
         imageRequestSupport: .pageURL
     )
+
+    static let eternalmangas1628 = PinnedInterpretedProfile(
+        identifier: "eternalmangas-1.6.28",
+        sha256: "6325059f3d45e2b727268cdae936f7bcb08f914c5852b40c9e7bd736e0b78be6",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+        maximumAPKBytes: 64 * 1024 * 1024,
+        packageName: "eu.kanade.tachiyomi.extension.es.eternalmangas",
+        versionName: "1.6.28",
+        versionCode: 28,
+        expectedSourceID: 1_533_901_034_425_595_323,
+        filterSupport: .staticList,
+        preferenceSupport: .eternalMangas,
+        imageRequestSupport: .pageURL
+    )
 }
 
 private actor PinnedInterpretedRuntime {
@@ -825,6 +880,8 @@ private actor PinnedInterpretedRuntime {
         case .none:
             extensionPackageName = nil
         case .baoziManhua:
+            extensionPackageName = profile.packageName
+        case .eternalMangas:
             extensionPackageName = profile.packageName
         }
         let bridge = HostBridge.minimal(

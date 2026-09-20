@@ -404,6 +404,7 @@ public final class HostBridge {
 
     private final class SMangaBox {
         var value: SMangaCompat
+        var memoObject: OrderedJSONObject?
 
         init(_ value: SMangaCompat = .init()) {
             self.value = value
@@ -717,6 +718,10 @@ public final class HostBridge {
 
     private struct JSONElementSerializerBox {}
 
+    private struct JSONPrimitiveSerializerBox {}
+
+    private struct JSONBooleanSerializerBox {}
+
     private struct JSONArraySerializerBox {}
 
     private struct JSONElementBox {
@@ -752,7 +757,18 @@ public final class HostBridge {
 
         var values: [String: String] {
             object.entries.reduce(into: [String: String]()) { result, entry in
-                if let value = entry.value as? String { result[entry.key] = value }
+                if let value = entry.value as? String {
+                    result[entry.key] = value
+                } else if entry.value is NSNull {
+                    // Null entries carry no string content for the bounded subset.
+                } else if let number = entry.value as? NSNumber,
+                          let data = try? JSONSerialization.data(
+                              withJSONObject: number,
+                              options: [.fragmentsAllowed]
+                          ),
+                          let text = String(data: data, encoding: .utf8) {
+                    result[entry.key] = text
+                }
             }
         }
     }
@@ -1087,6 +1103,35 @@ public final class HostBridge {
                     _ = try close(vm, [closeable])
                 } catch is DEXThrowable {}
             }
+            return .null
+        }
+        bridge.register(
+            class: "Lokhttp3/internal/_UtilCommonKt;",
+            "closeQuietly",
+            prototype: "(Ljava/io/Closeable;)V",
+            isStatic: true
+        ) { vm, args in
+            let operation = "closeQuietly"
+            let closeable = try argument(args, 0, operation)
+            if closeable.isNull { return .null }
+            guard case let .obj(object) = closeable else {
+                throw VMError.verify("\(operation) receiver")
+            }
+            guard let close = bridge.resolve(
+                class: object.dexType,
+                "close",
+                prototype: "()V",
+                isStatic: false
+            ) else {
+                throw VMError.unresolvedMethod(
+                    class: object.dexType,
+                    signature: "close()V"
+                )
+            }
+            // OkHttp's closeQuietly swallows every close failure.
+            do {
+                _ = try close(vm, [closeable])
+            } catch {}
             return .null
         }
 
@@ -1451,6 +1496,7 @@ public final class HostBridge {
         for (name, beforeLast) in [
             ("substringAfter$default", false),
             ("substringBeforeLast$default", true),
+            ("substringAfterLast$default", true),
         ] {
             bridge.register(
                 class: "Lkotlin/text/StringsKt;",
@@ -1922,6 +1968,38 @@ public final class HostBridge {
                 return .null
             }
             return box.entries.remove(at: index).value
+        }
+        bridge.register(
+            class: concurrentMap,
+            "put",
+            prototype: "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
+        ) { _, args in
+            let box = try mapBox(args, "ConcurrentHashMap.put")
+            guard box.isMutable else {
+                throw DEXThrowable(string("UnsupportedOperationException: immutable map"))
+            }
+            let key = try argument(args, 1, "ConcurrentHashMap.put")
+            let value = try argument(args, 2, "ConcurrentHashMap.put")
+            guard !key.isNull, !value.isNull else {
+                throw DEXThrowable(string("NullPointerException"))
+            }
+            if let index = box.entries.firstIndex(where: { javaValueEquals($0.key, key) }) {
+                let previous = box.entries[index].value
+                box.entries[index].value = value
+                return previous
+            }
+            try requireCollectionCapacity(box.entries.count + 1, "ConcurrentHashMap.put")
+            box.entries.append((key, value))
+            return .null
+        }
+        bridge.register(
+            class: concurrentMap,
+            "get",
+            prototype: "(Ljava/lang/Object;)Ljava/lang/Object;"
+        ) { _, args in
+            let box = try mapBox(args, "ConcurrentHashMap.get")
+            let key = try argument(args, 1, "ConcurrentHashMap.get")
+            return box.entries.first(where: { javaValueEquals($0.key, key) })?.value ?? .null
         }
         bridge.register(
             class: "Ljava/util/Map;",
@@ -2944,6 +3022,61 @@ public final class HostBridge {
             box.utf8Bytes = nextBytes
             return .obj(ObjInstance(dexType: primitive, payload: value, isHost: true))
         }
+        bridge.register(
+            class: "Lkotlinx/serialization/json/JsonElementBuildersKt;",
+            "put",
+            prototype: "(Lkotlinx/serialization/json/JsonObjectBuilder;Ljava/lang/String;Ljava/lang/Number;)Lkotlinx/serialization/json/JsonElement;",
+            isStatic: true
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "JsonObjectBuilder.put"),
+                  let box = object.payload as? JSONObjectBuilderBox else {
+                throw VMError.verify("JsonObjectBuilder.put receiver")
+            }
+            let key = try requiredString(args, 1, "JsonObjectBuilder.put")
+            guard key.utf8.count <= 4_096,
+                  box.object.contains(key) || box.object.count < 512 else {
+                throw VMError.verify("JsonObjectBuilder.put entry bounds")
+            }
+            let number: NSNumber
+            switch args[2] {
+            case .int(let value):
+                number = NSNumber(value: Int(value))
+            case .long(let value):
+                number = NSNumber(value: value)
+            case .float(let value):
+                number = NSNumber(value: value)
+            case .double(let value):
+                number = NSNumber(value: value)
+            case .obj(let boxed):
+                if let value = boxed.payload as? Int32 {
+                    number = NSNumber(value: Int(value))
+                } else if let value = boxed.payload as? Int64 {
+                    number = NSNumber(value: value)
+                } else if let value = boxed.payload as? Float {
+                    number = NSNumber(value: value)
+                } else if let value = boxed.payload as? Double {
+                    number = NSNumber(value: value)
+                } else {
+                    throw VMError.verify("JsonObjectBuilder.put number")
+                }
+            default:
+                throw VMError.verify("JsonObjectBuilder.put number")
+            }
+            let text = try Self.jsonPrimitiveContent(number, operation: "JsonObjectBuilder.put")
+            guard text.utf8.count <= 4_096 else {
+                throw VMError.verify("JsonObjectBuilder.put exceeds 4096 number bytes")
+            }
+            let previousBytes = (box.object.value(forKey: key) as? String).map {
+                key.utf8.count + $0.utf8.count
+            } ?? 0
+            let nextBytes = box.utf8Bytes - previousBytes + key.utf8.count + text.utf8.count
+            guard nextBytes <= 1_048_576 else {
+                throw VMError.verify("JsonObjectBuilder.put exceeds 1048576 UTF-8 bytes")
+            }
+            box.object.set(number, forKey: key)
+            box.utf8Bytes = nextBytes
+            return .obj(ObjInstance(dexType: primitive, payload: number, isHost: true))
+        }
         bridge.register(class: builder, "build", prototype: "()Lkotlinx/serialization/json/JsonObject;") { _, args in
             guard case let .obj(object) = try argument(args, 0, "JsonObjectBuilder.build"),
                   let box = object.payload as? JSONObjectBuilderBox else {
@@ -3098,6 +3231,25 @@ public final class HostBridge {
             let value = try requiredString(args, 0, "JsonElement.JsonPrimitive")
             try Self.validateJSONFoundation(value, policy: bridge.htmlPolicy)
             return Self.jsonElementValue(value)
+        }
+        bridge.register(
+            class: "Lkotlinx/serialization/json/JsonElementKt;",
+            "getInt",
+            prototype: "(Lkotlinx/serialization/json/JsonPrimitive;)I",
+            isStatic: true
+        ) { _, args in
+            let value = try primitiveValue(
+                try argument(args, 0, "JsonElement.getInt"),
+                operation: "JsonElement.getInt"
+            )
+            if value is NSNull {
+                throw VMError.verify("JsonElement.getInt null primitive")
+            }
+            let content = try Self.jsonPrimitiveContent(value, operation: "JsonElement.getInt")
+            guard let parsed = Int32(content) else {
+                throw VMError.verify("JsonElement.getInt content")
+            }
+            return .int(parsed)
         }
         bridge.register(
             class: "Lkotlinx/serialization/json/JsonElementKt;",
@@ -3502,6 +3654,18 @@ public final class HostBridge {
                object.payload is JSONElementSerializerBox {
                 try validateJSON(value)
                 return Self.jsonElementValue(value)
+            }
+            if case let .obj(object) = strategy,
+               object.payload is JSONPrimitiveSerializerBox {
+                try validateJSON(value)
+                return Self.jsonElementValue(value)
+            }
+            if case let .obj(object) = strategy,
+               object.payload is JSONBooleanSerializerBox {
+                guard isJSONBoolean(value) else {
+                    throw serializationThrowable("expected JSON boolean")
+                }
+                return boxedBoolean((value as? NSNumber)?.boolValue == true)
             }
             if case let .obj(object) = strategy,
                object.payload is JSONArraySerializerBox {
@@ -3991,6 +4155,8 @@ public final class HostBridge {
             case is JSONIntSerializerBox: leafName = "kotlin.Int"
             case is JSONFloatSerializerBox: leafName = "kotlin.Float"
             case is JSONElementSerializerBox: leafName = "kotlinx.serialization.json.JsonElement"
+            case is JSONPrimitiveSerializerBox: leafName = "kotlinx.serialization.json.JsonPrimitive"
+            case is JSONBooleanSerializerBox: leafName = "kotlin.Boolean"
             case is JSONArraySerializerBox: leafName = "kotlinx.serialization.json.JsonArray"
             default: leafName = nil
             }
@@ -4108,6 +4274,8 @@ public final class HostBridge {
         let stringSerializer = "Lkotlinx/serialization/internal/StringSerializer;"
         let intSerializer = "Lkotlinx/serialization/internal/IntSerializer;"
         let floatSerializer = "Lkotlinx/serialization/internal/FloatSerializer;"
+        let jsonPrimitiveSerializer = "Lkotlinx/serialization/json/JsonPrimitiveSerializer;"
+        let booleanSerializer = "Lkotlinx/serialization/internal/BooleanSerializer;"
         bridge.staticFields["\(stringSerializer)->INSTANCE"] = .obj(ObjInstance(
             dexType: stringSerializer,
             payload: JSONStringSerializerBox(),
@@ -4121,6 +4289,16 @@ public final class HostBridge {
         bridge.staticFields["\(floatSerializer)->INSTANCE"] = .obj(ObjInstance(
             dexType: floatSerializer,
             payload: JSONFloatSerializerBox(),
+            isHost: true
+        ))
+        bridge.staticFields["\(jsonPrimitiveSerializer)->INSTANCE"] = .obj(ObjInstance(
+            dexType: jsonPrimitiveSerializer,
+            payload: JSONPrimitiveSerializerBox(),
+            isHost: true
+        ))
+        bridge.staticFields["\(booleanSerializer)->INSTANCE"] = .obj(ObjInstance(
+            dexType: booleanSerializer,
+            payload: JSONBooleanSerializerBox(),
             isHost: true
         ))
         bridge.register(
@@ -4762,12 +4940,26 @@ public final class HostBridge {
             class: d,
             method: "append",
             prototypes: textAppendParameters.map { "(\($0))\(appendResult)" }
-        ) { _, args in
+        ) { vm, args in
             guard case let .obj(o) = try argument(args, 0, "StringBuilder.append") else {
                 throw VMError.verify("append receiver")
             }
-            let current = (o.payload as? String) ?? ""
-            o.payload = current + text(try argument(args, 1, "StringBuilder.append"))
+            let value = try argument(args, 1, "StringBuilder.append")
+            let addition: String
+            if case let .obj(hostObject) = value, hostObject.isHost,
+               hostObject.payload as? String == nil,
+               hostObject.payload as? Int32 == nil,
+               let toString = bridge.resolve(
+                   class: hostObject.dexType,
+                   "toString",
+                   prototype: "()Ljava/lang/String;",
+                   isStatic: false
+               ) {
+                addition = vmStringValue(try toString(vm, [value]))
+            } else {
+                addition = text(value)
+            }
+            o.payload = ((o.payload as? String) ?? "") + addition
             return .obj(o)
         }
         bridge.register(class: d, "append", prototype: "(Z)\(appendResult)") { _, args in
@@ -7284,6 +7476,35 @@ public final class HostBridge {
         }
         bridge.register(
             class: collections,
+            "sorted",
+            prototype: "(Ljava/lang/Iterable;)Ljava/util/List;",
+            isStatic: true
+        ) { _, args in
+            var input = try listBox(args, "CollectionsKt.sorted").elements
+            guard input.count <= 65_536 else {
+                throw VMError.verify("CollectionsKt.sorted size")
+            }
+            guard input.count > 1 else { return hostList(input, isMutable: false) }
+            var texts: [String] = []
+            texts.reserveCapacity(input.count)
+            for element in input {
+                guard case let .obj(object) = element,
+                      let text = object.payload as? String else {
+                    throw VMError.verify("CollectionsKt.sorted element")
+                }
+                texts.append(text)
+            }
+            let order = texts.enumerated().sorted { lhs, rhs in
+                lhs.element != rhs.element ? lhs.element < rhs.element : lhs.offset < rhs.offset
+            }.map(\.offset)
+            var output = input
+            for (index, source) in order.enumerated() {
+                output[index] = input[source]
+            }
+            return hostList(output, isMutable: false)
+        }
+        bridge.register(
+            class: collections,
             "sortedWith",
             prototype: "(Ljava/lang/Iterable;Ljava/util/Comparator;)Ljava/util/List;",
             isStatic: true
@@ -8381,6 +8602,66 @@ public final class HostBridge {
                     )
                 }
             }
+            bridge.registerAsync(
+                class: "Lokhttp3/Call;",
+                "enqueue",
+                prototype: "(Lokhttp3/Callback;)V"
+            ) { vm, args in
+                guard case let .obj(callObject) = try argument(args, 0, "Call.enqueue"),
+                      let call = callObject.payload as? CallBox else {
+                    throw VMError.verify("Call.enqueue receiver")
+                }
+                guard case let .obj(callbackObject) = try argument(args, 1, "Call.enqueue"),
+                      !callbackObject.isHost else {
+                    throw VMError.verify("Call.enqueue callback")
+                }
+                guard let transport = bridge.transport else {
+                    throw VMError.verify("Call.enqueue requires an HTTP transport")
+                }
+                let callValue = RVal.obj(callObject)
+                let callbackValue = RVal.obj(callbackObject)
+                func failureValue(_ message: String) -> RVal {
+                    .obj(ObjInstance(
+                        dexType: "Ljava/io/IOException;",
+                        payload: message,
+                        isHost: true
+                    ))
+                }
+                do {
+                    let responseValue = try await execute(
+                        callValue: callValue,
+                        call,
+                        vm: vm,
+                        transport: transport,
+                        policy: bridge.transportPolicy,
+                        requiresSuccess: false
+                    )
+                    try await vm.callNestedAsync(
+                        classDescriptor: callbackObject.dexType,
+                        method: "onResponse",
+                        prototype: "(Lokhttp3/Call;Lokhttp3/Response;)V",
+                        args: [callbackValue, callValue, responseValue]
+                    )
+                } catch is CancellationError {
+                    throw VMError.cancelled
+                } catch let error as VMError {
+                    if case .cancelled = error { throw error }
+                    try await vm.callNestedAsync(
+                        classDescriptor: callbackObject.dexType,
+                        method: "onFailure",
+                        prototype: "(Lokhttp3/Call;Ljava/io/IOException;)V",
+                        args: [callbackValue, callValue, failureValue("network request failed")]
+                    )
+                } catch {
+                    try await vm.callNestedAsync(
+                        classDescriptor: callbackObject.dexType,
+                        method: "onFailure",
+                        prototype: "(Lokhttp3/Call;Ljava/io/IOException;)V",
+                        args: [callbackValue, callValue, failureValue("network request failed")]
+                    )
+                }
+                return .null
+            }
 
             let interceptorChain = "Lokhttp3/Interceptor$Chain;"
             bridge.register(
@@ -8724,6 +9005,16 @@ public final class HostBridge {
                 throw VMError.verify("HttpUrl.querySize receiver")
             }
             return .int(Int32(clamping: components.queryItems?.count ?? 0))
+        }
+        bridge.register(class: httpUrl, "queryParameterNames", prototype: "()Ljava/util/Set;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "HttpUrl.queryParameterNames"),
+                  let url = object.payload as? HttpUrlBox,
+                  let components = URLComponents(string: url.value) else {
+                throw VMError.verify("HttpUrl.queryParameterNames receiver")
+            }
+            let names = Array(Set((components.queryItems ?? []).map { $0.name })).sorted()
+            try requireCollectionCapacity(names.count, "HttpUrl.queryParameterNames")
+            return hostList(names.map(string), isMutable: false, descriptor: "Ljava/util/Set;")
         }
         bridge.register(class: httpUrl, "pathSegments", prototype: "()Ljava/util/List;") { _, args in
             guard case let .obj(object) = try argument(args, 0, "HttpUrl.pathSegments"),
@@ -9110,6 +9401,89 @@ public final class HostBridge {
                     url: rawURL,
                     method: "GET",
                     headers: headers,
+                    cachePolicy: cachePolicy
+                ),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: "Leu/kanade/tachiyomi/network/RequestsKt;",
+            "POST$default",
+            prototype: "(Ljava/lang/String;Lokhttp3/Headers;Lokhttp3/RequestBody;Lokhttp3/CacheControl;ILjava/lang/Object;)Lokhttp3/Request;",
+            isStatic: true
+        ) { _, args in
+            let rawURL = try requiredString(args, 0, "RequestsKt.POST$default")
+            guard parsedHTTPURL(rawURL) != nil,
+                  case let .int(mask) = try argument(args, 4, "RequestsKt.POST$default"),
+                  mask & ~14 == 0,
+                  try argument(args, 5, "RequestsKt.POST$default").isNull else {
+                throw VMError.verify("RequestsKt.POST$default arguments")
+            }
+
+            let headers: [CompatHTTPHeader]
+            if mask & 2 != 0 {
+                headers = []
+            } else {
+                guard case let .obj(headersObject) = try argument(
+                    args, 1, "RequestsKt.POST$default"
+                ), let box = headersObject.payload as? HeadersBox else {
+                    throw VMError.verify("RequestsKt.POST$default headers")
+                }
+                headers = box.headers
+            }
+
+            let body: CompatHTTPRequestBody?
+            if mask & 4 != 0 {
+                body = nil
+            } else {
+                guard case let .obj(bodyObject) = try argument(
+                    args, 2, "RequestsKt.POST$default"
+                ), let bodyValue = bodyObject.payload as? CompatHTTPRequestBody else {
+                    throw VMError.verify("RequestsKt.POST$default body")
+                }
+                body = bodyValue
+            }
+
+            let cachePolicy: CompatHTTPCachePolicy?
+            if mask & 8 != 0 {
+                cachePolicy = nil
+            } else {
+                switch try argument(args, 3, "RequestsKt.POST$default") {
+                case .null:
+                    cachePolicy = nil
+                case let .obj(cacheObject):
+                    guard let box = cacheObject.payload as? CacheControlBox else {
+                        throw VMError.verify("RequestsKt.POST$default cache control")
+                    }
+                    cachePolicy = box.policy
+                default:
+                    throw VMError.verify("RequestsKt.POST$default cache control")
+                }
+            }
+
+            guard headers.count <= 128 else {
+                throw VMError.verify("RequestsKt.POST$default exceeds 128 headers")
+            }
+            var headerBytes = 0
+            for header in headers {
+                try validateHTTPHeader(
+                    name: header.name,
+                    value: header.value,
+                    method: "RequestsKt.POST$default"
+                )
+                let added = header.name.utf8.count + header.value.utf8.count
+                guard added <= 65_536 - headerBytes else {
+                    throw VMError.verify("RequestsKt.POST$default headers exceed 65536 bytes")
+                }
+                headerBytes += added
+            }
+            return .obj(ObjInstance(
+                dexType: request,
+                payload: CompatHTTPRequest(
+                    url: rawURL,
+                    method: "POST",
+                    headers: headers,
+                    body: body,
                     cachePolicy: cachePolicy
                 ),
                 isHost: true
@@ -9968,6 +10342,23 @@ public final class HostBridge {
                 throw htmlThrowable(error)
             }
         }
+        bridge.register(
+            class: jsoup,
+            "parse",
+            prototype: "(Ljava/lang/String;)Lorg/jsoup/nodes/Document;",
+            isStatic: true
+        ) { _, args in
+            let html = try requiredString(args, 0, "Jsoup.parse")
+            do {
+                let context = try CompatHTMLParser.parse(
+                    html,
+                    policy: bridge.htmlPolicy
+                )
+                return value(context.document, context: context, descriptor: document)
+            } catch {
+                throw htmlThrowable(error)
+            }
+        }
 
         for descriptor in [document, element] {
             bridge.register(
@@ -10010,6 +10401,16 @@ public final class HostBridge {
             do {
                 return string(try receiver.context.boundedString(
                     receiver.context.document.location()
+                ))
+            } catch {
+                throw htmlThrowable(error)
+            }
+        }
+        bridge.register(class: document, "text", prototype: "()Ljava/lang/String;") { _, args in
+            let receiver = try box(args, "Document.text")
+            do {
+                return string(try receiver.context.boundedString(
+                    try receiver.context.document.text()
                 ))
             } catch {
                 throw htmlThrowable(error)
@@ -10206,6 +10607,36 @@ public final class HostBridge {
                 return .null
             }
             return string(value)
+        }
+        bridge.register(
+            class: smanga,
+            "setMemo",
+            prototype: "(Lkotlinx/serialization/json/JsonObject;)V"
+        ) { _, args in
+            let box = try mangaBox(args, "SManga.setMemo")
+            guard case let .obj(object) = try argument(args, 1, "SManga.setMemo"),
+                  let memo = object.payload as? JSONObjectBox else {
+                throw VMError.verify("SManga.setMemo value")
+            }
+            box.value.memo = memo.values
+            box.memoObject = memo.object
+            return .null
+        }
+        bridge.register(
+            class: smanga,
+            "getMemo",
+            prototype: "()Lkotlinx/serialization/json/JsonObject;"
+        ) { _, args in
+            let box = try mangaBox(args, "SManga.getMemo")
+            let memo = box.memoObject ?? OrderedJSONObject(entries: box.value.memo
+                .sorted { $0.key < $1.key }
+                .map { (key: $0.key, value: $0.value) })
+            guard memo.count > 0 else { return .null }
+            return .obj(ObjInstance(
+                dexType: "Lkotlinx/serialization/json/JsonObject;",
+                payload: JSONObjectBox(object: memo),
+                isHost: true
+            ))
         }
         bridge.register(class: smanga, "setStatus", prototype: "(I)V") { _, args in
             let box = try mangaBox(args, "SManga.setStatus")
@@ -11604,6 +12035,26 @@ public final class HostBridge {
             if a.dexType == "Lkotlin/reflect/KClass;",
                b.dexType == "Lkotlin/reflect/KClass;" {
                 return (a.payload as? String) == (b.payload as? String)
+            }
+            // Boxed Java primitives compare by value, not identity: generated
+            // code creates fresh boxes for literals (`isLocked == true`).
+            if a.isHost, b.isHost, a.dexType == b.dexType {
+                switch (a.payload, b.payload) {
+                case let (lhsString as String, rhsString as String):
+                    return lhsString == rhsString
+                case let (lhsInt as Int32, rhsInt as Int32):
+                    return lhsInt == rhsInt
+                case let (lhsLong as Int64, rhsLong as Int64):
+                    return lhsLong == rhsLong
+                case let (lhsBool as Bool, rhsBool as Bool):
+                    return lhsBool == rhsBool
+                case let (lhsFloat as Float, rhsFloat as Float):
+                    return lhsFloat == rhsFloat
+                case let (lhsDouble as Double, rhsDouble as Double):
+                    return lhsDouble == rhsDouble
+                default:
+                    break
+                }
             }
             return a === b
         case let (.arr(a), .arr(b)): return a === b

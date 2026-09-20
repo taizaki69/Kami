@@ -15,44 +15,52 @@
     {
       "identity": "eu.kanade.tachiyomi.extension.all.komga@1.6.69(69)",
       "structuralCandidate": false,
-      "planBlockers": ["the source class chain is missing the required stable Mihon wrappers"],
+      "planBlockers": [
+        "the source class chain is missing the required stable Mihon wrappers"
+      ],
       "dexCount": 1,
       "codeMethodCount": 287,
       "instructionCount": 8258,
-      "uniqueUnregisteredExternalMethodCount": 112,
+      "uniqueUnregisteredExternalMethodCount": 111,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
     {
       "identity": "eu.kanade.tachiyomi.extension.all.mangaplus@1.6.65(65)",
       "structuralCandidate": false,
-      "planBlockers": ["the source class chain is missing the required stable Mihon wrappers"],
+      "planBlockers": [
+        "the source class chain is missing the required stable Mihon wrappers"
+      ],
       "dexCount": 1,
       "codeMethodCount": 339,
       "instructionCount": 8142,
-      "uniqueUnregisteredExternalMethodCount": 73,
+      "uniqueUnregisteredExternalMethodCount": 72,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
     {
       "identity": "eu.kanade.tachiyomi.extension.all.nhentaixxx@1.6.10(10)",
       "structuralCandidate": false,
-      "planBlockers": ["the source class chain is missing the required stable Mihon wrappers"],
+      "planBlockers": [
+        "the source class chain is missing the required stable Mihon wrappers"
+      ],
       "dexCount": 1,
       "codeMethodCount": 141,
       "instructionCount": 4938,
-      "uniqueUnregisteredExternalMethodCount": 69,
+      "uniqueUnregisteredExternalMethodCount": 68,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
     {
       "identity": "eu.kanade.tachiyomi.extension.all.xcomic@1.6.4(4)",
       "structuralCandidate": false,
-      "planBlockers": ["the source class chain is missing the required stable Mihon wrappers"],
+      "planBlockers": [
+        "the source class chain is missing the required stable Mihon wrappers"
+      ],
       "dexCount": 1,
       "codeMethodCount": 437,
       "instructionCount": 19350,
-      "uniqueUnregisteredExternalMethodCount": 97,
+      "uniqueUnregisteredExternalMethodCount": 95,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -63,7 +71,7 @@
       "dexCount": 1,
       "codeMethodCount": 244,
       "instructionCount": 5480,
-      "uniqueUnregisteredExternalMethodCount": 67,
+      "uniqueUnregisteredExternalMethodCount": 64,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -74,7 +82,7 @@
       "dexCount": 1,
       "codeMethodCount": 245,
       "instructionCount": 6291,
-      "uniqueUnregisteredExternalMethodCount": 55,
+      "uniqueUnregisteredExternalMethodCount": 42,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -85,7 +93,7 @@
       "dexCount": 1,
       "codeMethodCount": 452,
       "instructionCount": 13787,
-      "uniqueUnregisteredExternalMethodCount": 103,
+      "uniqueUnregisteredExternalMethodCount": 100,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -96,7 +104,7 @@
       "dexCount": 1,
       "codeMethodCount": 190,
       "instructionCount": 7098,
-      "uniqueUnregisteredExternalMethodCount": 98,
+      "uniqueUnregisteredExternalMethodCount": 97,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -107,7 +115,7 @@
       "dexCount": 1,
       "codeMethodCount": 164,
       "instructionCount": 6027,
-      "uniqueUnregisteredExternalMethodCount": 99,
+      "uniqueUnregisteredExternalMethodCount": 96,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     },
@@ -118,7 +126,7 @@
       "dexCount": 1,
       "codeMethodCount": 127,
       "instructionCount": 3389,
-      "uniqueUnregisteredExternalMethodCount": 75,
+      "uniqueUnregisteredExternalMethodCount": 74,
       "omittedExternalInvocationCount": 0,
       "unsupportedOpcodes": []
     }
@@ -132,7 +140,7 @@
         "extensionCount": 4
       }
     ],
-    "uniqueUnregisteredExternalMethodCount": 418,
+    "uniqueUnregisteredExternalMethodCount": 404,
     "omittedExternalInvocationCount": 0,
     "unsupportedOpcodeCount": 0,
     "topLimit": 5,
