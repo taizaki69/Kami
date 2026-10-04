@@ -6,8 +6,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-04
 
 The full native-reader and compatibility objective remains active. The current
-continuation preserves FoolSlide content identity independently of its settings.
-It builds on atomic reader state with database-issued reading targets, bounded
+continuation preserves exact chapter URL identity during refresh and discovery.
+It builds on durable FoolSlide website identity, atomic reader state with database-issued reading targets, bounded
 native export to Files, Mihon gzip/raw backup decoding, offline downloads,
 updates, History resume and revocable source registrations. Restoration remains
 pending.
@@ -53,8 +53,14 @@ must not be used as evidence for the current commit.
       rebound reading targets and show persistence errors; integrate offline
       leases and manual read actions with captured targets and verify them.
       PR #16 at b122ee9 passes Linux/macOS tests, simulator/device and IPA CI.
-- [~] Add durable Foo content binding with exact URL identity, independent
+- [x] Add durable Foo content binding with exact URL identity, independent
       configuration CAS and bounded one-time migration inference.
+      PR #17 at b15344d passes Linux/macOS tests, simulator/device and IPA CI.
+- [x] Preserve byte-distinct chapter URLs during replacement, disappearance
+      and discovery; retain separate reading state, history and download jobs.
+      Updates IDs/cursors also compare exact bytes. Five reproduced regressions
+      and all 296 Core/SQLite tests pass locally; the implementation PR records
+      exact-commit Apple verification separately.
 - [ ] Add shared operation/scene barriers required before enabling restoration.
 - [ ] Add immutable restore preview and atomic
       merge with stale-plan rejection, exact identities and source conflict reports.

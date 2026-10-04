@@ -48,13 +48,19 @@ public struct LibraryChapterDiscovery: Identifiable, Equatable, Sendable {
     public let chapter: Chapter
     public let detectedAt: Int64
 
-    public var id: String { "\(chapter.mangaId):\(chapter.url)" }
+    /// An opaque ASCII key keeps SwiftUI/set equality faithful to URL bytes.
+    public var id: String { "\(chapter.mangaId):\(Data(chapter.url.utf8).base64EncodedString())" }
 }
 
 public struct LibraryChapterDiscoveryCursor: Equatable, Sendable {
     public let detectedAt: Int64
     public let mangaID: Int64
     public let chapterURL: String
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.detectedAt == rhs.detectedAt && lhs.mangaID == rhs.mangaID
+            && Data(lhs.chapterURL.utf8) == Data(rhs.chapterURL.utf8)
+    }
 }
 
 public enum LibraryUpdateTargetOutcome: String, Sendable {
