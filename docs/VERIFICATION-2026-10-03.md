@@ -367,3 +367,75 @@ recuperar el registro como interrumpido y volver a empezar. El parse de los
 Apple. El cuerpo del PR registra el commit publicado y sus workflows Apple;
 los resultados de PR #11 no se atribuyen a estos cambios. Esta fase conserva
 los perfiles, APK y baseline de compatibilidad anteriores.
+
+## Descargas manuales y lectura local
+
+`assistant/offline-downloads-20261003` parte de `36e038a` (PR #12). La migración
+5 añade trabajos con revisión e identidad de intento, recibos de páginas,
+publicación preparada/completa y limpieza pendiente. Filas del antiguo scaffold
+se migran a pausadas/no verificadas. Retirar un manga, cambiar configuración o
+deshabilitar/reemplazar una fuente invalida los intentos pendientes; lectura,
+marcadores, historial y descargas ya terminadas se conservan.
+
+La cola manual procesa un capítulo y una página cada vez. Usa el `ImageRequest`
+de la fuente con su ejecutor y ámbito originales, una caché desactivada y
+reservas previas de espacio. Cancelar invalida primero SQLite y después cancela
+y drena las peticiones. Reintentar obtiene una fuente y lista de páginas nuevas,
+empezando desde cero. El límite de 4.096 ejecutores interpretados ahora devuelve
+indisponibilidad en vez de perder el ejecutor y usar sólo URL/cabeceras.
+
+El almacenamiento usa directorios UUID, nombres ordinales, manifiestos canónicos
+y hashes SHA-256. No sigue symlinks ni acepta enlaces a archivos externos. Una
+revisión independiente encontró el cierre entre `linkat(temp, final)` y
+`unlinkat(temp)`: quedaban dos nombres internos para el mismo inode y la limpieza
+los rechazaba. La corrección permite exclusivamente esa pareja interna con dos
+enlaces exactos; la regresión reproduce página/manifiesto en staging/publicado
+y conserva el rechazo de enlaces externos y archivos especiales.
+
+La apertura offline comprueba la generación completa en SQLite, el manifiesto,
+los recibos y todos los archivos esperados; cada página vuelve a comprobar tamaño
+y hash antes de decodificarse. Una lease mantiene los archivos de un lector
+abierto mientras el borrado bloquea lectores nuevos. Cerrar la última lease
+permite limpiar y confirmar el borrado. Los fallos locales no disparan red.
+Si la app no puede abrir su base durable, el fallback en memoria no obtiene
+autoridad para reconciliar o borrar la carpeta real de descargas.
+
+En Linux, Swift 6.3.3 pasa 333/333 MihonCompatKit, 175/175 Core con SQLite real y
+60/60 Core portable. Las 54 pruebas añadidas a Core/SQLite incluyen 22 de
+persistencia, 17 del coordinador, 11 del filesystem, tres de snapshots/caché y
+una que rechaza validación de imágenes cuando ImageIO no está disponible.
+El coordinador cubre respuesta tardía después de cancelar, registro revocado,
+retry desde cero, fallo de commit y fallo de escritura terminal, recuperación
+local, reserva previa a ejecución y lectura sin consultar el proveedor de
+fuentes. El decoder real tiene pruebas específicas para ejecutarse en Apple;
+las fixtures Linux del filesystem no se atribuyen a ImageIO.
+
+El CLI optimizado compila. Las 27 fixtures bloqueadas se verifican sin cambiar
+APK ni manifest; la auditoría de ocho measurement conserva cuatro candidatos
+estructurales, cuatro bloqueados por wrappers, 359 gaps, cero errores y cero
+opcodes no soportados. Estos recuentos estáticos no amplían compatibilidad.
+Logs y checkpoints: `.git/checkpoints/20261003-offline-downloads/`. El PR de
+implementación registra el commit y sus resultados Apple exactos. Compilación
+de simulador/dispositivo e IPA no prueban interacción, rendimiento físico,
+transferencias de fondo ni disponibilidad de sitios reales.
+
+### Corrección detectada en Apple — 4 de octubre
+
+El primer commit de descargas, `b0fc130`, compiló para simulador y dispositivo
+y generó su IPA sin firma. Linux pasó 333 pruebas de compatibilidad y 175 Core.
+En macOS, las 333 de compatibilidad pasaron, pero una de las 178 Core falló:
+ImageIO aceptaba un PNG truncado de la regresión y lo declaraba completo.
+Ese resultado no se considera una verificación satisfactoria del PR.
+
+La corrección comprueba primero la estructura PNG: límites y orden de chunks,
+CRCs, cabecera única y bloque IEND vacío al final. El decoder de ImageIO sigue
+siendo necesario para interpretar píxeles; otros formatos conservan sus
+comprobaciones ImageIO. Seis regresiones portables prueban truncamiento en
+cada posición después de la firma, CRCs y longitudes corruptos, orden, chunks
+desconocidos y cancelación. La prueba Apple original se conserva y añade PNG
+sin IEND y CRC corrupto.
+
+Tras la corrección, Linux pasa 181/181 Core con SQLite y 66/66 Core portable.
+Los logs `core-sqlite-png-final.log`, `core-portable-png-final.log` y la evidencia
+del fallo inicial quedan en el mismo checkpoint. El PR registra los workflows
+del commit corregido; los builds anteriores no se atribuyen a ese nuevo hash.

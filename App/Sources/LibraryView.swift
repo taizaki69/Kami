@@ -11,6 +11,7 @@ struct LibraryView: View {
     @State private var selecting = false
     @State private var selectedIDs = Set<Int64>()
     @State private var assignment: CategoryAssignmentRequest?
+    @State private var showDownloads = false
 
     private var filtered: [Manga] {
         model.librarySnapshot.filteredManga(category: category, search: search)
@@ -52,6 +53,11 @@ struct LibraryView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
+                        showDownloads = true
+                    } label: {
+                        Label("Downloads", systemImage: "arrow.down.circle")
+                    }
+                    Button {
                         showCategories = true
                     } label: {
                         Label("Manage categories", systemImage: "folder.badge.gearshape")
@@ -69,7 +75,11 @@ struct LibraryView: View {
             .navigationDestination(for: Manga.self) { manga in
                 MangaDetailView(manga: manga)
             }
-            .task { await model.refreshLibrary() }
+            .task {
+                await model.refreshLibrary()
+                await model.refreshDownloadCounts()
+            }
+            .sheet(isPresented: $showDownloads) { DownloadsView() }
             .sheet(isPresented: $showCategories) { CategoriesView() }
             .sheet(item: $assignment) { request in
                 CategoryAssignmentSheet(mangaIDs: request.mangaIDs, title: request.title)
@@ -205,6 +215,17 @@ struct MangaCoverCell: View {
                         .padding(.vertical, 2)
                         .background(.thinMaterial, in: Capsule())
                         .padding(4)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if let id = manga.id, let count = model.downloadedChapterCounts[id], count > 0 {
+                    Label("\(count)", systemImage: "arrow.down.circle.fill")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.thinMaterial, in: Capsule())
+                        .padding(4)
+                        .accessibilityLabel("\(count) downloaded chapters")
                 }
             }
             Text(manga.title)

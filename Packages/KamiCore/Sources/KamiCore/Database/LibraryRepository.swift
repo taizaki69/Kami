@@ -6,13 +6,16 @@ import MihonCompatKit
 /// Serialized database access. All library mutations flow through this actor.
 public actor LibraryStore {
     private let db: SQLiteDatabase
+    public nonisolated let downloadPolicy: DownloadPolicy
 
-    public init(path: String) throws {
+    public init(path: String, downloadPolicy: DownloadPolicy = .init()) throws {
+        self.downloadPolicy = downloadPolicy
         self.db = try SQLiteDatabase(path: path)
         try Migrations.apply(db)
     }
 
-    public init(inMemory: Bool = true) throws {
+    public init(inMemory: Bool = true, downloadPolicy: DownloadPolicy = .init()) throws {
+        self.downloadPolicy = downloadPolicy
         self.db = try SQLiteDatabase(path: inMemory ? ":memory:" : ":memory:")
         try Migrations.apply(db)
     }
@@ -77,6 +80,8 @@ public actor LibraryStore {
         try withLibraryTransaction {
             try db.run("UPDATE manga SET in_library=? WHERE id=?", [.bool(inLibrary), .int(mangaId)])
             if !inLibrary {
+                _ = try invalidateDownloadsInTransaction(where: "manga_id=?", values: [.int(mangaId)],
+                                                          reason: .mangaRemoved)
                 try db.run("DELETE FROM manga_category WHERE manga_id=?", [.int(mangaId)])
             }
         }
@@ -301,6 +306,9 @@ public actor LibraryStore {
             // Keep reading state and history if the URL later reappears.
             try db.run("UPDATE chapter SET is_current=0 WHERE id=?", [.int(id)])
         }
+        _ = try invalidateDownloadsInTransaction(
+            where: "manga_id=? AND chapter_id IN (SELECT id FROM chapter WHERE is_current=0)",
+            values: [.int(mangaId)], reason: .chapterUnavailable)
     }
 
     /// The source/configuration check and every source-result write share the
@@ -822,10 +830,16 @@ public actor LibraryStore {
     }
 
     public func setExtensionEnabled(_ enabled: Bool, packageName: String) throws {
-        try db.run(
-            "UPDATE installed_extension SET enabled=? WHERE package_name=?",
-            [.bool(enabled), .text(packageName)]
-        )
+        try withLibraryTransaction {
+            if let previous = try installedExtensionTrust(packageName: packageName),
+               previous.enabled != enabled {
+                _ = try invalidateDownloadSourceIDsInTransaction(previous.sourceIDs)
+            }
+            try db.run(
+                "UPDATE installed_extension SET enabled=? WHERE package_name=?",
+                [.bool(enabled), .text(packageName)]
+            )
+        }
     }
 
     func commitExtensionAdmission(
@@ -878,6 +892,10 @@ public actor LibraryStore {
         let historyJSON = try Self.json(signerHistory)
         let sourceJSON = try Self.json(candidate.sourceIDs.sorted())
         let now = Int64(Date().timeIntervalSince1970)
+        // Re-admission can replace an identical runtime in the same second.
+        // Revoke attempts even when the exact release/configuration is equal.
+        _ = try invalidateDownloadSourceIDsInTransaction(
+            candidate.sourceIDs.union(existing?.sourceIDs ?? []))
         if let existing,
            existing.versionName != candidate.versionName
             || existing.versionCode != candidate.versionCode
@@ -1032,6 +1050,7 @@ public actor LibraryStore {
             guard snapshot.revision < Int64.max else {
                 throw ExtensionPreferencesError.invalidStoredConfiguration
             }
+            _ = try invalidateDownloadSourceIDsInTransaction(snapshot.schema.identity.sourceIDs)
             let revision = snapshot.revision + 1
             try db.run("""
                 INSERT INTO installed_extension_preferences
@@ -1171,6 +1190,753 @@ public actor LibraryStore {
             read: row.bool("chapter_read"), bookmark: row.bool("chapter_bookmark"),
             lastPageRead: row.int("chapter_last_page_read") ?? 0
         )
+    }
+}
+
+// Download identities refer to generated content. Authentication and execution
+// configuration remain in nonserializable tokens checked inside each mutation.
+extension LibraryStore {
+    private static let downloadJoin = """
+        SELECT m.*, c.id AS chapter_id, c.url AS chapter_url, c.name AS chapter_name,
+            c.source_order AS chapter_source_order, c.scanlator AS chapter_scanlator,
+            c.number AS chapter_number, c.date_upload AS chapter_date_upload,
+            c.read AS chapter_read, c.bookmark AS chapter_bookmark,
+            c.last_page_read AS chapter_last_page_read, c.is_current AS chapter_is_current
+        FROM chapter c JOIN manga m ON m.id=c.manga_id
+        """
+
+    private static let downloadItemJoin = """
+        SELECT m.*, c.id AS chapter_id, c.url AS chapter_url, c.name AS chapter_name,
+            c.source_order AS chapter_source_order, c.scanlator AS chapter_scanlator,
+            c.number AS chapter_number, c.date_upload AS chapter_date_upload,
+            c.read AS chapter_read, c.bookmark AS chapter_bookmark,
+            c.last_page_read AS chapter_last_page_read, c.is_current AS chapter_is_current,
+            j.job_id, j.manga_id AS captured_manga_id, j.source_id AS captured_source_id,
+            j.manga_url_digest, j.chapter_url_digest, j.state, j.revision, j.attempt_id,
+            j.page_count, j.completed_pages, j.stored_bytes, j.reason,
+            j.manifest_sha256, j.queue_order, j.created_at, j.updated_at
+        FROM download_job j JOIN chapter c ON c.id=j.chapter_id
+        JOIN manga m ON m.id=c.manga_id
+        """
+
+    public func downloadTarget(chapterID: Int64) throws -> DownloadTarget {
+        guard let row = try db.query(Self.downloadJoin + " WHERE c.id=? LIMIT 1", [.int(chapterID)]).first else {
+            throw DownloadPersistenceError.chapterNotFound
+        }
+        return try Self.downloadTarget(from: row)
+    }
+
+    public func downloadItem(jobID: UUID) throws -> DownloadItem? {
+        try db.query(Self.downloadItemJoin + " WHERE j.job_id=? LIMIT 1", [.text(jobID.uuidString)])
+            .first.map(Self.downloadItem(from:))
+    }
+
+    public func nextQueuedDownload() throws -> DownloadItem? {
+        try db.query(Self.downloadItemJoin + " WHERE j.state=0 ORDER BY j.queue_order,j.job_id LIMIT 1")
+            .first.map(Self.downloadItem(from:))
+    }
+
+    public func downloadsSnapshot(
+        limit: Int = 100, after: DownloadQueueCursor? = nil
+    ) throws -> DownloadQueueSnapshot {
+        try withLibraryTransaction(readOnly: true) {
+            let count = max(1, min(500, limit))
+            var sql = Self.downloadItemJoin
+            var values: [SQLiteBindable] = []
+            if let after {
+                sql += " WHERE (j.queue_order>? OR (j.queue_order=? AND j.job_id>?))"
+                values = [.int(after.queueOrder), .int(after.queueOrder), .text(after.jobID.uuidString)]
+            }
+            sql += " ORDER BY j.queue_order,j.job_id LIMIT ?"
+            values.append(.int(count + 1))
+            let rows = try db.query(sql, values)
+            let hasMore = rows.count > count
+            let items = try rows.prefix(count).map(Self.downloadItem(from:))
+            let cursor = hasMore ? items.last.map {
+                DownloadQueueCursor(queueOrder: $0.queueOrder, jobID: $0.jobID)
+            } : nil
+            return DownloadQueueSnapshot(items: items, summary: try downloadQueueSummary(),
+                                         hasMore: hasMore, nextCursor: cursor)
+        }
+    }
+
+    public func downloadChapterStates(mangaID: Int64) throws -> [Int64: DownloadChapterState] {
+        try downloadChapterStateRows(where: "manga_id=?", values: [.int(mangaID)])
+    }
+
+    public func downloadChapterStates(chapterIDs: [Int64]) throws -> [Int64: DownloadChapterState] {
+        guard chapterIDs.count <= 500 else { throw DownloadPersistenceError.selectionTooLarge }
+        let ids = Set(chapterIDs).sorted()
+        guard !ids.isEmpty else { return [:] }
+        return try downloadChapterStateRows(
+            where: "chapter_id IN (" + Array(repeating: "?", count: ids.count).joined(separator: ",") + ")",
+            values: ids.map(SQLiteBindable.int))
+    }
+
+    public func downloadedChapterCountsByManga() throws -> [Int64: Int] {
+        var result: [Int64: Int] = [:]
+        for row in try db.query("""
+            SELECT j.manga_id,COUNT(*) AS count FROM download_job j
+            JOIN manga m ON m.id=j.manga_id WHERE j.state=2 AND m.in_library=1
+            GROUP BY j.manga_id
+            """) {
+            if let id = row.int64("manga_id"), let count = row.int("count") { result[id] = count }
+        }
+        return result
+    }
+
+    public func downloadedChapters(mangaID: Int64) throws -> [Chapter] {
+        try db.query("""
+            SELECT c.* FROM chapter c JOIN download_job j ON j.chapter_id=c.id
+            WHERE j.state=2 AND j.manga_id=? ORDER BY c.source_order,c.id
+            """, [.int(mangaID)]).compactMap(Self.chapter(from:))
+    }
+
+    public func pendingDownloadCleanup() throws -> [DownloadContentIdentity] {
+        try db.query("SELECT * FROM download_cleanup ORDER BY attempt_id")
+            .map(Self.cleanupIdentity(from:))
+    }
+
+    public func completedDownloadIdentities() throws -> [DownloadContentIdentity] {
+        try db.query(Self.downloadItemJoin + " WHERE j.state=2 ORDER BY j.queue_order,j.job_id")
+            .map { row in
+                guard let identity = try Self.downloadItem(from: row).contentIdentity else {
+                    throw DownloadPersistenceError.invalidStoredRecord
+                }
+                return identity
+            }
+    }
+
+    /// Merely queues a target. Callers obtain a current source separately and
+    /// explicitly start transfer; persisting a row never enables an extension.
+    public func enqueueDownload(
+        chapterID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?
+    ) throws -> DownloadItem {
+        try withDownloadTransaction {
+            let target = try validatedDownloadTarget(chapterID: chapterID, expectedConfiguration: expectedConfiguration)
+            if let row = try db.query("SELECT job_id FROM download_job WHERE chapter_id=?", [.int(chapterID)]).first,
+               let text = row.string("job_id"), let id = UUID(uuidString: text) {
+                let existing = try requiredDownloadItem(id)
+                try verifyDownloadIdentity(existing, target: target)
+                return existing
+            }
+            guard (try db.query("SELECT COUNT(*) AS count FROM download_job").first?.int("count") ?? 0)
+                    < downloadPolicy.maximumJobs else { throw DownloadPersistenceError.queueLimitExceeded }
+            let jobID = UUID()
+            let now = Self.downloadNow()
+            let order = try nextDownloadQueueOrder()
+            let origin = try downloadOrigin(expectedConfiguration)
+            try db.run("""
+                INSERT INTO download_job(
+                    job_id,chapter_id,manga_id,source_id,manga_url_digest,chapter_url_digest,state,
+                    revision,library_revision,origin_package,origin_fingerprint,configuration_revision,
+                    queue_order,created_at,updated_at
+                ) VALUES (?,?,?,?,?,?,0,1,?,?,?,?,?,?,?)
+                """, [.text(jobID.uuidString), .int(chapterID), .int(target.manga.id!),
+                      .int(target.manga.sourceId), .text(Self.downloadDigest(target.manga.url)),
+                      .text(Self.downloadDigest(target.chapter.url)), .int(try downloadLibraryRevision(target.manga.id!)),
+                      origin.package, origin.fingerprint, origin.revision, .int(order), .int(now), .int(now)])
+            return try requiredDownloadItem(jobID)
+        }
+    }
+
+    public func retryDownload(
+        jobID: UUID, expectedConfiguration: ExtensionExecutionConfiguration?
+    ) throws -> DownloadItem {
+        try withDownloadTransaction {
+            let previous = try requiredDownloadItem(jobID)
+            let target = try validatedDownloadTarget(chapterID: previous.chapter.id!, expectedConfiguration: expectedConfiguration)
+            try verifyDownloadIdentity(previous, target: target, allowLegacy: true)
+            if previous.state == .queued { return previous }
+            guard [.paused, .failed, .cancelled].contains(previous.state) else {
+                throw DownloadPersistenceError.invalidState
+            }
+            guard try db.query("SELECT 1 FROM download_cleanup WHERE job_id=? LIMIT 1",
+                               [.text(jobID.uuidString)]).isEmpty else { throw DownloadPersistenceError.cleanupPending }
+            guard previous.contentIdentity == nil else { throw DownloadPersistenceError.cleanupPending }
+            let origin = try downloadOrigin(expectedConfiguration)
+            try db.run("""
+                UPDATE download_job SET state=0,revision=?,reason=NULL,library_revision=?,
+                    manga_url_digest=?,chapter_url_digest=?,origin_package=?,origin_fingerprint=?,
+                    configuration_revision=?,queue_order=?,updated_at=?
+                WHERE job_id=?
+                """, [.int(try nextDownloadRevision(previous.revision)),
+                      .int(try downloadLibraryRevision(target.manga.id!)),
+                      .text(Self.downloadDigest(target.manga.url)), .text(Self.downloadDigest(target.chapter.url)),
+                      origin.package, origin.fingerprint, origin.revision,
+                      .int(try nextDownloadQueueOrder()), .int(Self.downloadNow()), .text(jobID.uuidString)])
+            return try requiredDownloadItem(jobID)
+        }
+    }
+
+    public func beginDownloadAttempt(
+        jobID: UUID, expectedConfiguration: ExtensionExecutionConfiguration?
+    ) throws -> DownloadAttempt {
+        try withDownloadTransaction {
+            let previous = try requiredDownloadItem(jobID)
+            guard previous.state == .queued else { throw DownloadPersistenceError.invalidState }
+            guard try db.query("SELECT 1 FROM download_job WHERE state=1 LIMIT 1").isEmpty else {
+                throw DownloadPersistenceError.activeAttemptExists
+            }
+            guard previous.contentIdentity == nil,
+                  try db.query("SELECT 1 FROM download_cleanup WHERE job_id=? LIMIT 1",
+                               [.text(jobID.uuidString)]).isEmpty else { throw DownloadPersistenceError.cleanupPending }
+            let target = try validatedDownloadTarget(chapterID: previous.chapter.id!, expectedConfiguration: expectedConfiguration)
+            try verifyDownloadIdentity(previous, target: target)
+            try verifyQueuedDownloadOrigin(jobID: jobID, expectedConfiguration: expectedConfiguration)
+            let revision = try nextDownloadRevision(previous.revision)
+            let libraryRevision = try downloadLibraryRevision(target.manga.id!)
+            let identity = DownloadContentIdentity(
+                jobID: jobID, attemptID: UUID(), mangaID: target.manga.id!, chapterID: target.chapter.id!,
+                sourceID: target.manga.sourceId, mangaURLDigest: Self.downloadDigest(target.manga.url),
+                chapterURLDigest: Self.downloadDigest(target.chapter.url))
+            try db.run("""
+                UPDATE download_job SET state=1,revision=?,attempt_id=?,library_revision=?,
+                    publication_state='working',reason=NULL,updated_at=? WHERE job_id=?
+                """, [.int(revision), .text(identity.attemptID.uuidString), .int(libraryRevision),
+                      .int(Self.downloadNow()), .text(jobID.uuidString)])
+            return DownloadAttempt(identity: identity, revision: revision, manga: target.manga,
+                                   chapter: target.chapter, policy: downloadPolicy,
+                                   libraryRevision: libraryRevision, expectedConfiguration: expectedConfiguration)
+        }
+    }
+}
+
+extension LibraryStore {
+    public func setDownloadPageCount(attempt: DownloadAttempt, pageCount: Int) throws -> DownloadItem {
+        guard pageCount > 0, pageCount <= downloadPolicy.maximumPageCount else {
+            throw DownloadPersistenceError.pageLimitExceeded
+        }
+        return try withDownloadTransaction {
+            let item = try verifyDownloadAttempt(attempt)
+            try requireWorkingDownload(attempt.jobID)
+            if let previous = item.pageCount {
+                guard previous == pageCount else { throw DownloadPersistenceError.invalidState }
+                return item
+            }
+            try db.run("UPDATE download_job SET page_count=?,updated_at=? WHERE job_id=?",
+                       [.int(pageCount), .int(Self.downloadNow()), .text(attempt.jobID.uuidString)])
+            return try requiredDownloadItem(attempt.jobID)
+        }
+    }
+
+    /// Identical receipt retries are idempotent. A changed digest/size at an
+    /// existing ordinal cannot replace committed bytes in the same attempt.
+    public func commitDownloadPage(
+        attempt: DownloadAttempt, receipt: DownloadPageReceipt
+    ) throws -> DownloadItem {
+        try Self.validateDownloadReceipt(receipt, policy: downloadPolicy)
+        return try withDownloadTransaction {
+            let item = try verifyDownloadAttempt(attempt)
+            try requireWorkingDownload(attempt.jobID)
+            guard let count = item.pageCount, receipt.ordinal < count else {
+                throw DownloadPersistenceError.invalidReceipt
+            }
+            let pages = try downloadPages(identity: attempt.identity)
+            if let previous = pages.first(where: { $0.ordinal == receipt.ordinal }) {
+                guard previous == receipt else { throw DownloadPersistenceError.invalidReceipt }
+                return item
+            }
+            let (total, overflow) = item.storedBytes.addingReportingOverflow(receipt.byteCount)
+            guard !overflow, total <= downloadPolicy.maximumChapterBytes else {
+                throw DownloadPersistenceError.chapterLimitExceeded
+            }
+            try db.run("""
+                INSERT INTO download_page(job_id,attempt_id,ordinal,byte_count,sha256) VALUES (?,?,?,?,?)
+                """, [.text(attempt.jobID.uuidString), .text(attempt.attemptID.uuidString),
+                      .int(receipt.ordinal), .int(receipt.byteCount), .text(receipt.sha256)])
+            try db.run("""
+                UPDATE download_job SET completed_pages=completed_pages+1,stored_bytes=?,updated_at=? WHERE job_id=?
+                """, [.int(total), .int(Self.downloadNow()), .text(attempt.jobID.uuidString)])
+            return try requiredDownloadItem(attempt.jobID)
+        }
+    }
+
+    public func prepareDownload(
+        attempt: DownloadAttempt, manifestReceipt: DownloadManifestReceipt
+    ) throws -> DownloadItem {
+        try withDownloadTransaction {
+            let item = try verifyDownloadAttempt(attempt)
+            try verifyDownloadManifest(item: item, identity: attempt.identity, receipt: manifestReceipt)
+            let phase = try downloadPublicationPhase(attempt.jobID)
+            guard phase == "working" || phase == "prepared" else { throw DownloadPersistenceError.invalidState }
+            if phase == "prepared" {
+                guard item.manifestSHA256 == manifestReceipt.manifestSHA256 else {
+                    throw DownloadPersistenceError.manifestMismatch
+                }
+                return item
+            }
+            try db.run("""
+                UPDATE download_job SET publication_state='prepared',manifest_sha256=?,updated_at=? WHERE job_id=?
+                """, [.text(manifestReceipt.manifestSHA256), .int(Self.downloadNow()), .text(attempt.jobID.uuidString)])
+            return try requiredDownloadItem(attempt.jobID)
+        }
+    }
+
+    /// Publication is authoritative only after this CAS. A renamed directory
+    /// whose attempt was cancelled remains cleanup work, never offline data.
+    public func completeDownload(
+        attempt: DownloadAttempt, manifestReceipt: DownloadManifestReceipt
+    ) throws -> DownloadItem {
+        try withDownloadTransaction {
+            let current = try requiredDownloadItem(attempt.jobID)
+            if current.state == .finished, current.contentIdentity == attempt.identity,
+               current.revision == attempt.revision {
+                try verifyDownloadManifest(item: current, identity: attempt.identity, receipt: manifestReceipt)
+                guard current.manifestSHA256 == manifestReceipt.manifestSHA256 else {
+                    throw DownloadPersistenceError.manifestMismatch
+                }
+                return current
+            }
+            let item = try verifyDownloadAttempt(attempt)
+            guard try downloadPublicationPhase(attempt.jobID) == "prepared",
+                  item.manifestSHA256 == manifestReceipt.manifestSHA256 else {
+                throw DownloadPersistenceError.manifestMismatch
+            }
+            try verifyDownloadManifest(item: item, identity: attempt.identity, receipt: manifestReceipt)
+            try db.run("""
+                UPDATE download_job SET state=2,publication_state='complete',reason=NULL,updated_at=? WHERE job_id=?
+                """, [.int(Self.downloadNow()), .text(attempt.jobID.uuidString)])
+            return try requiredDownloadItem(attempt.jobID)
+        }
+    }
+
+    /// No source or admission is consulted. Filesystem validation remains the
+    /// caller's next step; this only returns a sealed database generation.
+    public func offlineChapter(chapterID: Int64) throws -> CompletedDownloadBundle? {
+        try withLibraryTransaction(readOnly: true) {
+            guard let row = try db.query(Self.downloadItemJoin + " WHERE j.chapter_id=? AND j.state=2 LIMIT 1",
+                                        [.int(chapterID)]).first else { return nil }
+            let item = try Self.downloadItem(from: row)
+            guard let identity = item.contentIdentity, let digest = item.manifestSHA256,
+                  Self.validDownloadDigest(digest),
+                  try downloadPublicationPhase(item.jobID) == "complete" else {
+                throw DownloadPersistenceError.invalidStoredRecord
+            }
+            let pages = try downloadPages(identity: identity)
+            try verifyCompleteDownloadPages(item: item, pages: pages)
+            return CompletedDownloadBundle(identity: identity, manifestSHA256: digest, pages: pages,
+                                           totalBytes: item.storedBytes, manga: item.manga,
+                                           chapter: item.chapter, isCurrentChapter: item.isCurrentChapter)
+        }
+    }
+
+    public func pauseDownload(jobID: UUID) throws -> DownloadMutation {
+        try withLibraryTransaction { try stopDownloadInTransaction(jobID: jobID, state: .paused, reason: .paused) }
+    }
+
+    public func cancelDownload(jobID: UUID) throws -> DownloadMutation {
+        try withLibraryTransaction { try stopDownloadInTransaction(jobID: jobID, state: .cancelled, reason: .cancelled) }
+    }
+
+    public func failDownload(attempt: DownloadAttempt, reason: DownloadFailureReason) throws -> DownloadMutation {
+        try withLibraryTransaction {
+            let item = try requiredDownloadItem(attempt.jobID)
+            // Failure reporting may follow a source disable. It cannot revive
+            // or relabel the terminal generation installed by that mutation.
+            guard item.state == .downloading, item.revision == attempt.revision,
+                  item.contentIdentity == attempt.identity else { throw DownloadPersistenceError.staleAttempt }
+            return try stopDownloadInTransaction(jobID: attempt.jobID, state: .failed, reason: reason)
+        }
+    }
+
+    public func failQueuedDownload(
+        jobID: UUID, expectedRevision: Int64, reason: DownloadFailureReason
+    ) throws -> DownloadMutation {
+        try withLibraryTransaction {
+            let item = try requiredDownloadItem(jobID)
+            guard item.state == .queued, item.revision == expectedRevision else {
+                throw DownloadPersistenceError.staleAttempt
+            }
+            return try stopDownloadInTransaction(jobID: jobID, state: .failed, reason: reason)
+        }
+    }
+
+    public func deleteDownload(jobID: UUID) throws -> DownloadMutation {
+        try withLibraryTransaction {
+            guard let item = try downloadItem(jobID: jobID) else { return DownloadMutation(item: nil, cleanup: []) }
+            if item.state == .deleting {
+                return DownloadMutation(item: item, cleanup: try downloadCleanup(jobID: jobID))
+            }
+            if item.contentIdentity == nil {
+                guard try downloadCleanup(jobID: jobID).isEmpty else { throw DownloadPersistenceError.cleanupPending }
+                try db.run("DELETE FROM download_job WHERE job_id=?", [.text(jobID.uuidString)])
+                return DownloadMutation(item: nil, cleanup: [])
+            }
+            return try stopDownloadInTransaction(jobID: jobID, state: .deleting, reason: nil, allowFinished: true)
+        }
+    }
+
+    public func recoverInterruptedDownloads() throws -> DownloadRecovery {
+        try withLibraryTransaction {
+            let jobs = try db.query("SELECT job_id FROM download_job WHERE state=1 ORDER BY queue_order,job_id")
+            for row in jobs {
+                guard let text = row.string("job_id"), let id = UUID(uuidString: text) else {
+                    throw DownloadPersistenceError.invalidStoredRecord
+                }
+                _ = try stopDownloadInTransaction(jobID: id, state: .paused, reason: .interrupted)
+            }
+            return DownloadRecovery(interruptedJobs: jobs.count, cleanup: try pendingDownloadCleanup())
+        }
+    }
+
+    public func acknowledgeDownloadCleanup(identity: DownloadContentIdentity) throws {
+        try withLibraryTransaction {
+            guard let row = try db.query("SELECT * FROM download_cleanup WHERE attempt_id=?",
+                                        [.text(identity.attemptID.uuidString)]).first else { return }
+            guard try Self.cleanupIdentity(from: row) == identity else {
+                throw DownloadPersistenceError.sourceIdentityMismatch
+            }
+            // An old acknowledgement cannot reset a new attempt or delete a
+            // completed job. It only removes the generation it was issued for.
+            if let item = try downloadItem(jobID: identity.jobID), item.contentIdentity == identity {
+                guard [.paused, .failed, .cancelled, .deleting].contains(item.state) else {
+                    throw DownloadPersistenceError.invalidState
+                }
+                if item.state == .deleting {
+                    try db.run("DELETE FROM download_job WHERE job_id=?", [.text(identity.jobID.uuidString)])
+                } else {
+                    try db.run("""
+                        UPDATE download_job SET attempt_id=NULL,publication_state='none',page_count=NULL,
+                            completed_pages=0,stored_bytes=0,manifest_sha256=NULL,updated_at=? WHERE job_id=?
+                        """, [.int(Self.downloadNow()), .text(identity.jobID.uuidString)])
+                }
+            }
+            try db.run("DELETE FROM download_page WHERE job_id=? AND attempt_id=?",
+                       [.text(identity.jobID.uuidString), .text(identity.attemptID.uuidString)])
+            try db.run("DELETE FROM download_cleanup WHERE attempt_id=?", [.text(identity.attemptID.uuidString)])
+        }
+    }
+
+    /// Call before replacing even an identical facade. Durable attempt epochs
+    /// prevent disable/re-enable and same-configuration replacement ABA.
+    @discardableResult
+    public func invalidateDownloadAttempts(sourceIDs: Set<Int64>) throws -> [DownloadContentIdentity] {
+        try withLibraryTransaction { try invalidateDownloadSourceIDsInTransaction(sourceIDs) }
+    }
+}
+
+extension LibraryStore {
+    private func withDownloadTransaction<T>(_ operation: () throws -> T) throws -> T {
+        try Task.checkCancellation()
+        return try withLibraryTransaction {
+            let result = try operation()
+            try Task.checkCancellation()
+            return result
+        }
+    }
+
+    private func requiredDownloadItem(_ id: UUID) throws -> DownloadItem {
+        guard let item = try downloadItem(jobID: id) else { throw DownloadPersistenceError.jobNotFound }
+        return item
+    }
+
+    private func validatedDownloadTarget(
+        chapterID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?
+    ) throws -> DownloadTarget {
+        let target = try downloadTarget(chapterID: chapterID)
+        guard target.manga.inLibrary else { throw DownloadPersistenceError.mangaNotInLibrary }
+        guard target.isCurrentChapter else { throw DownloadPersistenceError.chapterNotCurrent }
+        try verifySourceUpdateConfiguration(manga: target.manga, expectedConfiguration: expectedConfiguration)
+        return target
+    }
+
+    private func downloadLibraryRevision(_ mangaID: Int64) throws -> Int64 {
+        guard let revision = try db.query("SELECT library_revision FROM manga WHERE id=?", [.int(mangaID)])
+            .first?.int64("library_revision"), revision >= 0 else { throw DownloadPersistenceError.invalidStoredRecord }
+        return revision
+    }
+
+    private func downloadOrigin(
+        _ configuration: ExtensionExecutionConfiguration?
+    ) throws -> (package: SQLiteBindable, fingerprint: SQLiteBindable, revision: SQLiteBindable) {
+        guard let configuration else { return (.null, .null, .null) }
+        return (.text(configuration.installed.packageName),
+                .text(try ExtensionPreferenceBinding.fingerprint(configuration.installed)),
+                configuration.snapshot.map { .int($0.revision) } ?? .null)
+    }
+
+    private func verifyQueuedDownloadOrigin(
+        jobID: UUID, expectedConfiguration: ExtensionExecutionConfiguration?
+    ) throws {
+        guard let row = try db.query("""
+            SELECT origin_package,origin_fingerprint,configuration_revision,library_revision,manga_id
+            FROM download_job WHERE job_id=?
+            """, [.text(jobID.uuidString)]).first,
+              let mangaID = row.int64("manga_id"),
+              row.int64("library_revision") == (try downloadLibraryRevision(mangaID)) else {
+            throw DownloadPersistenceError.staleAttempt
+        }
+        if let expectedConfiguration {
+            guard row.string("origin_package") == expectedConfiguration.installed.packageName,
+                  row.string("origin_fingerprint") == (try ExtensionPreferenceBinding.fingerprint(expectedConfiguration.installed)),
+                  row.int64("configuration_revision") == expectedConfiguration.snapshot?.revision else {
+                throw DownloadPersistenceError.staleAttempt
+            }
+        } else {
+            guard row.string("origin_package") == nil, row.string("origin_fingerprint") == nil,
+                  row.int64("configuration_revision") == nil else { throw DownloadPersistenceError.staleAttempt }
+        }
+    }
+
+    private func verifyDownloadIdentity(
+        _ item: DownloadItem, target: DownloadTarget, allowLegacy: Bool = false
+    ) throws {
+        guard item.manga.id == target.manga.id, item.manga.sourceId == target.manga.sourceId,
+              item.chapter.id == target.chapter.id else { throw DownloadPersistenceError.sourceIdentityMismatch }
+        guard let row = try db.query("SELECT manga_url_digest,chapter_url_digest FROM download_job WHERE job_id=?",
+                                     [.text(item.jobID.uuidString)]).first else { throw DownloadPersistenceError.jobNotFound }
+        if allowLegacy, item.reason == .legacyUnverified,
+           row.string("manga_url_digest") == "", row.string("chapter_url_digest") == "" { return }
+        guard row.string("manga_url_digest") == Self.downloadDigest(target.manga.url),
+              row.string("chapter_url_digest") == Self.downloadDigest(target.chapter.url) else {
+            throw DownloadPersistenceError.sourceIdentityMismatch
+        }
+    }
+
+    private func verifyDownloadAttempt(_ attempt: DownloadAttempt) throws -> DownloadItem {
+        let item = try requiredDownloadItem(attempt.jobID)
+        guard item.state == .downloading, item.revision == attempt.revision,
+              item.contentIdentity == attempt.identity else { throw DownloadPersistenceError.staleAttempt }
+        let target = try validatedDownloadTarget(chapterID: attempt.identity.chapterID,
+                                                 expectedConfiguration: attempt.expectedConfiguration)
+        try verifyDownloadIdentity(item, target: target)
+        guard try downloadLibraryRevision(attempt.identity.mangaID) == attempt.libraryRevision else {
+            throw DownloadPersistenceError.staleAttempt
+        }
+        try verifyQueuedDownloadOrigin(jobID: attempt.jobID, expectedConfiguration: attempt.expectedConfiguration)
+        return item
+    }
+
+    private func downloadPublicationPhase(_ jobID: UUID) throws -> String {
+        guard let phase = try db.query("SELECT publication_state FROM download_job WHERE job_id=?",
+                                      [.text(jobID.uuidString)]).first?.string("publication_state") else {
+            throw DownloadPersistenceError.jobNotFound
+        }
+        return phase
+    }
+
+    private func requireWorkingDownload(_ id: UUID) throws {
+        guard try downloadPublicationPhase(id) == "working" else { throw DownloadPersistenceError.invalidState }
+    }
+
+    private func downloadPages(identity: DownloadContentIdentity) throws -> [DownloadPageReceipt] {
+        try db.query("""
+            SELECT ordinal,byte_count,sha256 FROM download_page WHERE job_id=? AND attempt_id=?
+            ORDER BY ordinal LIMIT 2049
+            """, [.text(identity.jobID.uuidString), .text(identity.attemptID.uuidString)]).map { row in
+                guard let ordinal = row.int("ordinal"), let bytes = row.int64("byte_count"),
+                      let hash = row.string("sha256") else { throw DownloadPersistenceError.invalidStoredRecord }
+                let receipt = DownloadPageReceipt(ordinal: ordinal, byteCount: bytes, sha256: hash)
+                try Self.validateDownloadReceipt(receipt, policy: downloadPolicy)
+                return receipt
+            }
+    }
+
+    private func verifyCompleteDownloadPages(item: DownloadItem, pages: [DownloadPageReceipt]) throws {
+        guard let count = item.pageCount, count > 0, count <= downloadPolicy.maximumPageCount,
+              pages.count == count, item.completedPages == count,
+              pages.enumerated().allSatisfy({ $0.offset == $0.element.ordinal }) else {
+            throw DownloadPersistenceError.incompletePages
+        }
+        var bytes: Int64 = 0
+        for page in pages {
+            try Self.validateDownloadReceipt(page, policy: downloadPolicy)
+            let (next, overflow) = bytes.addingReportingOverflow(page.byteCount)
+            guard !overflow, next <= downloadPolicy.maximumChapterBytes else {
+                throw DownloadPersistenceError.chapterLimitExceeded
+            }
+            bytes = next
+        }
+        guard bytes == item.storedBytes else { throw DownloadPersistenceError.manifestMismatch }
+    }
+
+    private func verifyDownloadManifest(
+        item: DownloadItem, identity: DownloadContentIdentity, receipt: DownloadManifestReceipt
+    ) throws {
+        guard receipt.identity == identity, Self.validDownloadDigest(receipt.manifestSHA256),
+              receipt.pages.count <= downloadPolicy.maximumPageCount else {
+            throw DownloadPersistenceError.manifestMismatch
+        }
+        let pages = try downloadPages(identity: identity)
+        try verifyCompleteDownloadPages(item: item, pages: pages)
+        guard pages == receipt.pages, receipt.totalBytes == item.storedBytes else {
+            throw DownloadPersistenceError.manifestMismatch
+        }
+    }
+
+    private func downloadCleanup(jobID: UUID) throws -> [DownloadContentIdentity] {
+        try db.query("SELECT * FROM download_cleanup WHERE job_id=? ORDER BY attempt_id",
+                     [.text(jobID.uuidString)]).map(Self.cleanupIdentity(from:))
+    }
+
+    private func stopDownloadInTransaction(
+        jobID: UUID, state: DownloadState, reason: DownloadFailureReason?, allowFinished: Bool = false
+    ) throws -> DownloadMutation {
+        let item = try requiredDownloadItem(jobID)
+        if item.state == .deleting || (item.state == .finished && !allowFinished) {
+            return DownloadMutation(item: item, cleanup: try downloadCleanup(jobID: jobID))
+        }
+        if item.state == state {
+            return DownloadMutation(item: item, cleanup: try downloadCleanup(jobID: jobID))
+        }
+        if let identity = item.contentIdentity {
+            try db.run("""
+                INSERT INTO download_cleanup(
+                    attempt_id,job_id,manga_id,chapter_id,source_id,manga_url_digest,chapter_url_digest,stored_bytes
+                ) VALUES (?,?,?,?,?,?,?,?)
+                ON CONFLICT(attempt_id) DO NOTHING
+                """, [.text(identity.attemptID.uuidString), .text(identity.jobID.uuidString),
+                      .int(identity.mangaID), .int(identity.chapterID), .int(identity.sourceID),
+                      .text(identity.mangaURLDigest), .text(identity.chapterURLDigest), .int(item.storedBytes)])
+        }
+        try db.run("UPDATE download_job SET state=?,revision=?,reason=?,updated_at=? WHERE job_id=?",
+                   [.int(state.rawValue), .int(try nextDownloadRevision(item.revision)),
+                    reason.map { .text($0.rawValue) } ?? .null, .int(Self.downloadNow()), .text(jobID.uuidString)])
+        return DownloadMutation(item: try requiredDownloadItem(jobID), cleanup: try downloadCleanup(jobID: jobID))
+    }
+
+    private func invalidateDownloadSourceIDsInTransaction(_ ids: Set<Int64>) throws -> [DownloadContentIdentity] {
+        guard !ids.isEmpty else { return [] }
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        return try invalidateDownloadsInTransaction(
+            where: "source_id IN (" + placeholders + ")", values: ids.sorted().map(SQLiteBindable.int),
+            reason: .configurationChanged)
+    }
+
+    private func invalidateDownloadsInTransaction(
+        where condition: String, values: [SQLiteBindable], reason: DownloadFailureReason
+    ) throws -> [DownloadContentIdentity] {
+        var cleanup: [DownloadContentIdentity] = []
+        for row in try db.query("SELECT job_id FROM download_job WHERE state IN (0,1) AND (" + condition + ")", values) {
+            guard let text = row.string("job_id"), let id = UUID(uuidString: text) else {
+                throw DownloadPersistenceError.invalidStoredRecord
+            }
+            cleanup += try stopDownloadInTransaction(jobID: id, state: .paused, reason: reason).cleanup
+        }
+        return cleanup
+    }
+
+    private func nextDownloadQueueOrder() throws -> Int64 {
+        let current = try db.query("SELECT MAX(queue_order) AS value FROM download_job").first?.int64("value") ?? -1
+        guard current < Int64.max else { throw DownloadPersistenceError.invalidStoredRecord }
+        return current + 1
+    }
+
+    private func nextDownloadRevision(_ current: Int64) throws -> Int64 {
+        guard current > 0, current < Int64.max else { throw DownloadPersistenceError.invalidStoredRecord }
+        return current + 1
+    }
+
+    private func downloadQueueSummary() throws -> DownloadQueueSummary {
+        var counts: [DownloadState: Int] = [:]
+        for row in try db.query("SELECT state,COUNT(*) AS count FROM download_job GROUP BY state") {
+            guard let raw = row.int("state"), let state = DownloadState(rawValue: raw),
+                  let count = row.int("count") else { throw DownloadPersistenceError.invalidStoredRecord }
+            counts[state] = count
+        }
+        let jobBytes = try db.query("SELECT COALESCE(SUM(stored_bytes),0) AS value FROM download_job").first?.int64("value") ?? 0
+        let cleanupBytes = try db.query("SELECT COALESCE(SUM(stored_bytes),0) AS value FROM download_cleanup")
+            .first?.int64("value") ?? 0
+        let orphanBytes = try db.query("""
+            SELECT COALESCE(SUM(c.stored_bytes),0) AS value FROM download_cleanup c
+            WHERE NOT EXISTS(SELECT 1 FROM download_job j WHERE j.attempt_id=c.attempt_id)
+            """).first?.int64("value") ?? 0
+        let (storedBytes, overflow) = jobBytes.addingReportingOverflow(orphanBytes)
+        guard !overflow else { throw DownloadPersistenceError.invalidStoredRecord }
+        return DownloadQueueSummary(queued: counts[.queued] ?? 0, active: counts[.downloading] ?? 0,
+                                    finished: counts[.finished] ?? 0, paused: counts[.paused] ?? 0,
+                                    failed: counts[.failed] ?? 0, cancelled: counts[.cancelled] ?? 0,
+                                    deleting: counts[.deleting] ?? 0, storedBytes: storedBytes,
+                                    cleanupBytes: cleanupBytes, quotaBytes: downloadPolicy.quotaBytes)
+    }
+
+    private func downloadChapterStateRows(
+        where condition: String, values: [SQLiteBindable]
+    ) throws -> [Int64: DownloadChapterState] {
+        var result: [Int64: DownloadChapterState] = [:]
+        for row in try db.query("SELECT chapter_id,job_id,state,reason FROM download_job WHERE " + condition, values) {
+            guard let chapterID = row.int64("chapter_id"), let text = row.string("job_id"),
+                  let jobID = UUID(uuidString: text), let raw = row.int("state"), let state = DownloadState(rawValue: raw) else {
+                throw DownloadPersistenceError.invalidStoredRecord
+            }
+            let reason = row.string("reason").flatMap(DownloadFailureReason.init(rawValue:))
+            guard row.string("reason") == nil || reason != nil else { throw DownloadPersistenceError.invalidStoredRecord }
+            result[chapterID] = DownloadChapterState(jobID: jobID, state: state, reason: reason)
+        }
+        return result
+    }
+
+    private static func downloadNow() -> Int64 { Int64(Date().timeIntervalSince1970) }
+
+    private static func downloadDigest(_ value: String) -> String {
+        APKSignatureVerifier.apkSHA256(Array(value.utf8))
+    }
+
+    private static func validDownloadDigest(_ value: String) -> Bool {
+        value.utf8.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+    }
+
+    private static func validateDownloadReceipt(_ receipt: DownloadPageReceipt, policy: DownloadPolicy) throws {
+        guard receipt.ordinal >= 0, receipt.ordinal < policy.maximumPageCount, receipt.byteCount > 0,
+              receipt.byteCount <= Int64(policy.maximumPageBytes), validDownloadDigest(receipt.sha256) else {
+            throw DownloadPersistenceError.invalidReceipt
+        }
+    }
+
+    private static func downloadTarget(from row: SQLiteDatabase.Row) throws -> DownloadTarget {
+        guard let manga = manga(from: row), let mangaID = manga.id,
+              let chapterID = row.int64("chapter_id"), let url = row.string("chapter_url"),
+              let name = row.string("chapter_name") else { throw DownloadPersistenceError.invalidStoredRecord }
+        return DownloadTarget(manga: manga, chapter: joinedChapter(from: row, id: chapterID, mangaID: mangaID,
+                                                                  url: url, name: name),
+                              isCurrentChapter: row.bool("chapter_is_current"))
+    }
+
+    private static func downloadItem(from row: SQLiteDatabase.Row) throws -> DownloadItem {
+        let target = try downloadTarget(from: row)
+        guard let text = row.string("job_id"), let jobID = UUID(uuidString: text),
+              let raw = row.int("state"), let state = DownloadState(rawValue: raw),
+              let revision = row.int64("revision"), revision > 0,
+              let mangaID = row.int64("captured_manga_id"), mangaID == target.manga.id,
+              let sourceID = row.int64("captured_source_id"), sourceID == target.manga.sourceId,
+              let mangaDigest = row.string("manga_url_digest"), let chapterDigest = row.string("chapter_url_digest"),
+              let completedPages = row.int("completed_pages"), completedPages >= 0,
+              let storedBytes = row.int64("stored_bytes"), storedBytes >= 0,
+              let queueOrder = row.int64("queue_order"), let createdAt = row.int64("created_at"),
+              let updatedAt = row.int64("updated_at") else { throw DownloadPersistenceError.invalidStoredRecord }
+        let reason = row.string("reason").flatMap(DownloadFailureReason.init(rawValue:))
+        guard row.string("reason") == nil || reason != nil else { throw DownloadPersistenceError.invalidStoredRecord }
+        let legacy = reason == .legacyUnverified && mangaDigest.isEmpty && chapterDigest.isEmpty
+        guard legacy || (mangaDigest == downloadDigest(target.manga.url) && chapterDigest == downloadDigest(target.chapter.url)) else {
+            throw DownloadPersistenceError.sourceIdentityMismatch
+        }
+        var identity: DownloadContentIdentity?
+        if let text = row.string("attempt_id") {
+            guard let attemptID = UUID(uuidString: text), !legacy else { throw DownloadPersistenceError.invalidStoredRecord }
+            identity = DownloadContentIdentity(jobID: jobID, attemptID: attemptID, mangaID: mangaID,
+                                               chapterID: target.chapter.id!, sourceID: sourceID,
+                                               mangaURLDigest: mangaDigest, chapterURLDigest: chapterDigest)
+        }
+        return DownloadItem(jobID: jobID, revision: revision, state: state, manga: target.manga,
+                            chapter: target.chapter, isCurrentChapter: target.isCurrentChapter, contentIdentity: identity,
+                            pageCount: row.int("page_count"), completedPages: completedPages, storedBytes: storedBytes,
+                            reason: reason, manifestSHA256: row.string("manifest_sha256"), queueOrder: queueOrder,
+                            createdAt: createdAt, updatedAt: updatedAt)
+    }
+
+    private static func cleanupIdentity(from row: SQLiteDatabase.Row) throws -> DownloadContentIdentity {
+        guard let jobText = row.string("job_id"), let jobID = UUID(uuidString: jobText),
+              let attemptText = row.string("attempt_id"), let attemptID = UUID(uuidString: attemptText),
+              let mangaID = row.int64("manga_id"), let chapterID = row.int64("chapter_id"),
+              let sourceID = row.int64("source_id"), let mangaDigest = row.string("manga_url_digest"),
+              let chapterDigest = row.string("chapter_url_digest"),
+              validDownloadDigest(mangaDigest), validDownloadDigest(chapterDigest) else {
+            throw DownloadPersistenceError.invalidStoredRecord
+        }
+        return DownloadContentIdentity(jobID: jobID, attemptID: attemptID, mangaID: mangaID,
+                                       chapterID: chapterID, sourceID: sourceID,
+                                       mangaURLDigest: mangaDigest, chapterURLDigest: chapterDigest)
     }
 }
 

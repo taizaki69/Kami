@@ -94,7 +94,7 @@ final class LibraryUpdatePersistenceTests: XCTestCase {
         let updates = try await reopened.libraryUpdatesSnapshot()
         XCTAssertEqual(updates.discoveries.map(\.chapter.url), ["/new"])
         XCTAssertEqual(updates.latestScan?.newChapters, 1)
-        XCTAssertEqual(try old.query("PRAGMA user_version").first?.int("user_version"), 4)
+        XCTAssertEqual(try old.query("PRAGMA user_version").first?.int("user_version"), Migrations.latest)
     }
 
     func testFirstHistoricalAndEmptySuccessBothEstablishSilentBaselines() async throws {

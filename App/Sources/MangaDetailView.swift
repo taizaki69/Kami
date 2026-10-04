@@ -21,6 +21,7 @@ struct MangaDetailView: View {
     @State private var categoryAssignment: CategoryAssignmentRequest?
     @State private var loadGeneration = 0
     @State private var loadedSourceRevision: UInt64?
+    @State private var showDownloads = false
 
     var body: some View {
         List {
@@ -28,6 +29,7 @@ struct MangaDetailView: View {
                 Section {
                     Label(errorText, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
+                    Button("Reload manga") { Task { await load() } }.disabled(loading)
                 }
             }
             if let detail {
@@ -91,27 +93,34 @@ struct MangaDetailView: View {
 
             Section("Chapters") {
                 ForEach(chapters) { chapter in
-                    NavigationLink {
-                        ReaderView(mangaTitle: detail?.title ?? manga.title,
-                                   chapter: chapter,
-                                   chapters: chapters,
-                                   sourceID: manga.sourceId)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(chapter.name)
-                                if let scanlator = chapter.scanlator {
-                                    Text(scanlator).font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        NavigationLink {
+                            ReaderView(mangaTitle: detail?.title ?? manga.title,
+                                       chapter: chapter,
+                                       chapters: chapters,
+                                       sourceID: manga.sourceId,
+                                       openingPolicy: isDownloaded(chapter) ? .offlineOnly : .automatic)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(chapter.name)
+                                    if let scanlator = chapter.scanlator {
+                                        Text(scanlator).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Label(isDownloaded(chapter) ? "Read offline" : "Read online",
+                                          systemImage: isDownloaded(chapter) ? "arrow.down.circle.fill" : "book")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if chapter.read {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.green).accessibilityLabel("Read")
                                 }
                             }
-                            Spacer()
-                            if chapter.read {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.green)
-                            }
                         }
+                        .disabled(!hasCurrentSource && !isDownloaded(chapter))
+                        ChapterDownloadControls(manga: manga, chapter: chapter, inLibrary: inLibrary)
                     }
-                    .disabled(!hasCurrentSource)
                     .swipeActions {
                         Button(chapter.read ? "Unread" : "Read") {
                             markRead(chapter)
@@ -123,11 +132,18 @@ struct MangaDetailView: View {
         }
         .navigationTitle(manga.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showDownloads = true } label: { Label("Downloads", systemImage: "arrow.down.circle") }
+            }
+        }
         .task(id: model.sourceRevision(for: manga.sourceId)) { await load() }
+        .refreshable { await load() }
         .onDisappear { loadGeneration &+= 1 }
         .sheet(item: $categoryAssignment) { request in
             CategoryAssignmentSheet(mangaIDs: request.mangaIDs, title: request.title)
         }
+        .sheet(isPresented: $showDownloads) { DownloadsView() }
         .alert("Could not update library", isPresented: Binding(
             get: { libraryError != nil },
             set: { if !$0 { libraryError = nil } }
@@ -141,6 +157,10 @@ struct MangaDetailView: View {
     private var hasCurrentSource: Bool {
         loadedSourceRevision == model.sourceRevision(for: manga.sourceId)
             && model.source(id: manga.sourceId) != nil
+    }
+
+    private func isDownloaded(_ chapter: Chapter) -> Bool {
+        chapter.id.map { model.isChapterDownloaded($0) } ?? false
     }
 
     private var statusText: String {
@@ -162,16 +182,26 @@ struct MangaDetailView: View {
         loading = true
         errorText = nil
         loadedSourceRevision = nil
-        chapters = []
         defer { if generation == loadGeneration { loading = false } }
-        guard let source = model.source(id: manga.sourceId) else {
-            errorText = "Source not available for this manga."
-            return
-        }
         do {
-            let execution = try model.sourceExecutionConfiguration(id: manga.sourceId, revision: revision)
             let existing = try await model.store.manga(sourceId: manga.sourceId, url: manga.url)
-            guard canPublish(revision: revision, generation: generation) else { return }
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            if let existing, let id = existing.id {
+                let current = try await model.store.chapters(mangaId: id)
+                let downloaded = try await model.store.downloadedChapters(mangaID: id)
+                await model.refreshDownloadAvailability(mangaID: id)
+                guard !Task.isCancelled, generation == loadGeneration else { return }
+                detail = savedDetail(existing)
+                storedId = id
+                inLibrary = existing.inLibrary
+                chapters = mergeChapters(current, downloaded)
+                loadedSourceRevision = model.isSourceCurrent(id: manga.sourceId, revision: revision) ? revision : nil
+            }
+            guard let source = model.source(id: manga.sourceId) else {
+                errorText = "Source unavailable. Downloaded chapters can still be read offline. Enable this source in Extensions to refresh or download."
+                return
+            }
+            let execution = try model.sourceExecutionConfiguration(id: manga.sourceId, revision: revision)
 
             var compat = prefetchedSourceRevision == revision
                 ? prefetched ?? SMangaCompat(url: manga.url, title: manga.title)
@@ -200,13 +230,34 @@ struct MangaDetailView: View {
             storedId = saved.manga.id
             inLibrary = saved.manga.inLibrary
             detail = compat
-            chapters = saved.chapters
+            guard let savedID = saved.manga.id else { throw DownloadPersistenceError.chapterNotFound }
+            let downloaded = try await model.store.downloadedChapters(mangaID: savedID)
+            await model.refreshDownloadAvailability(mangaID: savedID)
+            guard canPublish(revision: revision, generation: generation) else { return }
+            chapters = mergeChapters(saved.chapters, downloaded)
             loadedSourceRevision = revision
         } catch is CancellationError {
             return
         } catch {
-            guard canPublish(revision: revision, generation: generation) else { return }
-            errorText = "Could not load this manga: \(error.localizedDescription)"
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            errorText = "This manga could not be refreshed. Saved chapters and downloads remain available. Please try again when the source is available."
+        }
+    }
+
+    private func savedDetail(_ manga: Manga) -> SMangaCompat {
+        SMangaCompat(url: manga.url, title: manga.title, altTitles: manga.altTitles,
+            thumbnailURL: manga.thumbnailURL, artist: manga.artist, author: manga.author,
+            status: manga.status, description: manga.descriptionText, genres: manga.genres,
+            updateStrategy: manga.updateStrategy, initialized: true)
+    }
+
+    private func mergeChapters(_ current: [Chapter], _ downloaded: [Chapter]) -> [Chapter] {
+        var seen = Set(current.compactMap(\.id))
+        return (current + downloaded.filter { chapter in
+            guard let id = chapter.id else { return false }
+            return seen.insert(id).inserted
+        }).sorted {
+            $0.sourceOrder == $1.sourceOrder ? ($0.id ?? 0) < ($1.id ?? 0) : $0.sourceOrder < $1.sourceOrder
         }
     }
 

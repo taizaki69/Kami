@@ -25,6 +25,11 @@ public enum ReaderImageLoadPolicy: Sendable {
     case reload
 }
 
+public enum ReaderImageCachePolicy: Sendable {
+    case memory
+    case disabled
+}
+
 /// Source-scoped, bounded compressed-image loading for the reader. Production
 /// requests reuse MihonCompatKit's streaming transport, redirect policy,
 /// header validation, body limit, and isolated cookie jar. Interpreted sources
@@ -69,12 +74,18 @@ public actor ReaderImagePipeline {
         sourceID: String,
         maximumImageBytes: Int = 32 * 1024 * 1024,
         maximumCacheBytes: Int = 64 * 1024 * 1024,
+        cachePolicy: ReaderImageCachePolicy = .memory,
         transport: (any CompatHTTPTransport)? = nil,
         transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
     ) {
         let imageLimit = max(1, min(maximumImageBytes, 128 * 1024 * 1024))
         self.maximumImageBytes = imageLimit
-        self.maximumCacheBytes = max(1, min(maximumCacheBytes, 256 * 1024 * 1024))
+        switch cachePolicy {
+        case .memory:
+            self.maximumCacheBytes = max(1, min(maximumCacheBytes, 256 * 1024 * 1024))
+        case .disabled:
+            self.maximumCacheBytes = 0
+        }
         let imageTransportPolicy = CompatHTTPTransportPolicy(
             requestTimeoutSeconds: min(45, transportPolicy.requestTimeoutSeconds),
             maximumRedirects: transportPolicy.maximumRedirects,
