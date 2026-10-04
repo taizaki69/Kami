@@ -32,8 +32,11 @@ FoolSlide's exact SHA-256 is
 `9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, and its source
 ID is `6351052922295965587`. Its default URL is a loopback placeholder. The
 factory requires an explicitly configured HTTPS override; raw default
-construction is only a metadata/test seam. Production preference UI and
-persistence remain pending. No arbitrary-host live availability, Cloudflare
+construction is only a metadata/test seam. The app now provides the measured
+URL/adult settings with authenticated, version-bound persistence. Adult controls
+the chapter-request confirmation, not a catalogue filter. A saved manga locks
+the deployment URL; settings edits and source-result writes use transactional
+freshness checks. No arbitrary-host live availability, Cloudflare
 handling or source-executed image transform is claimed. Search page two repeats
 the same POST as page one in this exact APK; the tests record that behavior and
 do not claim distinct paginated search results.

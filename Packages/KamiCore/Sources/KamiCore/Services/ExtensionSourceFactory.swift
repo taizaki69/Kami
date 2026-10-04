@@ -109,19 +109,21 @@ public struct ExtensionSourceFactory: Sendable {
                 throw ExtensionSourceFactoryError.sourceConfigurationRequired
             }
         }
-        if let requested { return requested }
         guard admission.packageName == "eu.kanade.tachiyomi.extension.zh.baozimanhua",
               admission.versionName == "1.6.29",
               admission.versionCode == 29 else {
-            return .init()
+            return requested ?? .init()
         }
         // Baozi enables an Android Bitmap banner transform by default. Kami's
         // portable runtime cannot execute that optional pixel operation yet;
         // disable it explicitly so the remaining tagged reader interceptors
         // and the source-scoped cookie jar can execute instead of failing.
-        return try InterpretedExtensionPreferences(
-            strings: ["BAOZI_BANNER": "0"]
-        )
+        // A partial explicit set must not restore the APK's unsupported
+        // default transform. Preserve explicit raw modes for the documented
+        // raw-profile fallback; the product settings contract cannot set them.
+        var strings = requested?.strings ?? [:]
+        if strings["BAOZI_BANNER"] == nil { strings["BAOZI_BANNER"] = "0" }
+        return try InterpretedExtensionPreferences(strings: strings, booleans: requested?.booleans ?? [:])
     }
 
     private func authenticatedBytes(admission: ExtensionAdmission) throws -> [UInt8] {
@@ -183,26 +185,14 @@ public struct ExtensionSourceFactory: Sendable {
     }
 
     private static func readAPK(path: String) throws -> [UInt8] {
-        guard !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw ExtensionSourceFactoryError.apkUnavailable
-        }
-        let url = URL(fileURLWithPath: path).standardizedFileURL
-        guard let values = try? url.resourceValues(
-            forKeys: [.fileSizeKey, .isRegularFileKey]
-        ),
-        values.isRegularFile == true,
-        let fileSize = values.fileSize else {
-            throw ExtensionSourceFactoryError.apkUnavailable
-        }
-        guard fileSize <= APKSignatureVerifier.maximumAPKSize else {
+        do {
+            return try ExtensionAPKFileReader.read(path: path)
+        } catch ExtensionAPKFileReader.ReadError.tooLarge(let limit) {
             throw ExtensionSourceFactoryError.apkTooLarge(
-                limit: APKSignatureVerifier.maximumAPKSize
+                limit: limit
             )
-        }
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
-              data.count == fileSize else {
+        } catch {
             throw ExtensionSourceFactoryError.apkUnavailable
         }
-        return [UInt8](data)
     }
 }

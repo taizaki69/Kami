@@ -5,7 +5,7 @@ import Foundation
 /// Versioned schema migrations. Every change ships as a new step; the
 /// `user_version` pragma tracks the applied version.
 enum Migrations {
-    static let latest: Int = 2
+    static let latest: Int = 3
 
     static let steps: [Int: String] = [
         1: """
@@ -109,6 +109,15 @@ enum Migrations {
         ALTER TABLE installed_extension ADD COLUMN signer_history TEXT NOT NULL DEFAULT '[]';
         ALTER TABLE installed_extension ADD COLUMN trust_source TEXT NOT NULL DEFAULT '';
         ALTER TABLE installed_extension ADD COLUMN source_ids TEXT NOT NULL DEFAULT '[]';
+        """,
+        3: """
+        CREATE TABLE installed_extension_preferences (
+            package_name TEXT PRIMARY KEY REFERENCES installed_extension(package_name) ON DELETE CASCADE,
+            identity_fingerprint TEXT NOT NULL CHECK(length(identity_fingerprint) = 64),
+            schema_revision INTEGER NOT NULL,
+            revision INTEGER NOT NULL CHECK(revision > 0),
+            user_values TEXT NOT NULL CHECK(length(CAST(user_values AS BLOB)) <= 16384)
+        );
         """,
     ]
 

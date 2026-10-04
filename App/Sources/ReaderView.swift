@@ -9,9 +9,42 @@ import KamiCore
 /// shared across every visible page in this chapter.
 @MainActor
 struct ReaderView: View {
+    @EnvironmentObject private var model: AppModel
     let mangaTitle: String
     let chapters: [Chapter]
+    let sourceID: Int64
     @State private var chapter: Chapter
+
+    init(mangaTitle: String, chapter: Chapter, chapters: [Chapter] = [], sourceID: Int64) {
+        self.mangaTitle = mangaTitle
+        self.chapters = chapters
+        self.sourceID = sourceID
+        _chapter = State(initialValue: chapter)
+    }
+
+    var body: some View {
+        let revision = model.sourceRevision(for: sourceID)
+        ReaderSessionView(
+            mangaTitle: mangaTitle,
+            chapter: $chapter,
+            chapters: chapters,
+            sourceID: sourceID,
+            sourceRevision: revision,
+            source: model.source(id: sourceID)
+        )
+        // A new source instance must own a new pipeline, cookie jar, page UI,
+        // and cache, even when its public source ID and page URLs are unchanged.
+        .id("\(sourceID):\(revision)")
+    }
+}
+
+@MainActor
+private struct ReaderSessionView: View {
+    let mangaTitle: String
+    let chapters: [Chapter]
+    @Binding private var chapter: Chapter
+    let sourceID: Int64
+    let sourceRevision: UInt64
     let source: (any KamiSource)?
 
     @EnvironmentObject private var model: AppModel
@@ -35,19 +68,24 @@ struct ReaderView: View {
     @State private var loadGeneration = 0
     @State private var reloadID = 0
     @State private var pendingStartAtEnd = false
+    @State private var progressTask: Task<Void, Never>?
 
     init(
         mangaTitle: String,
-        chapter: Chapter,
+        chapter: Binding<Chapter>,
         chapters: [Chapter] = [],
+        sourceID: Int64,
+        sourceRevision: UInt64,
         source: (any KamiSource)?
     ) {
         self.mangaTitle = mangaTitle
         self.chapters = chapters
-        _chapter = State(initialValue: chapter)
+        self._chapter = chapter
+        self.sourceID = sourceID
+        self.sourceRevision = sourceRevision
         self.source = source
         _imageStore = StateObject(wrappedValue: ReaderImageStore(
-            sourceID: String(source?.id ?? 0),
+            sourceID: "\(sourceID):\(sourceRevision)",
             transportPolicy: source?.transportPolicy
                 ?? CompatHTTPTransportPolicy(allowsInsecureHTTP: false)
         ))
@@ -133,6 +171,8 @@ struct ReaderView: View {
         }
         .onDisappear {
             loadGeneration &+= 1
+            progressTask?.cancel()
+            progressTask = nil
             if let previousIdleTimerDisabled {
                 UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled
             }
@@ -159,6 +199,10 @@ struct ReaderView: View {
             prefetchPages: prefetchPages,
             webtoonGap: webtoonGap
         )
+    }
+
+    private var isSessionCurrent: Bool {
+        model.isSourceCurrent(id: sourceID, revision: sourceRevision)
     }
 
     private var backgroundColor: Color {
@@ -302,6 +346,7 @@ struct ReaderView: View {
         let generation = loadGeneration
         return { request in
             guard !Task.isCancelled,
+                  isSessionCurrent,
                   generation == loadGeneration,
                   imageRequests.indices.contains(index) else { return false }
             imageRequests[index] = request
@@ -388,7 +433,7 @@ struct ReaderView: View {
     }
 
     private func schedulePrefetch(around index: Int) {
-        guard !pages.isEmpty else { return }
+        guard isSessionCurrent, !pages.isEmpty else { return }
         let indexes = ReaderPrefetchPlan.indexes(
             pageCount: pages.count,
             currentIndex: index,
@@ -399,15 +444,20 @@ struct ReaderView: View {
     }
 
     private func persistProgress(_ page: Int) {
-        guard let chapterID = chapter.id else { return }
+        guard isSessionCurrent, let chapterID = chapter.id else { return }
+        let mangaID = chapter.mangaId
         let reachedEnd = !pages.isEmpty && page == pages.count - 1
-        Task {
+        chapter.lastPageRead = page
+        progressTask?.cancel()
+        progressTask = Task {
+            guard !Task.isCancelled, isSessionCurrent else { return }
             try? await model.store.updateProgress(chapterId: chapterID, page: page)
+            guard !Task.isCancelled, isSessionCurrent else { return }
             try? await model.store.recordHistory(
-                mangaId: chapter.mangaId,
+                mangaId: mangaID,
                 chapterId: chapterID
             )
-            if reachedEnd {
+            if reachedEnd, !Task.isCancelled, isSessionCurrent {
                 try? await model.store.markRead(true, chapterId: chapterID)
             }
         }
@@ -422,7 +472,7 @@ struct ReaderView: View {
         imageRequests = []
         await imageStore.reset()
 
-        guard let source else {
+        guard !Task.isCancelled, isSessionCurrent, let source else {
             errorText = "Source not available."
             loading = false
             return
@@ -436,14 +486,16 @@ struct ReaderView: View {
                     : String(format: "%g", chapter.number)
             )
             let loadedPages = try await source.getPageList(chapter: compat)
+            guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else { return }
             var loadedImageRequests: [ImageRequest?] = []
             loadedImageRequests.reserveCapacity(loadedPages.count)
             for page in loadedPages {
                 try Task.checkCancellation()
+                guard isSessionCurrent else { return }
                 loadedImageRequests.append(await source.getImageRequest(page: page))
             }
             try Task.checkCancellation()
-            guard generation == loadGeneration else { return }
+            guard generation == loadGeneration, isSessionCurrent else { return }
             pages = loadedPages
             imageRequests = loadedImageRequests
             if pendingStartAtEnd {
@@ -462,7 +514,7 @@ struct ReaderView: View {
         } catch is CancellationError {
             return
         } catch {
-            guard generation == loadGeneration else { return }
+            guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else { return }
             errorText = "Could not load pages: \(error.localizedDescription)"
             loading = false
         }

@@ -33,6 +33,17 @@ public enum ReaderImageLoadPolicy: Sendable {
 /// concurrent requests for the same public and hidden execution identity share
 /// one task.
 public actor ReaderImagePipeline {
+    private struct RequestIdentity: Hashable {
+        struct Header: Hashable {
+            let name: String
+            let value: String
+        }
+        let url: String
+        let headers: [Header]
+        let executionID: UUID?
+        let scopeID: UUID?
+    }
+
     private struct CacheEntry {
         let data: Data
         var lastAccess: UInt64
@@ -49,10 +60,10 @@ public actor ReaderImagePipeline {
     private let transportPolicy: CompatHTTPTransportPolicy
     private let maximumImageBytes: Int
     private let maximumCacheBytes: Int
-    private var cache: [String: CacheEntry] = [:]
+    private var cache: [RequestIdentity: CacheEntry] = [:]
     private var cachedBytes = 0
     private var accessCounter: UInt64 = 0
-    private var inFlight: [String: InFlightRequest] = [:]
+    private var inFlight: [RequestIdentity: InFlightRequest] = [:]
 
     public init(
         sourceID: String,
@@ -86,6 +97,7 @@ public actor ReaderImagePipeline {
         policy: ReaderImageLoadPolicy = .useCache
     ) async throws -> Data {
         try Task.checkCancellation()
+        try imageRequest.checkAvailability()
 
         // Validate every public projection before cache or in-flight lookup.
         // This keeps a newly regenerated request subject to the same URL and
@@ -109,6 +121,7 @@ public actor ReaderImagePipeline {
         case .useCache:
             if var entry = cache[key] {
                 try Task.checkCancellation()
+                try imageRequest.checkAvailability()
                 accessCounter &+= 1
                 entry.lastAccess = accessCounter
                 cache[key] = entry
@@ -137,7 +150,10 @@ public actor ReaderImagePipeline {
                     inFlight[key]?.waiterCount -= 1
                 }
             }
-            return try await existing.task.value
+            let data = try await existing.task.value
+            try Task.checkCancellation()
+            try imageRequest.checkAvailability()
+            return data
         }
 
         try Task.checkCancellation()
@@ -153,11 +169,15 @@ public actor ReaderImagePipeline {
             try Task.checkCancellation()
             let response: CompatHTTPResponse
             if let sourceResponse = try await imageRequest.executeSourceRequest() {
+                // executeSourceRequest tracks the opaque executor itself.
                 response = sourceResponse
             } else {
-                response = try await transport.execute(request)
+                response = try await imageRequest.whileAvailable {
+                    try await transport.execute(request)
+                }
             }
             try Task.checkCancellation()
+            try imageRequest.checkAvailability()
             guard (200...299).contains(response.statusCode) else {
                 throw ReaderImagePipelineError.httpStatus(response.statusCode)
             }
@@ -173,6 +193,7 @@ public actor ReaderImagePipeline {
 
         do {
             let data = try await task.value
+            try imageRequest.checkAvailability()
             if inFlight[key]?.id == requestID {
                 inFlight.removeValue(forKey: key)
                 // The shared flight may still serve other callers after this
@@ -180,6 +201,7 @@ public actor ReaderImagePipeline {
                 // flight itself checks cancellation before returning bytes.
                 insert(data, for: key)
             }
+            try Task.checkCancellation()
             return data
         } catch {
             if inFlight[key]?.id == requestID {
@@ -212,7 +234,7 @@ public actor ReaderImagePipeline {
         (cache.count, cachedBytes, inFlight.values.reduce(0) { $0 + $1.waiterCount })
     }
 
-    private func insert(_ data: Data, for key: String) {
+    private func insert(_ data: Data, for key: RequestIdentity) {
         guard data.count <= maximumCacheBytes else { return }
         if let previous = cache.removeValue(forKey: key) {
             cachedBytes -= previous.data.count
@@ -222,7 +244,7 @@ public actor ReaderImagePipeline {
                   if $0.value.lastAccess != $1.value.lastAccess {
                       return $0.value.lastAccess < $1.value.lastAccess
                   }
-                  return $0.key < $1.key
+                  return $0.key.url < $1.key.url
               }) {
             cache.removeValue(forKey: oldest.key)
             cachedBytes -= oldest.value.data.count
@@ -232,17 +254,14 @@ public actor ReaderImagePipeline {
         cachedBytes += data.count
     }
 
-    private static func cacheKey(for request: ImageRequest) -> String {
-        var key = request.url
-        for header in request.headers.sorted(by: {
+    private static func cacheKey(for request: ImageRequest) -> RequestIdentity {
+        let headers = request.headers.sorted(by: {
             if $0.key != $1.key { return $0.key < $1.key }
             return $0.value < $1.value
-        }) {
-            key += "\u{0}\(header.key)\u{0}\(header.value)"
-        }
-        if let sourceExecutionID = request.sourceExecutionID {
-            key += "\u{0}source-execution\u{0}\(sourceExecutionID.uuidString)"
-        }
-        return key
+        }).map { RequestIdentity.Header(name: $0.key, value: $0.value) }
+        // Hidden identities occupy distinct fields: an HTTP header named
+        // source-execution or source-lifetime cannot impersonate either one.
+        return RequestIdentity(url: request.url, headers: headers,
+            executionID: request.sourceExecutionID, scopeID: request.requestScopeID)
     }
 }

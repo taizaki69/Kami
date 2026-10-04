@@ -253,48 +253,86 @@ public actor LibraryStore {
     }
 
     public func replaceChapters(mangaId: Int64, with chapters: [Chapter]) throws {
-        try db.execute("BEGIN")
-        do {
-            let existing = try db.query(
-                "SELECT id, url FROM chapter WHERE manga_id=?", [.int(mangaId)]
-            )
-            var idsByURL: [String: Int64] = [:]
-            for row in existing {
-                if let id = row.int64("id"), let url = row.string("url") {
-                    idsByURL[url] = id
+        try withLibraryTransaction {
+            try replaceChaptersInTransaction(mangaId: mangaId, with: chapters)
+        }
+    }
+
+    private func replaceChaptersInTransaction(mangaId: Int64, with chapters: [Chapter]) throws {
+        let existing = try db.query(
+            "SELECT id, url FROM chapter WHERE manga_id=?", [.int(mangaId)]
+        )
+        var idsByURL: [String: Int64] = [:]
+        for row in existing {
+            if let id = row.int64("id"), let url = row.string("url") {
+                idsByURL[url] = id
+            }
+        }
+
+        for (order, ch) in chapters.enumerated() {
+            if let id = idsByURL[ch.url] {
+                try db.run("""
+                    UPDATE chapter SET source_order=?, name=?, scanlator=?, number=?, date_upload=?
+                    WHERE id=?
+                    """, [.int(order), .text(ch.name),
+                          ch.scanlator.map { SQLiteBindable.text($0) } ?? .null,
+                          .double(ch.number), .int(ch.dateUpload), .int(id)])
+            } else {
+                _ = try db.insert("""
+                    INSERT INTO chapter (manga_id, source_order, url, name, scanlator, number,
+                                         date_upload, read, bookmark, last_page_read)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                    """, [.int(mangaId), .int(order), .text(ch.url), .text(ch.name),
+                          ch.scanlator.map { SQLiteBindable.text($0) } ?? .null, .double(ch.number),
+                          .int(ch.dateUpload), .bool(ch.read), .bool(ch.bookmark), .int(ch.lastPageRead)])
+            }
+        }
+
+        let incomingURLs = Set(chapters.map(\.url))
+        for row in existing {
+            guard let id = row.int64("id"),
+                  let url = row.string("url"),
+                  !incomingURLs.contains(url) else { continue }
+            try db.run("DELETE FROM chapter WHERE id=?", [.int(id)])
+        }
+    }
+
+    /// The source/configuration check and every source-result write share the
+    /// transaction. An obsolete runtime cannot insert a relative manga URL
+    /// after a deployment change, even if its network result arrived later.
+    public func persistSourceUpdate(
+        manga: Manga,
+        chapters: [SChapterCompat],
+        expectedConfiguration: ExtensionExecutionConfiguration?
+    ) throws -> SourceMangaUpdate {
+        try withLibraryTransaction {
+            if let expectedConfiguration {
+                try verifyExtensionExecutionConfigurationInTransaction(expectedConfiguration)
+                guard expectedConfiguration.installed.sourceIDs.contains(manga.sourceId) else {
+                    throw SourceUpdatePersistenceError.sourceIdentityMismatch
+                }
+            } else {
+                // The current product has one native source. Downloaded
+                // profiles must never use nil to bypass their CAS token.
+                guard manga.sourceId == MangaDexSource().id else {
+                    throw SourceUpdatePersistenceError.configurationRequired
                 }
             }
-
-            for (order, ch) in chapters.enumerated() {
-                if let id = idsByURL[ch.url] {
-                    try db.run("""
-                        UPDATE chapter SET source_order=?, name=?, scanlator=?, number=?, date_upload=?
-                        WHERE id=?
-                        """, [.int(order), .text(ch.name),
-                              ch.scanlator.map { SQLiteBindable.text($0) } ?? .null,
-                              .double(ch.number), .int(ch.dateUpload), .int(id)])
-                } else {
-                    _ = try db.insert("""
-                        INSERT INTO chapter (manga_id, source_order, url, name, scanlator, number,
-                                             date_upload, read, bookmark, last_page_read)
-                        VALUES (?,?,?,?,?,?,?,?,?,?)
-                        """, [.int(mangaId), .int(order), .text(ch.url), .text(ch.name),
-                              ch.scanlator.map { SQLiteBindable.text($0) } ?? .null, .double(ch.number),
-                              .int(ch.dateUpload), .bool(ch.read), .bool(ch.bookmark), .int(ch.lastPageRead)])
+            if let id = manga.id {
+                guard let stored = try self.manga(id: id),
+                      stored.sourceId == manga.sourceId, stored.url == manga.url else {
+                    throw SourceUpdatePersistenceError.sourceIdentityMismatch
                 }
             }
-
-            let incomingURLs = Set(chapters.map(\.url))
-            for row in existing {
-                guard let id = row.int64("id"),
-                      let url = row.string("url"),
-                      !incomingURLs.contains(url) else { continue }
-                try db.run("DELETE FROM chapter WHERE id=?", [.int(id)])
+            let id = try upsert(manga)
+            let incoming = chapters.enumerated().map { order, chapter in
+                Chapter(mangaId: id, sourceOrder: order, from: chapter)
             }
-            try db.execute("COMMIT")
-        } catch {
-            try? db.execute("ROLLBACK")
-            throw error
+            try replaceChaptersInTransaction(mangaId: id, with: incoming)
+            guard let stored = try self.manga(id: id) else {
+                throw SourceUpdatePersistenceError.sourceIdentityMismatch
+            }
+            return SourceMangaUpdate(manga: stored, chapters: try self.chapters(mangaId: id))
         }
     }
 
@@ -424,6 +462,14 @@ public actor LibraryStore {
     func commitExtensionAdmission(
         _ candidate: ExtensionAdmissionCandidate
     ) throws -> ExtensionAdmission {
+        try withLibraryTransaction {
+            try commitExtensionAdmissionInTransaction(candidate)
+        }
+    }
+
+    private func commitExtensionAdmissionInTransaction(
+        _ candidate: ExtensionAdmissionCandidate
+    ) throws -> ExtensionAdmission {
         let existing = try installedExtensionTrust(packageName: candidate.packageName)
         let trustSource: ExtensionTrustSource
         if let existing {
@@ -463,6 +509,18 @@ public actor LibraryStore {
         let historyJSON = try Self.json(signerHistory)
         let sourceJSON = try Self.json(candidate.sourceIDs.sorted())
         let now = Int64(Date().timeIntervalSince1970)
+        if let existing,
+           existing.versionName != candidate.versionName
+            || existing.versionCode != candidate.versionCode
+            || existing.apkSHA256 != candidate.apkSHA256
+            || existing.signatureScheme != candidate.signingIdentity.scheme
+            || existing.currentSigners.sorted() != currentSigners
+            || existing.signerHistory.sorted() != signerHistory
+            || existing.sourceIDs != candidate.sourceIDs {
+            // Signer continuity authenticates an update, but does not prove
+            // that its new release has the same preference semantics.
+            try db.run("DELETE FROM installed_extension_preferences WHERE package_name=?", [.text(candidate.packageName)])
+        }
         try db.run("""
             INSERT INTO installed_extension
                 (package_name, version_name, version_code, apk_path, repo_url,
@@ -506,6 +564,137 @@ public actor LibraryStore {
             trustSource: trustSource,
             sourceIDs: candidate.sourceIDs
         )
+    }
+
+    // MARK: - Exact extension preference documents
+
+    func verifyInstalledExtension(
+        _ expected: InstalledExtensionTrust,
+        requireEnabled: Bool = false
+    ) throws {
+        guard let current = try installedExtensionTrust(packageName: expected.packageName),
+              current == expected,
+              !requireEnabled || current.enabled else {
+            throw ExtensionPreferencesError.staleInstallation
+        }
+    }
+
+    func extensionConfigurationSnapshot(
+        installed: InstalledExtensionTrust,
+        schema: InterpretedExtensionPreferenceSchema
+    ) throws -> ExtensionConfigurationSnapshot {
+        try withLibraryTransaction(readOnly: true) {
+            try verifyInstalledExtension(installed)
+            return try readExtensionConfiguration(installed: installed, schema: schema)
+        }
+    }
+
+    private func readExtensionConfiguration(
+        installed: InstalledExtensionTrust,
+        schema: InterpretedExtensionPreferenceSchema
+    ) throws -> ExtensionConfigurationSnapshot {
+        let fingerprint = try ExtensionPreferenceBinding.fingerprint(installed)
+        // Select oversized/untyped payloads as NULL so the SQLite wrapper
+        // never materializes an unbounded string from a corrupt database.
+        let row = try db.query("""
+            SELECT
+                CASE WHEN typeof(identity_fingerprint)='text'
+                    AND length(CAST(identity_fingerprint AS BLOB))=64
+                    THEN identity_fingerprint ELSE NULL END AS identity_fingerprint,
+                schema_revision, revision,
+                CASE WHEN typeof(user_values)='text'
+                    AND length(CAST(user_values AS BLOB))<=?
+                    THEN user_values ELSE NULL END AS bounded_values
+            FROM installed_extension_preferences WHERE package_name=? LIMIT 1
+            """, [.int(StoredExtensionPreferenceValues.maximumBytes), .text(installed.packageName)]).first
+        let userValues: [InterpretedExtensionPreferenceSchema.FieldID: InterpretedExtensionPreferenceSchema.Value]
+        let revision: Int64
+        if let row {
+            guard row.string("identity_fingerprint") == fingerprint,
+                  row.int("schema_revision") == schema.revision,
+                  let storedRevision = row.int64("revision"), storedRevision > 0,
+                  let payload = row.string("bounded_values") else {
+                throw ExtensionPreferencesError.invalidStoredConfiguration
+            }
+            userValues = try StoredExtensionPreferenceValues.decode(payload, schema: schema).userValues
+            revision = storedRevision
+        } else {
+            userValues = schema.defaultUserValues
+            revision = 0
+        }
+        return ExtensionConfigurationSnapshot(
+            installed: installed, schema: schema, userValues: userValues,
+            identityFingerprint: fingerprint, revision: revision
+        )
+    }
+
+    func saveExtensionConfiguration(
+        snapshot: ExtensionConfigurationSnapshot,
+        resolved: ResolvedExtensionPreferences
+    ) throws -> ExtensionConfigurationSnapshot {
+        guard resolved.profileIdentity == snapshot.schema.identity,
+              resolved.schemaRevision == snapshot.schema.revision else {
+            throw ExtensionPreferencesError.staleInstallation
+        }
+        let payload = try StoredExtensionPreferenceValues(resolved.userValues).encoded()
+        return try withLibraryTransaction {
+            try verifyInstalledExtension(snapshot.installed)
+            let previous = try readExtensionConfiguration(installed: snapshot.installed, schema: snapshot.schema)
+            guard previous.identityFingerprint == snapshot.identityFingerprint else {
+                throw ExtensionPreferencesError.staleInstallation
+            }
+            guard previous.revision == snapshot.revision,
+                  previous.userValues == snapshot.userValues else {
+                throw ExtensionPreferencesError.staleConfiguration
+            }
+            let previousURL: String?
+            if case let .string(value)? = previous.userValues[.baseURL] {
+                previousURL = value
+            } else {
+                previousURL = nil
+            }
+            if previousURL != resolved.baseURL {
+                for sourceID in snapshot.schema.identity.sourceIDs {
+                    guard try db.query("SELECT 1 AS present FROM manga WHERE source_id=? LIMIT 1", [.int(sourceID)]).isEmpty else {
+                        throw ExtensionPreferencesError.deploymentInUse
+                    }
+                }
+            }
+            guard snapshot.revision < Int64.max else {
+                throw ExtensionPreferencesError.invalidStoredConfiguration
+            }
+            let revision = snapshot.revision + 1
+            try db.run("""
+                INSERT INTO installed_extension_preferences
+                    (package_name, identity_fingerprint, schema_revision, revision, user_values)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(package_name) DO UPDATE SET
+                    identity_fingerprint=excluded.identity_fingerprint,
+                    schema_revision=excluded.schema_revision,
+                    revision=excluded.revision,
+                    user_values=excluded.user_values
+                """, [.text(snapshot.packageName), .text(snapshot.identityFingerprint),
+                      .int(snapshot.schema.revision), .int(revision), .text(payload)])
+            return ExtensionConfigurationSnapshot(
+                installed: snapshot.installed, schema: snapshot.schema,
+                userValues: resolved.userValues, identityFingerprint: snapshot.identityFingerprint,
+                revision: revision
+            )
+        }
+    }
+
+    func verifyExtensionExecutionConfiguration(_ configuration: ExtensionExecutionConfiguration) throws {
+        try withLibraryTransaction(readOnly: true) {
+            try verifyExtensionExecutionConfigurationInTransaction(configuration)
+        }
+    }
+
+    private func verifyExtensionExecutionConfigurationInTransaction(_ configuration: ExtensionExecutionConfiguration) throws {
+        try verifyInstalledExtension(configuration.installed, requireEnabled: true)
+        if let expected = configuration.snapshot {
+            let current = try readExtensionConfiguration(installed: configuration.installed, schema: expected.schema)
+            guard current == expected else { throw ExtensionPreferencesError.staleConfiguration }
+        }
     }
 
     // MARK: - Row mapping

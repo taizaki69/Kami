@@ -259,11 +259,13 @@ public struct ImageRequest: Sendable {
     public let url: String
     public let headers: [String: String]
     private let sourceExecution: SourceImageExecution?
+    private let requestScope: SourceRequestScope?
 
     public init(url: String, headers: [String: String] = [:]) {
         self.url = url
         self.headers = headers
         sourceExecution = nil
+        requestScope = nil
     }
 
     /// Trusted Swift sources can provide their own source-scoped execution
@@ -281,6 +283,7 @@ public struct ImageRequest: Sendable {
             id: sourceExecutionID,
             operation: sourceExecutor
         )
+        requestScope = nil
     }
 
     init(
@@ -291,6 +294,43 @@ public struct ImageRequest: Sendable {
         self.url = url
         self.headers = headers
         self.sourceExecution = sourceExecution
+        requestScope = nil
+    }
+
+    private init(_ request: ImageRequest, scope: SourceRequestScope) {
+        url = request.url
+        headers = request.headers
+        sourceExecution = request.sourceExecution
+        requestScope = scope
+    }
+
+    /// Attach the registration lifetime without changing source-owned request
+    /// handles, tags or release hooks. A bound request cannot be transferred to
+    /// another registration, including after its original scope is revoked.
+    public func scoped(to scope: SourceRequestScope) throws -> ImageRequest {
+        try requestScope?.checkAvailability()
+        try scope.checkAvailability()
+        if let requestScope {
+            guard requestScope.id == scope.id else {
+                throw SourceRequestScope.Failure.differentLifetime
+            }
+            return self
+        }
+        return ImageRequest(self, scope: scope)
+    }
+
+    public var requestScopeID: UUID? { requestScope?.id }
+
+    public func checkAvailability() throws {
+        try requestScope?.checkAvailability()
+    }
+
+    public func whileAvailable<Value: Sendable>(
+        _ operation: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
+        if let requestScope { return try await requestScope.perform(operation) }
+        try Task.checkCancellation()
+        return try await operation()
     }
 
     /// Non-nil only when this request must not be coalesced with a plain
@@ -302,8 +342,9 @@ public struct ImageRequest: Sendable {
     /// Returns nil for ordinary native requests. ReaderImagePipeline validates
     /// the public URL/header projection before invoking this capability.
     public func executeSourceRequest() async throws -> CompatHTTPResponse? {
+        try checkAvailability()
         guard let sourceExecution else { return nil }
-        return try await sourceExecution.execute()
+        return try await whileAvailable { try await sourceExecution.execute() }
     }
 }
 

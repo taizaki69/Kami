@@ -298,17 +298,11 @@ public actor ExtensionInstallationService {
     }
 
     private static func readStagedAPK(at url: URL) throws -> [UInt8] {
-        guard let values = try? url.resourceValues(
-            forKeys: [.fileSizeKey, .isRegularFileKey]
-        ),
-        values.isRegularFile == true,
-        let fileSize = values.fileSize,
-        fileSize <= APKSignatureVerifier.maximumAPKSize,
-        let data = try? Data(contentsOf: url, options: .mappedIfSafe),
-        data.count == fileSize else {
+        do {
+            return try ExtensionAPKFileReader.read(path: url.path)
+        } catch {
             throw ExtensionInstallationError.pendingAPKChanged
         }
-        return [UInt8](data)
     }
 }
 

@@ -5,6 +5,7 @@ import KamiCore
 /// Extension store management: add repositories, securely install/update APKs,
 /// explicitly confirm legacy-store signers, and enable or disable admitted
 /// sources. Installed bytes and enabled state survive app restarts.
+@MainActor
 struct ExtensionsView: View {
     @EnvironmentObject var model: AppModel
 
@@ -81,6 +82,7 @@ struct ExtensionsView: View {
                 }
             }
             .navigationTitle("Extensions")
+            .refreshable { await model.refreshInstalledExtensions() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { adding = true } label: { Image(systemName: "plus") }
@@ -182,36 +184,61 @@ struct ExtensionsView: View {
     }
 }
 
+@MainActor
 private struct InstalledExtensionRow: View {
     @EnvironmentObject var model: AppModel
     let installed: InstalledExtensionTrust
+    @State private var showingConfiguration = false
 
     var body: some View {
-        Toggle(isOn: Binding(
-            get: { installed.enabled },
-            set: { enabled in
-                Task {
-                    await model.setExtensionEnabled(
-                        enabled,
-                        packageName: installed.packageName
-                    )
-                }
-            }
-        )) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(installed.packageName)
-                    .lineLimit(1)
-                Text("Version \(installed.versionName) · \(installed.signatureScheme.rawValue.uppercased()) · \(trustLabel)")
-                    .font(.caption)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(displayName)
+                .font(.headline)
+            Text("Version \(installed.versionName) · \(installed.signatureScheme.rawValue.uppercased()) · \(trustLabel)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let signer = installed.currentSigners.first {
+                Text("Signer \(signer.prefix(16))…")
+                    .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
-                if let signer = installed.currentSigners.first {
-                    Text("Signer \(signer.prefix(16))…")
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
+            }
+            Label(model.extensionStatus(installed), systemImage: model.extensionIsActive(installed)
+                  ? "checkmark.circle" : "pause.circle")
+                .font(.caption)
+            if let error = model.extensionErrors[installed.packageName] {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .accessibilityElement(children: .combine)
+            }
+            Toggle("Enabled", isOn: Binding(
+                get: { installed.enabled },
+                set: { enabled in
+                    Task {
+                        await model.setExtensionEnabled(enabled, packageName: installed.packageName)
+                    }
                 }
+            ))
+            .accessibilityLabel("Enable \(displayName)")
+            .accessibilityValue(model.extensionStatus(installed))
+            .disabled(model.extensionBusyPackages.contains(installed.packageName))
+            if model.extensionConfigurations[installed.packageName] != nil {
+                Button(model.extensionNeedsConfiguration(packageName: installed.packageName)
+                       ? "Configure source" : "Edit source settings") {
+                    showingConfiguration = true
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.extensionBusyPackages.contains(installed.packageName))
             }
         }
-        .disabled(model.extensionBusyPackages.contains(installed.packageName))
+        .sheet(isPresented: $showingConfiguration) {
+            ExtensionConfigurationSheet(packageName: installed.packageName)
+        }
+    }
+
+    private var displayName: String {
+        installed.packageName == AppModel.configurableFooPackage
+            ? "FoolSlide Customizable" : installed.packageName
     }
 
     private var trustLabel: String {

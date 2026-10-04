@@ -213,7 +213,10 @@ final class ReaderSupportTests: XCTestCase {
             body: [9, 8, 7]
         ))
 
-        _ = try? await reload.value
+        do {
+            _ = try await reload.value
+            XCTFail("Canceled initiating waiter must not receive shared bytes")
+        } catch is CancellationError {}
         let concurrentlyReloaded = try await concurrentReload.value
         XCTAssertEqual(concurrentlyReloaded, Data([9, 8, 7]))
 
@@ -221,6 +224,53 @@ final class ReaderSupportTests: XCTestCase {
         XCTAssertEqual(cached, Data([9, 8, 7]))
         let requests = await transport.recordedRequests()
         XCTAssertEqual(requests.count, 2)
+    }
+
+    func testCancelledJoinedWaiterDoesNotReceiveBytesOrCancelSharedFlight() async throws {
+        let started = expectation(description: "shared image request started")
+        let response = CompatHTTPResponse(finalURL: "https://cdn.example/shared.jpg", statusCode: 200, body: [3, 4])
+        let transport = GatedImageTransport(fallbackResponse: response, onRequest: { count in
+            if count == 1 { started.fulfill() }
+        })
+        defer { Task { await transport.finish() } }
+        let pipeline = ReaderImagePipeline(sourceID: "shared-cancellation", transport: transport)
+        let request = ImageRequest(url: response.finalURL)
+        let initiating = Task { try await pipeline.data(for: request) }
+        defer { initiating.cancel() }
+        guard await XCTWaiter.fulfillment(of: [started], timeout: 5) == .completed else {
+            XCTFail("Shared image request did not start")
+            return
+        }
+        let joined = Task { try await pipeline.data(for: request) }
+        defer { joined.cancel() }
+        let registered = expectation(description: "second waiter joined")
+        let observer = Task {
+            while !Task.isCancelled {
+                if await pipeline.cacheStatistics().inFlightWaiters == 2 {
+                    registered.fulfill()
+                    return
+                }
+                await Task.yield()
+            }
+        }
+        let joinResult = await XCTWaiter.fulfillment(of: [registered], timeout: 5)
+        observer.cancel()
+        guard joinResult == .completed else {
+            XCTFail("Second waiter did not join")
+            return
+        }
+        joined.cancel()
+        await transport.resumeNext(with: response)
+        do {
+            _ = try await joined.value
+            XCTFail("Canceled joined waiter must not receive shared bytes")
+        } catch is CancellationError {}
+        let value = try await initiating.value
+        let cached = try await pipeline.data(for: request)
+        XCTAssertEqual(value, Data([3, 4]))
+        XCTAssertEqual(cached, value)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 1)
     }
 
     func testImagePipelineUsesSourceScopedExecutionAndSeparatesHiddenCacheIdentity() async throws {

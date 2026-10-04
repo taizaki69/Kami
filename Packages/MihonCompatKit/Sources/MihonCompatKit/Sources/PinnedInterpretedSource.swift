@@ -463,18 +463,8 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
             throw PinnedInterpretedSourceError.invalidPreferences(profile: profile.identifier)
         }
         let runtimePreferences: InterpretedExtensionPreferences
-        if case .foolSlideCustomizable = profile.preferenceSupport,
-           preferences.strings["overrideBaseUrl"] != nil,
-           preferences.strings["defaultBaseUrl"] == nil {
-            // The APK migrates its custom URL when its default bookkeeping
-            // value changes. Supply the authenticated artifact's exact default
-            // so an injected override survives its constructor unchanged.
-            var strings = preferences.strings
-            strings["defaultBaseUrl"] = "https://127.0.0.1"
-            runtimePreferences = try InterpretedExtensionPreferences(
-                strings: strings,
-                booleans: preferences.booleans
-            )
+        if case .foolSlideCustomizable = profile.preferenceSupport {
+            runtimePreferences = try FoolSlidePreferenceRules.normalizedRuntimePreferences(preferences)
         } else {
             runtimePreferences = preferences
         }
@@ -645,12 +635,41 @@ public enum InterpretedExtensionProfileCatalog {
         versionName: String,
         versionCode: Int64
     ) -> Set<Int64>? {
+        identity(
+            packageName: packageName,
+            versionName: versionName,
+            versionCode: versionCode
+        )?.sourceIDs
+    }
+
+    /// Compiled identity data for a measured release, without reading or
+    /// executing an APK. This lookup does not grant trust or source admission.
+    public static func identity(
+        packageName: String,
+        versionName: String,
+        versionCode: Int64
+    ) -> InterpretedExtensionProfileIdentity? {
         guard let profile = profile(
             packageName: packageName,
             versionName: versionName,
             versionCode: versionCode
         ) else { return nil }
-        return [profile.expectedSourceID]
+        return profile.identity
+    }
+
+    /// The product exposes only the proven URL/adult fields of FoolSlide.
+    /// Other measured profiles have no editable product schema in this slice.
+    public static func preferenceSchema(
+        packageName: String,
+        versionName: String,
+        versionCode: Int64
+    ) -> InterpretedExtensionPreferenceSchema? {
+        guard let profile = profile(
+            packageName: packageName,
+            versionName: versionName,
+            versionCode: versionCode
+        ), case .foolSlideCustomizable = profile.preferenceSupport else { return nil }
+        return InterpretedExtensionPreferenceSchema(foolSlideIdentity: profile.identity)
     }
 
     private static func profile(
@@ -734,41 +753,8 @@ private struct PinnedInterpretedProfile: Sendable {
                         || (overrideURL!.hasPrefix("https://")
                             && overrideURL!.contains("doctruyen3q")))
             case .foolSlideCustomizable:
-                let allowedBooleans: Set<String> = ["adult"]
-                let overrideURL = preferences.strings["overrideBaseUrl"]
-                let defaultURL = preferences.strings["defaultBaseUrl"]
-                let otherStrings = preferences.strings.filter {
-                    $0.key != "overrideBaseUrl" && $0.key != "defaultBaseUrl"
-                }
-                return otherStrings.isEmpty
-                    && Set(preferences.booleans.keys).isSubset(of: allowedBooleans)
-                    && (overrideURL == nil || Self.validFoolSlideDeploymentURL(overrideURL!))
-                    && (defaultURL == nil || defaultURL == "https://127.0.0.1")
+                return FoolSlidePreferenceRules.validates(preferences)
             }
-        }
-
-        private static func validFoolSlideDeploymentURL(_ value: String) -> Bool {
-            guard !value.isEmpty,
-                  value.utf8.count <= 4_096,
-                  !value.hasSuffix("/"),
-                  !value.unicodeScalars.contains(where: {
-                      CharacterSet.controlCharacters.contains($0)
-                          || CharacterSet.whitespacesAndNewlines.contains($0)
-                          || $0 == "\\"
-                  }),
-                  let components = URLComponents(string: value),
-                  components.scheme?.lowercased() == "https",
-                  components.host?.isEmpty == false,
-                  components.user == nil,
-                  components.password == nil,
-                  components.query == nil,
-                  components.fragment == nil,
-                  !components.path.hasSuffix("/") else { return false }
-            // Reuse the transport's URL rules before constructing any DEX
-            // object; injected transports cannot bypass this admission check.
-            return (try? CompatHTTPTransportPolicy(allowsInsecureHTTP: false).validate(
-                request: CompatHTTPRequest(url: value)
-            )) != nil
         }
     }
 
@@ -790,6 +776,18 @@ private struct PinnedInterpretedProfile: Sendable {
     let imageRequestSupport: ImageRequestSupport
 
     var networkIdentity: String { "\(packageName)@\(versionName)" }
+
+    var identity: InterpretedExtensionProfileIdentity {
+        InterpretedExtensionProfileIdentity(
+            profileIdentifier: identifier,
+            packageName: packageName,
+            versionName: versionName,
+            versionCode: versionCode,
+            apkSHA256: sha256,
+            signerFingerprint: signerFingerprint,
+            sourceIDs: [expectedSourceID]
+        )
+    }
 
     static let batCave169 = PinnedInterpretedProfile(
         identifier: "batcave-1.6.9",
