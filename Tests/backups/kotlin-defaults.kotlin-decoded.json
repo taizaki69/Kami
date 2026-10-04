@@ -1,0 +1,123 @@
+{
+    "manga": [
+        {
+            "sourceId": 9007199254740993,
+            "url": "/manga/reference-default",
+            "title": "Reference default favorite",
+            "artist": "Fixture artist",
+            "author": "Fixture author",
+            "description": "No personal data.\nIndependent serializer fixture.",
+            "genres": [
+                "Reference",
+                "Action"
+            ],
+            "status": 1,
+            "thumbnailUrl": "https://fixtures.invalid/reference-cover.jpg",
+            "dateAdded": 1770000012345,
+            "chapters": [
+                {
+                    "url": "/chapter/reference-1",
+                    "name": "Reference chapter 2.25",
+                    "scanlator": "Fixture team",
+                    "read": true,
+                    "bookmark": false,
+                    "lastPageRead": 7,
+                    "dateFetch": 1780000000111,
+                    "dateUpload": 1779999999999,
+                    "chapterNumber": 2.25,
+                    "sourceOrder": 3
+                },
+                {
+                    "url": "/chapter/reference-2",
+                    "name": "Reference chapter 3.5",
+                    "scanlator": null,
+                    "read": false,
+                    "bookmark": true,
+                    "lastPageRead": 4294967311,
+                    "dateFetch": 0,
+                    "dateUpload": 0,
+                    "chapterNumber": 3.5,
+                    "sourceOrder": 4294967305
+                }
+            ],
+            "categoryOrders": [
+                7,
+                4294967301
+            ],
+            "favorite": true,
+            "history": [
+                {
+                    "url": "/chapter/reference-1",
+                    "lastRead": 1780009876543,
+                    "readDuration": 90123
+                },
+                {
+                    "url": "/chapter/reference-2",
+                    "lastRead": 1780009999999,
+                    "readDuration": 5000000001
+                }
+            ],
+            "updateStrategy": "ONLY_FETCH_ONCE",
+            "favoriteModifiedAt": 1760000123,
+            "initialized": true
+        },
+        {
+            "sourceId": 9223372036854775807,
+            "url": "/manga/reference-nonfavorite",
+            "title": "Reference explicit nonfavorite",
+            "artist": null,
+            "author": null,
+            "description": null,
+            "genres": [],
+            "status": 0,
+            "thumbnailUrl": null,
+            "dateAdded": 0,
+            "chapters": [
+                {
+                    "url": "/chapter/default-scalars",
+                    "name": "Default scalar chapter",
+                    "scanlator": null,
+                    "read": false,
+                    "bookmark": false,
+                    "lastPageRead": 0,
+                    "dateFetch": 0,
+                    "dateUpload": 0,
+                    "chapterNumber": 0.0,
+                    "sourceOrder": 0
+                }
+            ],
+            "categoryOrders": [
+                7
+            ],
+            "favorite": false,
+            "history": [],
+            "updateStrategy": "ALWAYS_UPDATE",
+            "favoriteModifiedAt": null,
+            "initialized": false
+        }
+    ],
+    "categories": [
+        {
+            "name": "Reference reading",
+            "order": 7,
+            "id": 101,
+            "flags": 9
+        },
+        {
+            "name": "Reference archived",
+            "order": 4294967301,
+            "id": 202,
+            "flags": 64
+        }
+    ],
+    "sources": [
+        {
+            "name": "Reference high-precision source",
+            "sourceId": 9007199254740993
+        },
+        {
+            "name": "Reference maximum signed source",
+            "sourceId": 9223372036854775807
+        }
+    ]
+}

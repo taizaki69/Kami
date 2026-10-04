@@ -20,6 +20,7 @@ enum Inflate {
         case incompleteStream
         case unexpectedEnd
         case outputLimitExceeded(Int)
+        case trailingData
 
         var description: String {
             switch self {
@@ -31,6 +32,7 @@ enum Inflate {
             case .incompleteStream: return "final block ended before stream was complete"
             case .unexpectedEnd: return "unexpected end of compressed stream"
             case let .outputLimitExceeded(limit): return "decompressed data exceeds the \(limit)-byte limit"
+            case .trailingData: return "deflate stream contains bytes after its final block"
             }
         }
     }
@@ -134,7 +136,11 @@ enum Inflate {
     /// Decompresses a raw DEFLATE stream (no zlib/gzip wrapper).
     static let defaultOutputLimit = 128 * 1024 * 1024
 
-    static func decompress(_ input: [UInt8], outputLimit: Int = defaultOutputLimit) throws -> [UInt8] {
+    static func decompress(
+        _ input: [UInt8], outputLimit: Int = defaultOutputLimit,
+        requiresCompleteInput: Bool = false, cancellable: Bool = false
+    ) throws -> [UInt8] {
+        if cancellable { try Task.checkCancellation() }
         guard outputLimit >= 0 else { throw Error.outputLimitExceeded(outputLimit) }
         var br = BitReader(input)
         var out: [UInt8] = []
@@ -142,6 +148,7 @@ enum Inflate {
         out.reserveCapacity(min(outputLimit, overflow ? outputLimit : scaledCapacity))
 
         while true {
+            if cancellable { try Task.checkCancellation() }
             let final = try br.bits(1)
             let type = try br.bits(2)
             switch type {
@@ -151,7 +158,8 @@ enum Inflate {
                 let nlen = Int(try br.bits(16))
                 guard len & 0xffff == (~nlen & 0xffff) else { throw Error.storedLengthMismatch }
                 guard len <= outputLimit - out.count else { throw Error.outputLimitExceeded(outputLimit) }
-                for _ in 0..<len {
+                for index in 0..<len {
+                    if cancellable, index & 0xfff == 0 { try Task.checkCancellation() }
                     out.append(UInt8(try br.bits(8)))
                 }
 
@@ -162,17 +170,24 @@ enum Inflate {
                 litLengths += [Int](repeating: 8, count: 8)
                 let lit = try Huffman(lengths: litLengths)
                 let dist = try Huffman(lengths: [Int](repeating: 5, count: 30))
-                try inflateBlock(&br, &out, lit, dist, outputLimit: outputLimit)
+                try inflateBlock(&br, &out, lit, dist, outputLimit: outputLimit, cancellable: cancellable)
 
             case 2:
                 let (lit, dist) = try dynamicTables(&br)
-                try inflateBlock(&br, &out, lit, dist, outputLimit: outputLimit)
+                try inflateBlock(&br, &out, lit, dist, outputLimit: outputLimit, cancellable: cancellable)
 
             default:
                 throw Error.badBlockType(Int(type))
             }
             if final == 1 { break }
         }
+        if requiresCompleteInput {
+            // Final-block padding bits are legal; additional whole bytes are
+            // not part of this DEFLATE stream (RFC 1951).
+            br.alignToByte()
+            guard br.pos == input.count else { throw Error.trailingData }
+        }
+        if cancellable { try Task.checkCancellation() }
         return out
     }
 
@@ -229,8 +244,16 @@ enum Inflate {
     }
 
     private static func inflateBlock(_ br: inout BitReader, _ out: inout [UInt8], _ lit: Huffman, _ dist: Huffman,
-                                     outputLimit: Int = defaultOutputLimit) throws {
+                                     outputLimit: Int = defaultOutputLimit, cancellable: Bool = false) throws {
+        var cancellationCountdown = 0
         while true {
+            if cancellable {
+                if cancellationCountdown == 0 {
+                    try Task.checkCancellation()
+                    cancellationCountdown = 256
+                }
+                cancellationCountdown -= 1
+            }
             let symbol = try lit.decode(&br)
             if symbol < 256 {
                 guard out.count < outputLimit else { throw Error.outputLimitExceeded(outputLimit) }
@@ -255,8 +278,9 @@ enum Inflate {
     }
 }
 
-/// zlib (RFC 1950) wrapper used by legacy Tachiyomi backups: 2-byte header
-/// (`78 xx`), raw DEFLATE body, adler32 trailer.
+/// zlib (RFC 1950) wrapper: 2-byte header, raw DEFLATE body, Adler-32 trailer.
+/// This generic format support does not establish a Tachiyomi backup format;
+/// the verified Mihon/Tachiyomi producers use gzip-wrapped protobuf.
 enum Zlib {
     enum Error: Swift.Error, CustomStringConvertible {
         case notZlib
@@ -308,17 +332,36 @@ enum Gzip {
         case notGzip
         case checksumMismatch
         case sizeMismatch
+        case headerChecksumMismatch
 
         var description: String {
             switch self {
             case .notGzip: return "stream has an invalid gzip header"
             case .checksumMismatch: return "gzip stream failed its CRC-32 check"
             case .sizeMismatch: return "gzip stream failed its uncompressed-size check"
+            case .headerChecksumMismatch: return "gzip stream failed its header CRC-16 check"
             }
         }
     }
 
     static func decompress(_ input: [UInt8], outputLimit: Int = Inflate.defaultOutputLimit) throws -> [UInt8] {
+        try decompress(input, outputLimit: outputLimit, singleMember: false)
+    }
+
+    /// Backup container policy: exactly one fully consumed member, including
+    /// optional-header CRC, body CRC and size checks. Concatenated gzip members
+    /// are valid RFC 1952 files but deliberately unsupported by this entry point.
+    /// Existing index callers keep their established `decompress` behavior.
+    static func decompressSingleMember(
+        _ input: [UInt8], outputLimit: Int = Inflate.defaultOutputLimit
+    ) throws -> [UInt8] {
+        try decompress(input, outputLimit: outputLimit, singleMember: true)
+    }
+
+    private static func decompress(
+        _ input: [UInt8], outputLimit: Int, singleMember: Bool
+    ) throws -> [UInt8] {
+        if singleMember { try Task.checkCancellation() }
         guard input.count > 18, input[0] == 0x1f, input[1] == 0x8b,
               input[2] == 8 else { throw Error.notGzip }
         let flags = input[3]
@@ -333,26 +376,42 @@ enum Gzip {
             start += xlen
         }
         if flags & 0x08 != 0 { // FNAME: zero-terminated
-            while start < trailerStart, input[start] != 0 { start += 1 }
+            while start < trailerStart, input[start] != 0 {
+                if singleMember, start & 0xffff == 0 { try Task.checkCancellation() }
+                start += 1
+            }
             guard start < trailerStart else { throw Error.notGzip }
             start += 1
         }
         if flags & 0x10 != 0 { // FCOMMENT
-            while start < trailerStart, input[start] != 0 { start += 1 }
+            while start < trailerStart, input[start] != 0 {
+                if singleMember, start & 0xffff == 0 { try Task.checkCancellation() }
+                start += 1
+            }
             guard start < trailerStart else { throw Error.notGzip }
             start += 1
         }
         if flags & 0x02 != 0 { // FHCRC
             guard start <= trailerStart - 2 else { throw Error.notGzip }
+            if singleMember {
+                let expected = UInt16(input[start]) | UInt16(input[start + 1]) << 8
+                // RFC 1952: low 16 bits of CRC-32 over all preceding header bytes.
+                let actual = try crc32(input[..<start], cancellable: true)
+                guard UInt16(truncatingIfNeeded: actual) == expected else {
+                    throw Error.headerChecksumMismatch
+                }
+            }
             start += 2
         }
         guard start < trailerStart else { throw Error.notGzip }
         let body = Array(input[start..<trailerStart])
-        let decoded = try Inflate.decompress(body, outputLimit: outputLimit)
+        let decoded = try Inflate.decompress(body, outputLimit: outputLimit,
+                                             requiresCompleteInput: singleMember, cancellable: singleMember)
         let expectedCRC = littleEndianUInt32(input, at: trailerStart)
         let expectedSize = littleEndianUInt32(input, at: trailerStart + 4)
-        guard crc32(decoded) == expectedCRC else { throw Error.checksumMismatch }
+        guard try crc32(decoded, cancellable: singleMember) == expectedCRC else { throw Error.checksumMismatch }
         guard UInt32(truncatingIfNeeded: decoded.count) == expectedSize else { throw Error.sizeMismatch }
+        if singleMember { try Task.checkCancellation() }
         return decoded
     }
 
@@ -361,13 +420,18 @@ enum Gzip {
             | UInt32(bytes[offset + 2]) << 16 | UInt32(bytes[offset + 3]) << 24
     }
 
-    private static func crc32(_ bytes: [UInt8]) -> UInt32 {
-        var crc: UInt32 = 0xffff_ffff
-        for byte in bytes {
-            crc ^= UInt32(byte)
-            for _ in 0..<8 {
-                crc = (crc >> 1) ^ (crc & 1 == 0 ? 0 : 0xedb8_8320)
-            }
+    private static let crcTable: [UInt32] = (0..<256).map { value in
+        var crc = UInt32(value)
+        for _ in 0..<8 { crc = (crc >> 1) ^ (crc & 1 == 0 ? 0 : 0xedb8_8320) }
+        return crc
+    }
+
+    private static func crc32<Bytes: Sequence>(_ bytes: Bytes, cancellable: Bool) throws -> UInt32
+    where Bytes.Element == UInt8 {
+        var crc = UInt32.max
+        for (index, byte) in bytes.enumerated() {
+            if cancellable, index & 0xffff == 0 { try Task.checkCancellation() }
+            crc = (crc >> 8) ^ crcTable[Int((crc ^ UInt32(byte)) & 0xff)]
         }
         return ~crc
     }

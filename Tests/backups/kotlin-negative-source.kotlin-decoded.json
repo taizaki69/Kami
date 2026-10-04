@@ -1,0 +1,30 @@
+{
+    "manga": [
+        {
+            "sourceId": -9223372036854775808,
+            "url": "/manga/reference-negative",
+            "title": "Reference negative signed source",
+            "artist": null,
+            "author": null,
+            "description": null,
+            "genres": [],
+            "status": 0,
+            "thumbnailUrl": null,
+            "dateAdded": 0,
+            "chapters": [],
+            "categoryOrders": [],
+            "favorite": true,
+            "history": [],
+            "updateStrategy": "ALWAYS_UPDATE",
+            "favoriteModifiedAt": 0,
+            "initialized": false
+        }
+    ],
+    "categories": [],
+    "sources": [
+        {
+            "name": "Reference negative signed source",
+            "sourceId": -9223372036854775808
+        }
+    ]
+}
