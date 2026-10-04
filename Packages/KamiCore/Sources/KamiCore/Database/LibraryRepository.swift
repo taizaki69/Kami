@@ -306,21 +306,23 @@ public actor LibraryStore {
 
     private func replaceChaptersInTransaction(mangaId: Int64, with chapters: [Chapter]) throws {
         let existing = try db.query(
-            "SELECT id, url FROM chapter WHERE manga_id=?", [.int(mangaId)]
+            "SELECT id, CAST(url AS BLOB) AS url_bytes FROM chapter WHERE manga_id=?", [.int(mangaId)]
         )
-        var idsByURL: [String: Int64] = [:]
+        // SQLite uses byte identity for these keys. Swift String equality
+        // would merge distinct composed/decomposed URL spellings.
+        var idsByURL: [Data: Int64] = [:]
         for row in existing {
-            if let id = row.int64("id"), let url = row.string("url") {
-                idsByURL[url] = id
+            if let id = row.int64("id"), let url = row.bytes("url_bytes") {
+                idsByURL[Data(url)] = id
             }
         }
 
         // A source may repeat a URL. Preserve its first metadata/order and
         // never write or count the same discovery twice.
-        var acceptedURLs: Set<String> = []
-        let unique = chapters.filter { acceptedURLs.insert($0.url).inserted }
+        var acceptedURLs: Set<Data> = []
+        let unique = chapters.filter { acceptedURLs.insert(Data($0.url.utf8)).inserted }
         for (order, ch) in unique.enumerated() {
-            if let id = idsByURL[ch.url] {
+            if let id = idsByURL[Data(ch.url.utf8)] {
                 try db.run("""
                     UPDATE chapter SET source_order=?, name=?, scanlator=?, number=?, date_upload=?, is_current=1
                     WHERE id=?
@@ -338,11 +340,11 @@ public actor LibraryStore {
             }
         }
 
-        let incomingURLs = Set(unique.map(\.url))
+        let incomingURLs = Set(unique.map { Data($0.url.utf8) })
         for row in existing {
             guard let id = row.int64("id"),
-                  let url = row.string("url"),
-                  !incomingURLs.contains(url) else { continue }
+                  let url = row.bytes("url_bytes"),
+                  !incomingURLs.contains(Data(url)) else { continue }
             // Keep reading state and history if the URL later reappears.
             try db.run("UPDATE chapter SET is_current=0 WHERE id=?", [.int(id)])
         }
@@ -438,10 +440,13 @@ public actor LibraryStore {
         mangaId: Int64, urls: [String], announce: Bool
     ) throws -> (newChapters: Int, establishedBaseline: Bool) {
         let baseline = try hasChapterBaseline(mangaId: mangaId)
-        let known = Set(try db.query("SELECT url FROM known_chapter WHERE manga_id=?", [.int(mangaId)])
-            .compactMap { $0.string("url") })
-        var seen: Set<String> = []
-        let unseen = urls.filter { seen.insert($0).inserted && !known.contains($0) }
+        let known = Set(try db.query("SELECT CAST(url AS BLOB) AS url_bytes FROM known_chapter WHERE manga_id=?", [.int(mangaId)])
+            .compactMap { $0.bytes("url_bytes").map { Data($0) } })
+        var seen: Set<Data> = []
+        let unseen = urls.filter {
+            let key = Data($0.utf8)
+            return seen.insert(key).inserted && !known.contains(key)
+        }
         let now = Int64(Date().timeIntervalSince1970)
         let shouldAnnounce = baseline && announce
         for url in unseen {
@@ -534,8 +539,8 @@ public actor LibraryStore {
                 throw LibraryUpdatePersistenceError.sourceIdentityMismatch
             }
             try verifySourceUpdateConfiguration(sourceID: manga.sourceId, expectedConfiguration: expectedConfiguration)
-            var seen: Set<String> = []
-            let unique = chapters.filter { seen.insert($0.url).inserted }
+            var seen: Set<Data> = []
+            let unique = chapters.filter { seen.insert(Data($0.url.utf8)).inserted }
             let discovery = try recordChapterDiscoveries(mangaId: mangaID, urls: unique.map(\.url), announce: true)
             _ = try persistSourceUpdateInTransaction(manga: manga, chapters: unique)
             let newCount = discovery.newChapters

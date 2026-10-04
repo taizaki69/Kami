@@ -33,6 +33,13 @@ or missing row rejects the operation. URL comparisons preserve UTF-8 bytes;
 canonically equivalent Unicode spellings are not interchangeable. The old
 public ID-only page/history/read mutation APIs have been removed.
 
+Source chapter refreshes use the same exact URL identity for deduplication,
+existing-row lookup and disappearance. Canonically equivalent Unicode paths
+retain different chapter IDs, progress and history; only the missing exact row
+has its pending download paused. Reappearance retains its prior state. Discovery
+keys and Updates pagination IDs preserve the distinction too. See the
+[chapter identity regression record](VERIFICATION-2026-10-04-CHAPTER-IDENTITY.md).
+
 `validateReadingTarget` returns current chapter state without renewing a
 target. `refreshReadingSnapshot(validating:)` may refresh lists only after
 validating the original target. Explicit initial opening uses

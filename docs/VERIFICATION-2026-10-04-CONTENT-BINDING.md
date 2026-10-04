@@ -34,9 +34,17 @@ invocar proveedores inyectados. Dos caminos de guardado también rechazan una
 URL de manga con composición Unicode distinta para el mismo ID físico.
 
 El parse de SwiftUI y `git diff --check` pasan. Los registros distinguen estas
-comprobaciones locales de la compilación Apple. El resultado del commit publicado y sus workflows queda en
-el PR de implementación. Los checkpoints y logs locales están en
+comprobaciones locales de la compilación Apple. Los checkpoints y logs locales están en
 `.git/checkpoints/20261004-foolslide-content-binding/`.
+
+El [PR #17](https://github.com/taizaki69/Kami/pull/17) quedó listo y sin fusionar
+en `b15344da383a33b6a2d56d83fe2ed0f46d4a0877`.
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/37238383693) pasó
+371 Compat + 291 Core/SQLite en Linux y 371 Compat + 294 Core en macOS.
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/37238383701) compiló
+simulador y dispositivo; [IPA Package](https://github.com/taizaki69/Kami/actions/runs/37238383716)
+generó el IPA sin firmar. El merge de CI `d29acd5` tiene el mismo árbol
+`9fcdb9741557cdc5de89945c17f701d7d2c1e17d` que el head publicado.
 
 No se habilitan restore, nuevas versiones de APK ni sitios reales. Faltan
 preview inmutable, fusión atómica y las barreras generales de operaciones y

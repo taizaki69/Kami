@@ -4,7 +4,21 @@ Last updated: 2026-10-04 (America/Lima)
 
 ## Canonical continuation — 2026-10-04
 
-The active continuation is `assistant/foolslide-content-binding-20261004`,
+The active continuation is `assistant/exact-chapter-url-identity-20261004`,
+based on `b15344da383a33b6a2d56d83fe2ed0f46d4a0877` from
+[PR #17](https://github.com/taizaki69/Kami/pull/17). That checkpoint is ready
+and unmerged: Linux 371 Compat + 291 Core/SQLite, macOS 371 Compat + 294 Core,
+simulator/device and unsigned IPA all passed. Its CI merge tree matches the
+published head. Evidence is in
+`.git/checkpoints/20261004-foolslide-content-binding/published-ci-evidence.json`.
+The current fix preserves exact chapter URL bytes during replacement and
+discovery reconciliation, including Updates IDs/cursors. Five regressions
+reproduce the previous failures and now pass; full local Core/SQLite passes
+296 tests and portable Core passes 96. See the
+[chapter identity verification](docs/VERIFICATION-2026-10-04-CHAPTER-IDENTITY.md).
+Shared restore barriers, immutable preview and atomic merge remain pending.
+
+The content-binding continuation was `assistant/foolslide-content-binding-20261004`,
 based on `b122ee94870b7b457739b5226b73de2943d24b1c` from
 [PR #16](https://github.com/taizaki69/Kami/pull/16). That reader checkpoint is
 ready and unmerged; its exact head passed Linux 371 Compat + 270 Core/SQLite,
@@ -16,8 +30,8 @@ settings/binding CAS and execution checks. See
 [content binding](docs/SOURCE_CONTENT_BINDING.md) and its
 [verification record](docs/VERIFICATION-2026-10-04-CONTENT-BINDING.md).
 Final local checks pass 371 Compat, 291 Core/SQLite and 95 portable Core tests,
-plus the SwiftUI syntax parse and diff whitespace check. The implementation PR
-will record exact-head Apple workflow results after publication.
+plus the SwiftUI syntax parse and diff whitespace check. PR #17 records the
+successful exact-head Apple workflows.
 This does not enable restore or replace the outstanding shared operation barriers.
 
 The reader checkpoint was based on `7bcbe7cb94c80527dd371a746fe591308f91aa49`
