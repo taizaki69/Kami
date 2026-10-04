@@ -13,6 +13,17 @@ can be created, renamed, reordered and deleted, assigned individually or in
 bulk, and combined with library search. Deleting a category preserves manga,
 chapter progress and history; bulk changes preserve untouched memberships.
 
+Updates can check the saved library on demand, report progress and per-manga
+failures or skipped sources, and cancel while keeping completed results.
+The first successful chapter list establishes a baseline; later discoveries
+appear in a persistent, paginated feed grouped by day and manga. Missing
+chapters retain their reading state and history if they return. History and
+Updates open the current saved chapter at its stored reading position.
+Checks use enabled source registrations, with at most three sources in
+parallel and one manga at a time per source. They do not run automatically in
+the background. Native MangaDex requests share the bounded, cancellable HTTP
+transport and reject HTTP failures and incomplete chapter catalogs.
+
 Extension installation authenticates the exact APK hash, package/version,
 signer and declared source IDs. Repository trust or explicit certificate
 confirmation is persisted and checked again at startup. The source factory
@@ -69,8 +80,8 @@ conformance fixtures. Historical paths under `measurement/` are retained; the
 manifest's `role` field determines measurement membership. Source acquisition
 provenance, fixture hashes and separate third-party notices are preserved.
 
-Downloads, update scanning, migration and backup UI, further source settings, Cloudflare
-cookie bridging, iPad spreads and physical-device performance verification
+Downloads, scheduled background updates, migration and backup UI, further
+source settings, Cloudflare cookie bridging, iPad spreads and physical-device performance verification
 remain on the [task tracker](TODO.md). The broader daily-reader and extension
 compatibility objective is still in progress.
 

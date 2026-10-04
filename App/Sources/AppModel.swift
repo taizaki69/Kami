@@ -36,6 +36,7 @@ final class AppModel: ObservableObject {
     let installationService: ExtensionInstallationService
     let sourceFactory: ExtensionSourceFactory
     let preferencesService: ExtensionPreferencesService
+    let libraryUpdateService: LibraryUpdateService
 
     @Published private(set) var librarySnapshot = LibrarySnapshot()
     @Published private(set) var libraryError: String?
@@ -48,6 +49,20 @@ final class AppModel: ObservableObject {
     @Published private(set) var extensionRepositories: [ExtensionRepositoryState] = []
     @Published private(set) var extensionConfigurations: [String: ExtensionConfigurationSnapshot] = [:]
     @Published private(set) var extensionErrors: [String: String] = [:]
+    @Published private(set) var libraryUpdatesSnapshot: LibraryUpdatesSnapshot?
+    @Published private(set) var libraryUpdatesLoading = false
+    @Published private(set) var libraryUpdatesError: String?
+    @Published private(set) var libraryUpdateGroups: [LibraryUpdateChapterGroup] = []
+    @Published private(set) var libraryUpdatesHasMore = false
+    @Published private(set) var libraryUpdatesLoadingMore = false
+    @Published private(set) var libraryUpdatesPaginationError: String?
+    @Published private(set) var libraryUpdateProgress: LibraryUpdateProgress?
+    @Published private(set) var libraryUpdateIsRunning = false
+    @Published private(set) var libraryUpdateIsCancelling = false
+    private var libraryUpdatesReloadGeneration: UInt64 = 0
+    private var libraryUpdateTask: Task<Void, Never>?
+    private var libraryUpdateDiscoveries: [LibraryChapterDiscovery] = []
+    private var libraryUpdatesNextCursor: LibraryChapterDiscoveryCursor?
     private var libraryReloadGeneration: UInt64 = 0
     private var extensionsReloadGeneration: UInt64 = 0
     private struct SourceExecutionState {
@@ -83,6 +98,7 @@ final class AppModel: ObservableObject {
         )
         self.sourceFactory = ExtensionSourceFactory()
         self.preferencesService = ExtensionPreferencesService(store: store)
+        self.libraryUpdateService = LibraryUpdateService(store: store)
         reloadLibrary()
         Task { [weak self] in
             await self?.restoreInstalledExtensions()
@@ -146,6 +162,120 @@ final class AppModel: ObservableObject {
     func libraryErrorMessage(for error: Error) -> String {
         (error as? LibraryCategoryError)?.errorDescription
             ?? "Your changes could not be saved. Please try again."
+    }
+
+    /// Reading the ledger may recover an interrupted run, but never starts
+    /// source requests. The service coalesces this one-time local recovery.
+    func refreshLibraryUpdates() async {
+        libraryUpdatesReloadGeneration &+= 1
+        let generation = libraryUpdatesReloadGeneration
+        libraryUpdatesLoading = true
+        libraryUpdatesLoadingMore = false
+        defer {
+            if generation == libraryUpdatesReloadGeneration { libraryUpdatesLoading = false }
+        }
+        do {
+            _ = try await libraryUpdateService.prepare()
+            let snapshot = try await store.libraryUpdatesSnapshot()
+            guard !Task.isCancelled, generation == libraryUpdatesReloadGeneration else { return }
+            libraryUpdatesSnapshot = snapshot
+            libraryUpdateDiscoveries = snapshot.discoveries
+            libraryUpdateGroups = LibraryUpdateChapterGroup.group(snapshot.discoveries)
+            libraryUpdatesHasMore = snapshot.hasMore
+            libraryUpdatesNextCursor = snapshot.nextCursor
+            libraryUpdatesPaginationError = nil
+            libraryUpdatesError = nil
+        } catch {
+            guard !Task.isCancelled, generation == libraryUpdatesReloadGeneration else { return }
+            libraryUpdatesError = "Saved updates could not be loaded. Please try again."
+        }
+    }
+
+    func checkLibraryForUpdates() async {
+        guard libraryUpdateTask == nil else { return }
+        libraryUpdateIsRunning = true
+        libraryUpdateIsCancelling = false
+        libraryUpdateProgress = nil
+        libraryUpdatesError = nil
+        let task = Task { [weak self] in
+            guard let self else { return }
+            var scanError: String?
+            do {
+                // Capture the facade and its configuration token together on
+                // MainActor, before the scanner captures its DB targets.
+                let contexts = self.libraryUpdateSourceContexts()
+                let run = try await self.libraryUpdateService.start(sources: contexts)
+                if self.libraryUpdateIsCancelling { await self.libraryUpdateService.cancel() }
+                for await progress in run.updates {
+                    guard progress.scanID == run.scanID else { continue }
+                    self.libraryUpdateProgress = progress
+                    if progress.phase == .cancelling { self.libraryUpdateIsCancelling = true }
+                    if let error = progress.error { scanError = error.errorDescription }
+                }
+            } catch {
+                scanError = (error as? LibraryUpdateServiceError)?.errorDescription
+                    ?? "The library check could not finish. Saved updates have been kept."
+            }
+            // Keep the local run locked until cooperative cancellation has
+            // drained and the stream closes. Navigation never cancels it.
+            await self.refreshLibraryUpdates()
+            await self.refreshLibrary()
+            if let scanError { self.libraryUpdatesError = scanError }
+            self.libraryUpdateIsRunning = false
+            self.libraryUpdateIsCancelling = false
+            self.libraryUpdateTask = nil
+        }
+        libraryUpdateTask = task
+        await task.value
+    }
+
+    func loadMoreLibraryUpdates() async {
+        guard !libraryUpdatesLoading, !libraryUpdatesLoadingMore, libraryUpdatesHasMore else { return }
+        guard let cursor = libraryUpdatesNextCursor else {
+            libraryUpdatesPaginationError = "More saved updates could not be loaded. Reload the list and try again."
+            return
+        }
+        let generation = libraryUpdatesReloadGeneration
+        libraryUpdatesLoadingMore = true
+        defer {
+            if generation == libraryUpdatesReloadGeneration { libraryUpdatesLoadingMore = false }
+        }
+        do {
+            let page = try await store.libraryUpdatesSnapshot(after: cursor)
+            guard !Task.isCancelled, generation == libraryUpdatesReloadGeneration else { return }
+            var seen = Set(libraryUpdateDiscoveries.map(\.id))
+            libraryUpdateDiscoveries += page.discoveries.filter { seen.insert($0.id).inserted }
+            libraryUpdateGroups = LibraryUpdateChapterGroup.group(libraryUpdateDiscoveries)
+            libraryUpdatesHasMore = page.hasMore
+            libraryUpdatesNextCursor = page.nextCursor
+            libraryUpdatesPaginationError = nil
+        } catch {
+            guard !Task.isCancelled, generation == libraryUpdatesReloadGeneration else { return }
+            libraryUpdatesPaginationError = "More saved updates could not be loaded. Please try again."
+        }
+    }
+
+    func cancelLibraryUpdate() {
+        guard libraryUpdateIsRunning, !libraryUpdateIsCancelling else { return }
+        libraryUpdateIsCancelling = true
+        Task { await libraryUpdateService.cancel() }
+    }
+
+    private func libraryUpdateSourceContexts() -> [Int64: LibraryUpdateSourceContext] {
+        var contexts: [Int64: LibraryUpdateSourceContext] = [:]
+        for source in sources {
+            let revision = sourceRevision(for: source.id)
+            do {
+                contexts[source.id] = .available(
+                    source: source,
+                    expectedConfiguration: try sourceExecutionConfiguration(id: source.id, revision: revision)
+                )
+            } catch {
+                // A missing downloaded token must not become native nil.
+                contexts[source.id] = .configurationUnavailable
+            }
+        }
+        return contexts
     }
 
     func source(id: Int64) -> (any KamiSource)? {

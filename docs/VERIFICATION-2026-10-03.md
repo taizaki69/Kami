@@ -295,3 +295,75 @@ no es typecheck Apple ni una prueba de interacción.
 El cuerpo del PR de esta rama registra el SHA y los workflows que verifican
 la implementación publicada; la compilación o el IPA no prueban una sesión
 real de lectura, rendimiento físico, sitios vivos ni compatibilidad general.
+
+La publicación de preferencias se verificó en el commit exacto
+`0ae9c4ded6e5dd01f577798122789827ec2e3842` del
+[PR #11](https://github.com/taizaki69/Kami/pull/11):
+
+- [Swift CI 37167605576](https://github.com/taizaki69/Kami/actions/runs/37167605576):
+  Linux y macOS pasan 332 pruebas MihonCompatKit y 79 Core con SQLite cada
+  uno; ambos compilan el CLI optimizado.
+- [iOS Build 37167605433](https://github.com/taizaki69/Kami/actions/runs/37167605433):
+  simulador y dispositivo genérico sin firma compilan correctamente.
+- [IPA Package 37167605408](https://github.com/taizaki69/Kami/actions/runs/37167605408):
+  artefacto unsigned `11290686076`, 3,806,697 bytes, digest del archivo
+  `sha256:5553c69529f1a283e2411924f344856f46263429bb4a732ec19694873d08d7ab`.
+
+Estos resultados corresponden al checkpoint de preferencias, anterior a las
+actualizaciones de biblioteca descritas a continuación.
+
+## Actualizaciones manuales e historial
+
+`assistant/library-updates-20261003` parte de `0ae9c4d`. La migración 4 conserva
+IDs, lectura, marcadores e historial de capítulos que ya no aparecen en una
+respuesta. Sólo los capítulos actuales se muestran en el catálogo. Un ledger
+por manga y URL impide anunciar de nuevo capítulos que desaparecen y vuelven.
+La primera consulta exitosa, incluso vacía, establece una baseline silenciosa;
+las siguientes consultas desde Detalle o desde el escáner registran novedades
+si el manga pertenece a la biblioteca. Las importaciones directas no generan
+notificaciones históricas.
+
+Cada revisión captura los mangas de la biblioteca y la revisión de su
+pertenencia. Retirar y volver a añadir un manga invalida el resultado anterior.
+Metadata, capítulos, descubrimientos y resultado del manga se guardan en una
+transacción que vuelve a comprobar la configuración autenticada de la fuente.
+El escáner limita la concurrencia a tres fuentes distintas y serializa los
+mangas de cada fuente. Una fuente ausente o deshabilitada no se activa.
+`ONLY_FETCH_ONCE` se respeta después de la primera baseline exitosa; las
+actualizaciones explícitas de Detalle siguen disponibles.
+
+Cancelar invalida el ID durable de la revisión, conserva los resultados
+confirmados y descarta callbacks tardíos. Una segunda revisión espera a que
+termine el trabajo cancelado. La recuperación local marca las revisiones
+interrumpidas sin empezar peticiones. Los motivos persistidos son valores
+finitos; no guardan respuestas, URLs ni textos de errores del transporte.
+El feed usa cursor estable y un botón para cargar más, en lugar de truncar
+silenciosamente después de 500 capítulos. Historial y Actualizaciones vuelven
+a consultar el capítulo y sus vecinos al abrirlo para recuperar el progreso
+actual. Leer las listas no marca capítulos como leídos.
+
+MangaDex nativo usa el transporte acotado y cancelable compartido. Los errores
+HTTP y los agregados de capítulos incompletos fallan antes de guardar un
+catálogo; una respuesta vacía explícita sigue siendo válida. Se comprueban
+también respuestas tardías no cooperativas, el presupuesto de 16 MiB y los
+contadores de paginación. No se consultó MangaDex ni ningún sitio de manga
+para estas pruebas.
+
+La evidencia de esta fase se guarda en
+`.git/checkpoints/20261003-library-updates/`. Swift 6.3.3 pasa las suites
+integradas: 332/332 MihonCompatKit, 121/121 Core con SQLite real y 45/45 Core
+portable sin ese módulo. Dentro de las 121 están las 20 pruebas del ledger,
+13 de coordinación, ocho de MangaDex y una de persistencia de la estrategia
+de actualización. La primera ejecución del filtro de coordinación detectó
+una precondición errónea en su fixture: `replaceChapters` ya había establecido
+la baseline que el test esperaba atribuir al escáner. Se corrigió la fixture
+para empezar sin carga previa; el filtro final y la suite integrada pasan.
+
+Dos regresiones adicionales de coordinación cubren un error de commit SQLite,
+que debe informarse como almacenamiento y no como fallo del sitio, y dos
+escrituras terminales fallidas, tras las cuales otra revisión explícita puede
+recuperar el registro como interrumpido y volver a empezar. El parse de los
+14 archivos Swift de App y `git diff --check` pasan. Ese parse no es typecheck
+Apple. El cuerpo del PR registra el commit publicado y sus workflows Apple;
+los resultados de PR #11 no se atribuyen a estos cambios. Esta fase conserva
+los perfiles, APK y baseline de compatibilidad anteriores.
