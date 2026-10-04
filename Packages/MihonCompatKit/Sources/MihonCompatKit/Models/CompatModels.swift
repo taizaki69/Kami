@@ -318,8 +318,10 @@ public struct InterpretedExtensionPreferences: Sendable, Equatable {
         case stringValueTooLarge
     }
 
-    let strings: [String: String]
-    let booleans: [String: Bool]
+    /// Immutable, size-validated values; each exact profile separately checks
+    /// which keys and values it can execute.
+    public let strings: [String: String]
+    public let booleans: [String: Bool]
 
     public init() {
         strings = [:]

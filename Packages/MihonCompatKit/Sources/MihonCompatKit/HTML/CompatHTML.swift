@@ -16,6 +16,7 @@ public struct CompatHTMLPolicy: Sendable, Equatable {
     public let maximumSelectorResults: Int
     public let maximumSelectorWork: Int
     public let maximumExtractedStringBytes: Int
+    public let maximumMutationBytes: Int
 
     public init(
         maximumInputBytes: Int = 8 * 1024 * 1024,
@@ -26,7 +27,8 @@ public struct CompatHTMLPolicy: Sendable, Equatable {
         maximumSelectorBytes: Int = 2_048,
         maximumSelectorResults: Int = 50_000,
         maximumSelectorWork: Int = 50_000_000,
-        maximumExtractedStringBytes: Int = 1024 * 1024
+        maximumExtractedStringBytes: Int = 1024 * 1024,
+        maximumMutationBytes: Int = 8 * 1024 * 1024
     ) {
         self.maximumInputBytes = max(1, min(maximumInputBytes, 32 * 1024 * 1024))
         self.maximumNodes = max(1, min(maximumNodes, 500_000))
@@ -40,6 +42,7 @@ public struct CompatHTMLPolicy: Sendable, Equatable {
             1,
             min(maximumExtractedStringBytes, 16 * 1024 * 1024)
         )
+        self.maximumMutationBytes = max(1, min(maximumMutationBytes, 32 * 1024 * 1024))
     }
 }
 
@@ -55,6 +58,7 @@ public enum CompatHTMLError: Swift.Error, Sendable, Equatable, CustomStringConve
     case tooManySelectorResults(limit: Int)
     case selectorBudgetExceeded(limit: Int)
     case extractedStringTooLarge(limit: Int)
+    case mutationBudgetExceeded(limit: Int)
     case malformedHTML
 
     public var description: String {
@@ -74,6 +78,8 @@ public enum CompatHTMLError: Swift.Error, Sendable, Equatable, CustomStringConve
             return "CSS selector work exceeds \(limit) units"
         case let .extractedStringTooLarge(limit):
             return "HTML extracted string exceeds \(limit) bytes"
+        case let .mutationBudgetExceeded(limit):
+            return "HTML mutation work exceeds \(limit) bytes"
         case .malformedHTML: return "HTML parsing failed"
         }
     }
@@ -90,14 +96,74 @@ final class CompatHTMLContext {
 
     let document: SwiftSoup.Document
     let policy: CompatHTMLPolicy
-    let nodeCount: Int
+    private(set) var nodeCount: Int
+    private var attributeCount: Int
     private var remainingSelectorWork: Int
+    private var remainingMutationBytes: Int
 
-    init(document: SwiftSoup.Document, policy: CompatHTMLPolicy, nodeCount: Int) {
+    init(
+        document: SwiftSoup.Document,
+        policy: CompatHTMLPolicy,
+        nodeCount: Int,
+        attributeCount: Int
+    ) {
         self.document = document
         self.policy = policy
         self.nodeCount = nodeCount
+        self.attributeCount = attributeCount
         self.remainingSelectorWork = policy.maximumSelectorWork
+        self.remainingMutationBytes = policy.maximumMutationBytes
+    }
+
+    /// Detached elements still retain their document context in the VM. Charge
+    /// each allocation to that context so createElement cannot bypass the DOM
+    /// limit or lower the cost of subsequent selectors.
+    func createElement(_ tagName: String) throws -> SwiftSoup.Element {
+        guard nodeCount < policy.maximumNodes else {
+            throw CompatHTMLError.tooManyNodes(limit: policy.maximumNodes)
+        }
+        try requireMutationCapacity(tagName.utf8.count)
+        let element = try document.createElement(tagName)
+        nodeCount += 1
+        remainingMutationBytes -= tagName.utf8.count
+        return element
+    }
+
+    func setAttribute(_ element: SwiftSoup.Element, key: String, value: String) throws {
+        _ = try boundedString(value)
+        let attributes = element.getAttributes()
+        let isExisting = attributes?.hasKeyIgnoreCase(key: key) == true
+        if !isExisting {
+            guard (attributes?.size() ?? 0) < policy.maximumAttributesPerElement else {
+                throw CompatHTMLError.tooManyAttributesOnElement(
+                    limit: policy.maximumAttributesPerElement
+                )
+            }
+            guard attributeCount < policy.maximumAttributes else {
+                throw CompatHTMLError.tooManyAttributes(limit: policy.maximumAttributes)
+            }
+        }
+        let bytes = key.utf8.count.addingReportingOverflow(value.utf8.count)
+        guard !bytes.overflow else {
+            throw CompatHTMLError.mutationBudgetExceeded(limit: policy.maximumMutationBytes)
+        }
+        try requireMutationCapacity(bytes.partialValue)
+        // Jsoup replaces an existing attribute without regard to key casing.
+        // SwiftSoup's put is case-sensitive, so use the stored key when present.
+        let storedKey = attributes?.asList().first {
+            $0.getKey().caseInsensitiveCompare(key) == .orderedSame
+        }?.getKey() ?? key
+        _ = try element.attr(storedKey, value)
+        if !isExisting { attributeCount += 1 }
+        // Replacements also copy strings and consume work; they cannot reset
+        // this cumulative per-document budget.
+        remainingMutationBytes -= bytes.partialValue
+    }
+
+    private func requireMutationCapacity(_ bytes: Int) throws {
+        guard bytes >= 0, bytes <= remainingMutationBytes else {
+            throw CompatHTMLError.mutationBudgetExceeded(limit: policy.maximumMutationBytes)
+        }
     }
 
     func select(_ root: SwiftSoup.Element, query: String) throws -> [SwiftSoup.Element] {
@@ -326,6 +392,11 @@ struct CompatHTMLElementBox {
     let element: SwiftSoup.Element
 }
 
+struct CompatHTMLNodeBox {
+    let context: CompatHTMLContext
+    let node: SwiftSoup.Node
+}
+
 enum CompatHTMLParser {
     static func parse(
         _ html: String,
@@ -401,6 +472,11 @@ enum CompatHTMLParser {
             }
         }
 
-        return CompatHTMLContext(document: document, policy: policy, nodeCount: nodeCount)
+        return CompatHTMLContext(
+            document: document,
+            policy: policy,
+            nodeCount: nodeCount,
+            attributeCount: attributeCount
+        )
     }
 }

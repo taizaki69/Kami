@@ -1,6 +1,66 @@
 # Extension Compatibility Matrix
 
-**Last updated:** 2026-09-18
+**Current continuation: 2026-10-03.** Current test and CI results belong in
+[VERIFICATION-2026-10-03.md](VERIFICATION-2026-10-03.md). The historical matrix
+below records the earlier checkpoint and must not be used for current totals.
+
+## Current exact catalog and limits
+
+| Exact current lib 1.6 profile | Fixture version | Measured operation scope |
+|---|---|---|
+| BatCave | 1.6.9 | Metadata, popular/latest/text search, details/chapters/pages |
+| Kawii Manga | 1.6.1 | Core operations through stable wrappers, JSON and custom headers |
+| MangaMelon | 1.6.1 | Core operations, static filters, generated JSON and form encoding |
+| Baozi Manhua | 1.6.29 | Core operations, scalar preferences, image request and bounded reader interceptors |
+| TuttoAnimeManga | 1.6.10 | Core operations, empty filters, inherited image headers |
+| Mangas-Origines.fr | 1.6.58 | Core operations, seven static filters and page-URL image requests |
+| Komikcast / VoraToon | 1.6.83 | Core operations, static filters and bounded dynamic genre refresh |
+| Yomu Comics / SSSCanlator | 1.6.59 | Core operations, dynamic genres, RSC pages and URL-shaped search |
+| EternalMangas | 1.6.28 | Metadata/filters and real-APK popular/latest/search/details/chapters/pages fixtures |
+| DocTruyen3Q | 1.6.38 | Core operations, bounded genre refresh, filtered search and page deduplication |
+| FoolSlide Customizable | 1.6.6 | Configured HTTPS source, strict real-APK operations and page-URL image projection |
+
+These are exact-byte profiles, not family-wide compatibility claims. Full
+hashes, package/version identities and fixture provenance remain in
+`Tests/corpus/manifest.json`; executable identities are independently pinned in
+`PinnedInterpretedSource.swift`. A manifest role does not create catalog
+membership or admission authority. The factory authenticates a downloaded APK
+and validates its exact declared source-ID set before and after construction.
+
+FoolSlide's exact SHA-256 is
+`d45b6d44760cb0465cc7be317d6d1b899c778bb9d7c02d03fb6c2c141dfa137e`, its signer is
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, and its source
+ID is `6351052922295965587`. Its default URL is a loopback placeholder. The
+factory requires an explicitly configured HTTPS override; raw default
+construction is only a metadata/test seam. Production preference UI and
+persistence remain pending. No arbitrary-host live availability, Cloudflare
+handling or source-executed image transform is claimed. Search page two repeats
+the same POST as page one in this exact APK; the tests record that behavior and
+do not claim distinct paginated search results.
+
+## Current corpus measurement
+
+The corpus remains 27 hash-locked artifacts and 19 current lib 1.6 APKs. Its
+roles are thirteen execution fixtures (eleven current profiles plus two legacy
+constructor fixtures), eight measurement-only fixtures and six AOSP signature
+conformance fixtures. EternalMangas and DocTruyen3Q already had execution tests
+before this continuation; correcting their roles repairs bookkeeping.
+
+Historical paths under `measurement/` are retained. Use manifest roles:
+
+```bash
+./scripts/linux-dev audit gaps Tests/corpus --role measurement
+```
+
+The remaining structural candidates are Hayalistic, MangaPandaOnl, PixivComic
+and ReadManga. Komga, MangaPlus, NHentai.xxx and XCOMIC retain structural
+wrapper blockers. The dated verification record reports the final deterministic
+audit and explains the inherited host-registration delta separately from role
+changes. Static gaps do not measure runtime coverage or authorize execution.
+
+## Historical matrix — 2026-09-18
+
+Everything below retains its original checkpoint scope, counts and evidence.
 
 **Corpus:** Keiyoushi release assets vendored from recorded release URLs and
 pinned by SHA-256 via `scripts/fetch_corpus.sh`, then verified against

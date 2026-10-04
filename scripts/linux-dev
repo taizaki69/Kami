@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+SWIFT_BIN="${KAMI_SWIFT:-$HOME/.local/share/kami/toolchains/swift-6.3.3-RELEASE-ubuntu24.04/usr/bin/swift}"
+if [[ ! -x "$SWIFT_BIN" ]]; then
+  SWIFT_BIN="$(command -v swift || true)"
+fi
+if [[ -z "$SWIFT_BIN" ]]; then
+  echo 'Swift missing. See README.md or set KAMI_SWIFT to the Swift executable.' >&2
+  exit 1
+fi
+export PATH="$(dirname "$SWIFT_BIN"):$PATH"
+cd "$ROOT"
+case "${1:-test}" in
+  version) exec "$SWIFT_BIN" --version ;;
+  test)
+    result=0
+    "$SWIFT_BIN" test --package-path Packages/MihonCompatKit --jobs "${KAMI_JOBS:-6}" || result=$?
+    "$SWIFT_BIN" test --package-path Packages/KamiCore --jobs "${KAMI_JOBS:-6}" || result=$?
+    exit "$result" ;;
+  compat) shift; exec "$SWIFT_BIN" test --package-path Packages/MihonCompatKit --jobs "${KAMI_JOBS:-6}" "$@" ;;
+  core) shift; exec "$SWIFT_BIN" test --package-path Packages/KamiCore --jobs "${KAMI_JOBS:-6}" "$@" ;;
+  audit) shift; exec "$SWIFT_BIN" run --package-path Packages/MihonCompatKit --jobs "${KAMI_JOBS:-6}" compat-audit "$@" ;;
+  *) echo 'Usage: scripts/linux-dev {version|test|compat [args]|core [args]|audit [args]}' >&2; exit 2 ;;
+esac

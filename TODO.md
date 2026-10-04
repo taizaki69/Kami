@@ -2,6 +2,28 @@
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocked
 
+
+## Active continuation — 2026-10-03
+
+The full native-reader and compatibility objective remains active. The current
+implementation continues the preserved FoolSlide work, adds strict source and
+host regressions, category management, manifest-role measurement and Linux CI.
+See [verification](docs/VERIFICATION-2026-10-03.md) for actual test/build evidence.
+Completed items below retain some historical checkpoint counts; those counts
+must not be used as evidence for the current commit.
+
+- [~] Finish and verify exact FoolSlide Customizable 1.6.6 promotion, including
+      configured factory admission, fail-before-transport boundaries, bounded
+      mutable HTML and the reached date-builder semantics.
+- [~] Verify category creation/order/assignment/filtering end to end, including
+      SQLite persistence and Apple compilation of the new UI.
+- [x] Reconcile execution/measurement roles for EternalMangas, DocTruyen3Q and
+      FoolSlide without changing their APK hashes or granting new trust.
+- [ ] Provide production preference UI/persistence; FoolSlide requires an
+      explicit HTTPS override and unconfigured app installation stays disabled.
+- [ ] Continue downloads and library update scanning, then migration/backup UI,
+      without treating a passing compatibility suite as completion of the app.
+
 ## P0 — Extension research & foundation
 
 - [x] Verify current ecosystem: tachiyomix 1.6/1.7 API, manifest keys, index
@@ -256,13 +278,15 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 
 - [ ] Downloads manager (queue/pause/resume/persist across restarts)
 - [ ] Library update scanner + grouping/notification summary
-- [ ] Categories UI + management
+- [~] Categories UI + management — implementation and regressions in progress;
+      see the current continuation above
 - [ ] Migration flow (multi-source search + chapter matching)
 - [ ] Backup/restore UI + import report
 - [x] Reader foundation: persistent LTR/RTL/webtoon modes, direction-aware tap
       zones, paged zoom/pan, settings, keep-awake, bounded header-aware image
       loading/prefetch, off-main downsampling, retry, and progress/history
-- [ ] Reader completion: previous/next chapter flow, configurable tap actions,
+- [x] Previous/next chapter flow (implemented before this continuation).
+- [ ] Reader completion: configurable tap actions,
       fit/crop/brightness controls, cookie continuity for page-URL paths without
       a source executor, memory-pressure purging, and download/disk-cache
       integration

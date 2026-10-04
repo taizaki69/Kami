@@ -2,6 +2,7 @@ import SwiftUI
 import MihonCompatKit
 import KamiCore
 
+@MainActor
 struct MangaDetailView: View {
     @EnvironmentObject var model: AppModel
 
@@ -14,6 +15,9 @@ struct MangaDetailView: View {
     @State private var loading = true
     @State private var errorText: String?
     @State private var storedId: Int64?
+    @State private var libraryBusy = false
+    @State private var libraryError: String?
+    @State private var categoryAssignment: CategoryAssignmentRequest?
 
     var body: some View {
         List {
@@ -39,6 +43,18 @@ struct MangaDetailView: View {
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent)
+                            .disabled(libraryBusy || storedId == nil)
+                            if inLibrary, let id = storedId {
+                                Button {
+                                    categoryAssignment = CategoryAssignmentRequest(mangaIDs: [id],
+                                                                                   title: detail.title)
+                                } label: {
+                                    Label(categoryLabel(mangaId: id), systemImage: "folder")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(libraryBusy)
+                            }
                         }
                     }
                     if let description = detail.description {
@@ -100,6 +116,17 @@ struct MangaDetailView: View {
         .navigationTitle(manga.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        .sheet(item: $categoryAssignment) { request in
+            CategoryAssignmentSheet(mangaIDs: request.mangaIDs, title: request.title)
+        }
+        .alert("Could not update library", isPresented: Binding(
+            get: { libraryError != nil },
+            set: { if !$0 { libraryError = nil } }
+        )) {
+            Button("OK", role: .cancel) { libraryError = nil }
+        } message: {
+            Text(libraryError ?? "")
+        }
     }
 
     private var statusText: String {
@@ -157,12 +184,28 @@ struct MangaDetailView: View {
     }
 
     private func toggleLibrary() {
-        guard let id = storedId else { return }
+        guard let id = storedId, !libraryBusy else { return }
+        let adding = !inLibrary
+        libraryBusy = true
         Task {
-            try? await model.store.setLibrary(!inLibrary, mangaId: id)
-            inLibrary.toggle()
-            model.reloadLibrary()
+            defer { libraryBusy = false }
+            do {
+                try await model.setLibrary(adding, mangaId: id)
+                inLibrary = adding
+                if adding, !model.categories.isEmpty {
+                    categoryAssignment = CategoryAssignmentRequest(mangaIDs: [id],
+                                                                   title: detail?.title ?? manga.title)
+                }
+            } catch {
+                libraryError = model.libraryErrorMessage(for: error)
+            }
         }
+    }
+
+    private func categoryLabel(mangaId: Int64) -> String {
+        let ids = model.librarySnapshot.categoryIDsByManga[mangaId] ?? []
+        let names = model.categories.filter { $0.id.map(ids.contains) ?? false }.map(\.name)
+        return names.isEmpty ? "Set categories" : names.joined(separator: ", ")
     }
 
     private func markRead(_ chapter: Chapter) {

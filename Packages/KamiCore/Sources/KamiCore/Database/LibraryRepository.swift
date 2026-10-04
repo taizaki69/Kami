@@ -34,6 +34,8 @@ public actor LibraryStore {
             .first.flatMap(Self.manga(from:))
     }
 
+    /// Metadata refresh preserves membership changed during a source request.
+    /// Pass inLibrary explicitly or use setLibrary for a membership mutation.
     @discardableResult
     public func upsert(_ manga: Manga, inLibrary: Bool? = nil) throws -> Int64 {
         let alt = (try? String(data: JSONEncoder().encode(manga.altTitles), encoding: .utf8)) ?? "[]"
@@ -41,12 +43,12 @@ public actor LibraryStore {
         if let id = manga.id {
             try db.run("""
                 UPDATE manga SET title=?, alt_titles=?, thumbnail_url=?, author=?, artist=?,
-                    description=?, genres=?, status=?, in_library=?, update_strategy=?, date_updated=?
+                    description=?, genres=?, status=?, in_library=COALESCE(?, in_library), update_strategy=?, date_updated=?
                 WHERE id=?
                 """, [.text(manga.title), .text(alt), manga.thumbnailURL.map { SQLiteBindable.text($0) } ?? .null,
                       manga.author.map { SQLiteBindable.text($0) } ?? .null, manga.artist.map { SQLiteBindable.text($0) } ?? .null,
                       manga.descriptionText.map { SQLiteBindable.text($0) } ?? .null, .text(genres), .int(Int64(manga.status.rawValue)),
-                      .bool(inLibrary ?? manga.inLibrary), .text(manga.updateStrategy.rawValue),
+                      inLibrary.map(SQLiteBindable.bool) ?? .null, .text(manga.updateStrategy.rawValue),
                       .int(manga.dateUpdated), .int(id)])
             return id
         }
@@ -57,7 +59,7 @@ public actor LibraryStore {
             merged.inLibrary = inLibrary ?? existing.inLibrary
             if merged.dateAdded == 0 { merged.dateAdded = existing.dateAdded }
             if merged.dateUpdated == 0 { merged.dateUpdated = existing.dateUpdated }
-            return try upsert(merged, inLibrary: merged.inLibrary)
+            return try upsert(merged, inLibrary: inLibrary)
         }
         return try db.insert("""
             INSERT INTO manga
@@ -72,9 +74,174 @@ public actor LibraryStore {
     }
 
     public func setLibrary(_ inLibrary: Bool, mangaId: Int64) throws {
-        try db.run("UPDATE manga SET in_library=? WHERE id=?", [.bool(inLibrary), .int(mangaId)])
-        if !inLibrary {
-            try db.run("DELETE FROM manga_category WHERE manga_id=?", [.int(mangaId)])
+        try withLibraryTransaction {
+            try db.run("UPDATE manga SET in_library=? WHERE id=?", [.bool(inLibrary), .int(mangaId)])
+            if !inLibrary {
+                try db.run("DELETE FROM manga_category WHERE manga_id=?", [.int(mangaId)])
+            }
+        }
+    }
+
+    // MARK: - Categories
+
+    public func categories() throws -> [Category] {
+        try db.query("SELECT id, name, sort_order FROM category ORDER BY sort_order, id")
+            .compactMap { row in
+                guard let id = row.int64("id"), let name = row.string("name") else { return nil }
+                return Category(id: id, name: name, order: row.int("sort_order") ?? 0)
+            }
+    }
+
+    public func librarySnapshot() throws -> LibrarySnapshot {
+        try withLibraryTransaction(readOnly: true) {
+            let manga = try libraryManga()
+            let categories = try self.categories()
+            let rows = try db.query("""
+                SELECT mc.manga_id, mc.category_id FROM manga_category mc
+                JOIN manga m ON m.id = mc.manga_id WHERE m.in_library = 1
+                """)
+            var membership: [Int64: Set<Int64>] = [:]
+            for row in rows {
+                guard let mangaID = row.int64("manga_id"),
+                      let categoryID = row.int64("category_id") else { continue }
+                membership[mangaID, default: []].insert(categoryID)
+            }
+            return LibrarySnapshot(manga: manga, categories: categories,
+                                   categoryIDsByManga: membership)
+        }
+    }
+
+    @discardableResult
+    public func createCategory(name: String) throws -> Category {
+        let name = try Category.validatedName(name)
+        return try withLibraryTransaction {
+            let existing = try categories()
+            guard !existing.contains(where: { Category.namesMatch($0.name, name) }) else {
+                throw LibraryCategoryError.duplicateName
+            }
+            try persistCategoryOrder(existing.compactMap(\.id))
+            let id = try db.insert(
+                "INSERT INTO category (name, sort_order) VALUES (?,?)",
+                [.text(name), .int(existing.count)]
+            )
+            return Category(id: id, name: name, order: existing.count)
+        }
+    }
+
+    public func renameCategory(id: Int64, name: String) throws {
+        let name = try Category.validatedName(name)
+        try withLibraryTransaction {
+            let existing = try categories()
+            guard existing.contains(where: { $0.id == id }) else {
+                throw LibraryCategoryError.categoryNotFound(id)
+            }
+            guard !existing.contains(where: { $0.id != id && Category.namesMatch($0.name, name) }) else {
+                throw LibraryCategoryError.duplicateName
+            }
+            try db.run("UPDATE category SET name=? WHERE id=?", [.text(name), .int(id)])
+        }
+    }
+
+    public func reorderCategories(ids: [Int64]) throws {
+        try withLibraryTransaction {
+            try Category.validateOrder(ids, existingIDs: Set(try categories().compactMap(\.id)))
+            try persistCategoryOrder(ids)
+        }
+    }
+
+    /// Foreign-key cascading removes only the category's associations.
+    /// Manga rows, chapter state, and history are never deleted here.
+    public func deleteCategories(ids: Set<Int64>) throws {
+        guard !ids.isEmpty else { return }
+        try withLibraryTransaction {
+            let existing = try categories()
+            try validateCategoryIDs(ids, categories: existing)
+            for id in ids.sorted() {
+                try db.run("DELETE FROM category WHERE id=?", [.int(id)])
+            }
+            try persistCategoryOrder(existing.compactMap(\.id).filter { !ids.contains($0) })
+        }
+    }
+
+    public func setCategories(_ categoryIDs: Set<Int64>, mangaId: Int64) throws {
+        try setCategories(categoryIDs, mangaIDs: [mangaId])
+    }
+
+    /// Replaces membership atomically after validating every manga and category.
+    public func setCategories(_ categoryIDs: Set<Int64>, mangaIDs: Set<Int64>) throws {
+        guard !mangaIDs.isEmpty else { return }
+        try withLibraryTransaction {
+            try validateCategoryIDs(categoryIDs, categories: categories())
+            try validateLibraryMangaIDs(mangaIDs)
+            for mangaID in mangaIDs.sorted() {
+                try db.run("DELETE FROM manga_category WHERE manga_id=?", [.int(mangaID)])
+                for categoryID in categoryIDs.sorted() {
+                    try db.run("INSERT INTO manga_category (manga_id, category_id) VALUES (?,?)",
+                               [.int(mangaID), .int(categoryID)])
+                }
+            }
+        }
+    }
+
+    /// Applies explicit bulk changes while preserving every untouched category.
+    public func updateCategories(
+        adding: Set<Int64>,
+        removing: Set<Int64>,
+        mangaIDs: Set<Int64>
+    ) throws {
+        guard adding.isDisjoint(with: removing) else {
+            throw LibraryCategoryError.conflictingCategoryChanges
+        }
+        guard !mangaIDs.isEmpty else { return }
+        try withLibraryTransaction {
+            try validateCategoryIDs(adding.union(removing), categories: categories())
+            try validateLibraryMangaIDs(mangaIDs)
+            for mangaID in mangaIDs.sorted() {
+                for categoryID in removing.sorted() {
+                    try db.run("DELETE FROM manga_category WHERE manga_id=? AND category_id=?",
+                               [.int(mangaID), .int(categoryID)])
+                }
+                for categoryID in adding.sorted() {
+                    try db.run("INSERT OR IGNORE INTO manga_category (manga_id, category_id) VALUES (?,?)",
+                               [.int(mangaID), .int(categoryID)])
+                }
+            }
+        }
+    }
+
+    private func validateCategoryIDs(_ ids: Set<Int64>, categories: [Category]) throws {
+        let known = Set(categories.compactMap(\.id))
+        if let missing = ids.subtracting(known).sorted().first {
+            throw LibraryCategoryError.categoryNotFound(missing)
+        }
+    }
+
+    private func validateLibraryMangaIDs(_ ids: Set<Int64>) throws {
+        let known = Set(try db.query("SELECT id FROM manga WHERE in_library=1")
+            .compactMap { $0.int64("id") })
+        if let missing = ids.subtracting(known).sorted().first {
+            throw LibraryCategoryError.mangaNotInLibrary(missing)
+        }
+    }
+
+    private func persistCategoryOrder(_ ids: [Int64]) throws {
+        for (order, id) in ids.enumerated() {
+            try db.run("UPDATE category SET sort_order=? WHERE id=?", [.int(order), .int(id)])
+        }
+    }
+
+    private func withLibraryTransaction<T>(
+        readOnly: Bool = false,
+        _ operation: () throws -> T
+    ) throws -> T {
+        try db.execute(readOnly ? "BEGIN" : "BEGIN IMMEDIATE")
+        do {
+            let result = try operation()
+            try db.execute("COMMIT")
+            return result
+        } catch {
+            try? db.execute("ROLLBACK")
+            throw error
         }
     }
 

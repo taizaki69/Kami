@@ -380,6 +380,9 @@ struct DexTypeHierarchy {
         classType("Ljava/util/Locale;", interfaces: [cloneable, serializable])
         classType("Ljava/text/Collator;", interfaces: [cloneable, "Ljava/util/Comparator;"])
         classType("Ljava/lang/Enum;", interfaces: ["Ljava/lang/Comparable;", serializable])
+        interfaceType("Ljava/time/temporal/TemporalField;")
+        classType("Ljava/time/temporal/ChronoField;", superclass: "Ljava/lang/Enum;",
+                  interfaces: ["Ljava/time/temporal/TemporalField;"])
         classType("Ljava/lang/Number;", interfaces: [serializable])
         for descriptor in [
             "Ljava/lang/Byte;", "Ljava/lang/Double;", "Ljava/lang/Float;",
@@ -400,7 +403,10 @@ struct DexTypeHierarchy {
             "Lorg/jsoup/select/Elements;",
             superclass: "Ljava/util/ArrayList;"
         )
-        classType("Lorg/jsoup/nodes/Element;")
+        classType("Lorg/jsoup/nodes/Node;", interfaces: [cloneable])
+        classType("Lorg/jsoup/nodes/LeafNode;", superclass: "Lorg/jsoup/nodes/Node;")
+        classType("Lorg/jsoup/nodes/TextNode;", superclass: "Lorg/jsoup/nodes/LeafNode;")
+        classType("Lorg/jsoup/nodes/Element;", superclass: "Lorg/jsoup/nodes/Node;")
         classType(
             "Lorg/jsoup/nodes/Document;",
             superclass: "Lorg/jsoup/nodes/Element;"
