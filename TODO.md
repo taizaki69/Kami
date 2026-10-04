@@ -6,8 +6,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-03
 
 The full native-reader and compatibility objective remains active. The current
-implementation adds manual library updates and History resume on top of
-verified persistent FoolSlide settings and revocable source registrations.
+implementation adds manual chapter downloads and source-independent offline
+reading on top of verified updates, History resume, persistent FoolSlide
+settings and revocable source registrations.
 See [verification](docs/VERIFICATION-2026-10-03.md) for actual test/build evidence.
 Completed items below retain some historical checkpoint counts; those counts
 must not be used as evidence for the current commit.
@@ -32,7 +33,11 @@ must not be used as evidence for the current commit.
       coordination suites pass locally; the implementation PR records Apple
       verification for its exact commit, separately from interaction testing.
 - [ ] Add scheduled background updates with explicit product controls.
-- [ ] Continue downloads, then migration/backup UI,
+- [x] Implement the foreground downloads manager: durable queue, pause/cancel,
+      fresh retry, bounded file storage, offline reader and deferred deletion.
+      Local fixtures pass; exact-commit Apple CI is recorded on its PR,
+      separately from physical-device interaction and performance.
+- [ ] Continue migration/backup UI and remaining reader controls,
       without treating a passing compatibility suite as completion of the app.
 
 ## P0 — Extension research & foundation
@@ -288,10 +293,11 @@ must not be used as evidence for the current commit.
 
 ## P1 — Daily driver
 
-- [ ] Downloads manager (queue/pause/resume/persist across restarts)
-- [ ] Library update scanner + grouping/notification summary
-- [~] Categories UI + management — implementation and regressions in progress;
-      see the current continuation above
+- [x] Foreground downloads manager; active continuation above. Retry restarts
+      partial chapters; background transfers and byte-range resume remain open.
+- [x] Manual library update scanner, grouping and per-manga outcomes (PR #12).
+      Scheduled updates and system notifications remain open.
+- [x] Categories UI + management (PR #10); device interaction remains unverified.
 - [ ] Migration flow (multi-source search + chapter matching)
 - [ ] Backup/restore UI + import report
 - [x] Reader foundation: persistent LTR/RTL/webtoon modes, direction-aware tap
@@ -300,8 +306,7 @@ must not be used as evidence for the current commit.
 - [x] Previous/next chapter flow (implemented before this continuation).
 - [ ] Reader completion: configurable tap actions,
       fit/crop/brightness controls, cookie continuity for page-URL paths without
-      a source executor, memory-pressure purging, and download/disk-cache
-      integration
+      a source executor, and memory-pressure purging
 - [ ] Cloudflare WKWebView bridge + cookie sync (M4)
 - [ ] Global search across enabled sources
 

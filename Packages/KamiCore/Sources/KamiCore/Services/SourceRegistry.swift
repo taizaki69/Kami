@@ -15,6 +15,36 @@ public enum SourceRegistryError: Error, Equatable, Sendable, LocalizedError {
     }
 }
 
+/// A captured published registration. Its lifetime only rejects obsolete
+/// work; it does not grant signer trust, enable a source, or authorize transport.
+/// App cannot manufacture a snapshot for a raw, unregistered source.
+public struct SourceRegistrationSnapshot: Sendable {
+    public let source: any KamiSource
+    public let revision: UInt64
+    public let origin: SourceOrigin
+    private let scope: SourceRequestScope
+
+    public var sourceID: Int64 { source.id }
+    public var registrationID: UUID { scope.id }
+
+    init(source: any KamiSource, revision: UInt64, origin: SourceOrigin, scope: SourceRequestScope) {
+        self.source = source
+        self.revision = revision
+        self.origin = origin
+        self.scope = scope
+    }
+
+    public func checkAvailability() throws {
+        try scope.checkAvailability()
+    }
+
+    /// Native projections gain this lifetime; already-bound interpreted
+    /// requests must have the exact same original scope and retain their handle.
+    public func scopedImageRequest(_ request: ImageRequest) throws -> ImageRequest {
+        try request.scoped(to: scope)
+    }
+}
+
 /// Registry of all installed/available sources. Native and interpreted sources
 /// share `KamiSource`, so the app layer does not need source-kind branches.
 @MainActor
@@ -34,6 +64,7 @@ public final class SourceRegistry {
         sources.append(md)
         origins[md.id] = .native
         protectedSourceIDs.insert(md.id)
+        scopes[md.id] = SourceRequestScope()
         revisions[md.id] = 1
     }
 
@@ -43,6 +74,14 @@ public final class SourceRegistry {
 
     public func origin(of sourceID: Int64) -> SourceOrigin? {
         origins[sourceID]
+    }
+
+    public func registrationSnapshot(id: Int64) -> SourceRegistrationSnapshot? {
+        guard let source = source(id: id), let origin = origins[id],
+              let scope = scopes[id], scope.isActive else { return nil }
+        return SourceRegistrationSnapshot(
+            source: source, revision: revision(for: id), origin: origin, scope: scope
+        )
     }
 
     /// Retained after removal so an open view can detect a revoked instance.
@@ -57,6 +96,7 @@ public final class SourceRegistry {
         sources.append(source)
         origins[source.id] = .pinnedCompatibilityProfile
         protectedSourceIDs.insert(source.id)
+        scopes[source.id] = SourceRequestScope()
         revisions[source.id, default: 0] &+= 1
     }
 

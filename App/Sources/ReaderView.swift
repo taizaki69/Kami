@@ -3,6 +3,17 @@ import UIKit
 import MihonCompatKit
 import KamiCore
 
+enum ReaderOpeningPolicy: Equatable {
+    case automatic, offlineOnly, onlineOnly
+}
+
+struct OfflineReaderChapter {
+    let manga: Manga
+    let chapter: Chapter
+    let neighbours: [Chapter]
+    let lease: OfflineChapterLease
+}
+
 /// Native reader with persistent LTR, RTL, and continuous webtoon modes.
 /// Page bytes flow through ReaderImagePipeline so source headers, redirect
 /// policy, streamed limits, isolated cookies, cache bounds, and prefetching are
@@ -13,28 +24,118 @@ struct ReaderView: View {
     let mangaTitle: String
     let chapters: [Chapter]
     let sourceID: Int64
+    let openingPolicy: ReaderOpeningPolicy
     @State private var chapter: Chapter
+    @State private var readerChapters: [Chapter]
+    @State private var offlineLease: OfflineChapterLease?
+    @State private var loadingProvider = true
+    @State private var providerError: String?
+    @State private var requireOffline = false
+    @State private var requestedOnline = false
+    @State private var retryID = 0
+    @State private var providerGeneration: UInt64 = 0
 
-    init(mangaTitle: String, chapter: Chapter, chapters: [Chapter] = [], sourceID: Int64) {
+    init(mangaTitle: String, chapter: Chapter, chapters: [Chapter] = [], sourceID: Int64,
+         openingPolicy: ReaderOpeningPolicy = .automatic) {
         self.mangaTitle = mangaTitle
         self.chapters = chapters
         self.sourceID = sourceID
+        self.openingPolicy = openingPolicy
         _chapter = State(initialValue: chapter)
+        _readerChapters = State(initialValue: chapters)
+        _requireOffline = State(initialValue: openingPolicy == .offlineOnly)
+        _requestedOnline = State(initialValue: openingPolicy == .onlineOnly)
     }
 
     var body: some View {
-        let revision = model.sourceRevision(for: sourceID)
-        ReaderSessionView(
-            mangaTitle: mangaTitle,
-            chapter: $chapter,
-            chapters: chapters,
-            sourceID: sourceID,
-            sourceRevision: revision,
-            source: model.source(id: sourceID)
-        )
-        // A new source instance must own a new pipeline, cookie jar, page UI,
-        // and cache, even when its public source ID and page URLs are unchanged.
-        .id("\(sourceID):\(revision)")
+        ZStack {
+            if loadingProvider {
+                ProgressView("Opening chapter…")
+            } else if let providerError {
+                ContentUnavailableView {
+                    Label("Chapter unavailable", systemImage: "book.closed")
+                } description: {
+                    Text(providerError)
+                } actions: {
+                    Button("Retry") { retryID &+= 1 }
+                    if model.source(id: sourceID) != nil {
+                        Button("Read online") { readOnline() }
+                    }
+                }
+            } else {
+                let revision = offlineLease == nil ? model.sourceRevision(for: sourceID) : 0
+                ReaderSessionView(
+                    mangaTitle: mangaTitle,
+                    chapter: $chapter,
+                    chapters: readerChapters,
+                    sourceID: sourceID,
+                    sourceRevision: revision,
+                    source: offlineLease == nil ? model.source(id: sourceID) : nil,
+                    offlineLease: offlineLease,
+                    onReadOnline: readOnline
+                )
+                .id(offlineLease.map { "offline:\($0.id)" } ?? "online:\(sourceID):\(revision)")
+            }
+        }
+        .task(id: retryID) { await resolveProvider() }
+        .onDisappear {
+            providerGeneration &+= 1
+            let lease = offlineLease
+            offlineLease = nil
+            Task {
+                await lease?.close()
+                await model.refreshDownloads()
+            }
+        }
+    }
+
+    private func readOnline() {
+        requestedOnline = true
+        requireOffline = false
+        loadingProvider = true
+        retryID &+= 1
+    }
+
+    private func resolveProvider() async {
+        providerGeneration &+= 1
+        let generation = providerGeneration
+        loadingProvider = true
+        providerError = nil
+        let previous = offlineLease
+        offlineLease = nil
+        await previous?.close()
+        defer { if generation == providerGeneration { loadingProvider = false } }
+        guard let chapterID = chapter.id else {
+            providerError = "This chapter is no longer available."
+            return
+        }
+        do {
+            if !requestedOnline {
+                let local = try await model.openOfflineChapter(chapterID: chapterID, sourceID: sourceID)
+                guard !Task.isCancelled, generation == providerGeneration else {
+                    await local?.lease.close()
+                    return
+                }
+                if let local {
+                    offlineLease = local.lease
+                    chapter = local.chapter
+                    readerChapters = local.neighbours
+                    requireOffline = true
+                    return
+                }
+                if requireOffline {
+                    providerError = "This chapter is not downloaded. Download it when its source is available, or choose Read online."
+                    return
+                }
+            }
+            guard model.source(id: sourceID) != nil else {
+                providerError = "Source unavailable. Your reading data is saved. Enable this source in Extensions to read online."
+                return
+            }
+        } catch {
+            guard !Task.isCancelled, generation == providerGeneration else { return }
+            providerError = "Downloaded files are missing, damaged, or unavailable. Retry the local files or re-download this chapter from Downloads."
+        }
     }
 }
 
@@ -46,6 +147,8 @@ private struct ReaderSessionView: View {
     let sourceID: Int64
     let sourceRevision: UInt64
     let source: (any KamiSource)?
+    let onReadOnline: () -> Void
+    private let offlineOnly: Bool
 
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -69,6 +172,9 @@ private struct ReaderSessionView: View {
     @State private var reloadID = 0
     @State private var pendingStartAtEnd = false
     @State private var progressTask: Task<Void, Never>?
+    @State private var offlineLease: OfflineChapterLease?
+    @State private var leaseChapterID: Int64?
+    @State private var localSessionActive = true
 
     init(
         mangaTitle: String,
@@ -76,7 +182,9 @@ private struct ReaderSessionView: View {
         chapters: [Chapter] = [],
         sourceID: Int64,
         sourceRevision: UInt64,
-        source: (any KamiSource)?
+        source: (any KamiSource)?,
+        offlineLease: OfflineChapterLease?,
+        onReadOnline: @escaping () -> Void
     ) {
         self.mangaTitle = mangaTitle
         self.chapters = chapters
@@ -84,8 +192,13 @@ private struct ReaderSessionView: View {
         self.sourceID = sourceID
         self.sourceRevision = sourceRevision
         self.source = source
+        self.offlineOnly = offlineLease != nil
+        self.onReadOnline = onReadOnline
+        _offlineLease = State(initialValue: offlineLease)
+        _leaseChapterID = State(initialValue: chapter.wrappedValue.id)
         _imageStore = StateObject(wrappedValue: ReaderImageStore(
             sourceID: "\(sourceID):\(sourceRevision)",
+            offlineOnly: offlineLease != nil,
             transportPolicy: source?.transportPolicy
                 ?? CompatHTTPTransportPolicy(allowsInsecureHTTP: false)
         ))
@@ -118,6 +231,9 @@ private struct ReaderSessionView: View {
                         Text(pageLabel)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                        if offlineOnly {
+                            Text("Offline").font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 ToolbarItemGroup(placement: .topBarLeading) {
@@ -138,6 +254,10 @@ private struct ReaderSessionView: View {
                     .accessibilityLabel("Next chapter")
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    if offlineOnly, model.source(id: sourceID) != nil {
+                        Button("Read online", action: onReadOnline)
+                            .accessibilityHint("Choose online reading for this chapter. This uses its enabled source and a network connection.")
+                    }
                     Button {
                         showingSettings = true
                     } label: {
@@ -163,6 +283,7 @@ private struct ReaderSessionView: View {
         }
         .task(id: reloadID) { await load() }
         .onAppear {
+            localSessionActive = true
             normalizeStoredSettings()
             if previousIdleTimerDisabled == nil {
                 previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
@@ -170,6 +291,7 @@ private struct ReaderSessionView: View {
             applyIdleTimerSetting()
         }
         .onDisappear {
+            localSessionActive = false
             loadGeneration &+= 1
             progressTask?.cancel()
             progressTask = nil
@@ -177,6 +299,12 @@ private struct ReaderSessionView: View {
                 UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled
             }
             imageStore.stop()
+            let lease = offlineLease
+            offlineLease = nil
+            Task {
+                await lease?.close()
+                await model.refreshDownloads()
+            }
         }
         .onChange(of: keepScreenAwake) { _, _ in
             applyIdleTimerSetting()
@@ -202,7 +330,7 @@ private struct ReaderSessionView: View {
     }
 
     private var isSessionCurrent: Bool {
-        model.isSourceCurrent(id: sourceID, revision: sourceRevision)
+        offlineOnly ? localSessionActive : model.isSourceCurrent(id: sourceID, revision: sourceRevision)
     }
 
     private var backgroundColor: Color {
@@ -240,6 +368,7 @@ private struct ReaderSessionView: View {
                     page: pages[index],
                     source: source,
                     request: imageRequest(at: index),
+                    offlineLease: offlineLease,
                     requestGeneration: loadGeneration,
                     store: imageStore,
                     layout: .paged,
@@ -247,7 +376,8 @@ private struct ReaderSessionView: View {
                     background: backgroundColor,
                     foreground: foregroundColor,
                     onSingleTap: handlePagedTap,
-                    onRequestRefresh: imageRequestPublisher(at: index)
+                    onRequestRefresh: imageRequestPublisher(at: index),
+                    onReadOnline: offlineOnly && model.source(id: sourceID) != nil ? onReadOnline : nil
                 )
                 .tag(index)
             }
@@ -283,6 +413,7 @@ private struct ReaderSessionView: View {
                                 page: pages[index],
                                 source: source,
                                 request: imageRequest(at: index),
+                                offlineLease: offlineLease,
                                 requestGeneration: loadGeneration,
                                 store: imageStore,
                                 layout: .webtoon,
@@ -290,7 +421,8 @@ private struct ReaderSessionView: View {
                                 background: backgroundColor,
                                 foreground: foregroundColor,
                                 onSingleTap: { _ in toggleChrome() },
-                                onRequestRefresh: imageRequestPublisher(at: index)
+                                onRequestRefresh: imageRequestPublisher(at: index),
+                                onReadOnline: offlineOnly && model.source(id: sourceID) != nil ? onReadOnline : nil
                             )
                             .id(index)
                             .background {
@@ -333,6 +465,9 @@ private struct ReaderSessionView: View {
                 reloadID &+= 1
             }
             .buttonStyle(.borderedProminent)
+            if offlineOnly, model.source(id: sourceID) != nil {
+                Button("Read online", action: onReadOnline).buttonStyle(.bordered)
+            }
         }
         .padding()
     }
@@ -433,7 +568,7 @@ private struct ReaderSessionView: View {
     }
 
     private func schedulePrefetch(around index: Int) {
-        guard isSessionCurrent, !pages.isEmpty else { return }
+        guard isSessionCurrent, !pages.isEmpty, !offlineOnly else { return }
         let indexes = ReaderPrefetchPlan.indexes(
             pageCount: pages.count,
             currentIndex: index,
@@ -472,7 +607,12 @@ private struct ReaderSessionView: View {
         imageRequests = []
         await imageStore.reset()
 
-        guard !Task.isCancelled, isSessionCurrent, let source else {
+        guard !Task.isCancelled, isSessionCurrent else { return }
+        if offlineOnly {
+            await loadOffline(generation: generation)
+            return
+        }
+        guard let source else {
             errorText = "Source not available."
             loading = false
             return
@@ -516,6 +656,54 @@ private struct ReaderSessionView: View {
         } catch {
             guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else { return }
             errorText = "Could not load pages: \(error.localizedDescription)"
+            loading = false
+        }
+    }
+
+    private func loadOffline(generation: Int) async {
+        do {
+            if leaseChapterID != chapter.id || offlineLease == nil {
+                let previous = offlineLease
+                offlineLease = nil
+                await previous?.close()
+                guard let chapterID = chapter.id else {
+                    errorText = "This chapter is no longer available."
+                    loading = false
+                    return
+                }
+                let local = try await model.openOfflineChapter(chapterID: chapterID, sourceID: sourceID)
+                guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else {
+                    await local?.lease.close()
+                    return
+                }
+                guard let local else {
+                    errorText = "This chapter is not downloaded. Download it when its source is available, or choose Read online."
+                    loading = false
+                    return
+                }
+                offlineLease = local.lease
+                leaseChapterID = chapterID
+                chapter = local.chapter
+            }
+            guard let offlineLease, !Task.isCancelled,
+                  generation == loadGeneration, isSessionCurrent else { return }
+            pages = offlineLease.pages.map { PageCompat(index: $0.ordinal) }
+            imageRequests = Array(repeating: nil, count: pages.count)
+            if pendingStartAtEnd {
+                currentIndex = max(pages.count - 1, 0)
+                pendingStartAtEnd = false
+            } else {
+                currentIndex = min(max(chapter.lastPageRead, 0), max(pages.count - 1, 0))
+            }
+            loading = false
+            if pages.isEmpty {
+                errorText = "This download has no readable pages. Re-download the chapter from Downloads."
+            } else {
+                persistProgress(currentIndex)
+            }
+        } catch {
+            guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else { return }
+            errorText = "Downloaded files are missing, damaged, or unavailable. Retry the local files or re-download this chapter from Downloads."
             loading = false
         }
     }

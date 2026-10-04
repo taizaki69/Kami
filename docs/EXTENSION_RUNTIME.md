@@ -439,7 +439,9 @@ synthetic and pinned-corpus tests:
 - Reader `ImageRequest` can carry an opaque source-scoped execution capability
   identified by a UUID. The interpreted runtime retains the exact DEX Request
   and configured client in an actor-owned table capped at 4,096 entries; no
-  `RVal` crosses into KamiCore. The reader validates the public URL/header
+  `RVal` crosses into KamiCore. At capacity, a request requiring a retained
+  executor returns unavailable; it cannot fall back to a plain URL/header
+  request that loses the configured client or tags. The reader validates the public URL/header
   projection first, includes the hidden UUID in deduplication/cache identity,
   invokes the same bounded chain, and then enforces 2xx, non-empty, and
   compressed-image size checks. Capability deallocation asynchronously releases

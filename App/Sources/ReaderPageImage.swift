@@ -1,20 +1,20 @@
 import SwiftUI
 import UIKit
-import ImageIO
 import MihonCompatKit
 import KamiCore
 
 @MainActor
 final class ReaderImageStore: ObservableObject {
-    private let pipeline: ReaderImagePipeline
+    private let pipeline: ReaderImagePipeline?
     private var prefetchTask: Task<Void, Never>?
     private var clearTask: Task<Void, Never>?
 
     init(
         sourceID: String,
+        offlineOnly: Bool = false,
         transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
     ) {
-        pipeline = ReaderImagePipeline(
+        pipeline = offlineOnly ? nil : ReaderImagePipeline(
             sourceID: sourceID,
             transportPolicy: transportPolicy
         )
@@ -24,13 +24,17 @@ final class ReaderImageStore: ObservableObject {
         for request: ImageRequest,
         policy: ReaderImageLoadPolicy = .useCache
     ) async throws -> Data {
-        try await pipeline.data(for: request, policy: policy)
+        guard let pipeline else { throw CancellationError() }
+        return try await pipeline.data(for: request, policy: policy)
+    }
+
+    func data(for lease: OfflineChapterLease, ordinal: Int) async throws -> Data {
+        try await lease.readPage(ordinal: ordinal)
     }
 
     func prefetch(_ requests: [ImageRequest]) {
         prefetchTask?.cancel()
-        guard !requests.isEmpty else { return }
-        let pipeline = self.pipeline
+        guard !requests.isEmpty, let pipeline else { return }
         prefetchTask = Task {
             await pipeline.prefetch(requests)
         }
@@ -41,14 +45,17 @@ final class ReaderImageStore: ObservableObject {
         clearTask = nil
         prefetchTask?.cancel()
         prefetchTask = nil
-        await pipeline.clear()
+        await pipeline?.clear()
     }
 
     func stop() {
         prefetchTask?.cancel()
         prefetchTask = nil
         clearTask?.cancel()
-        let pipeline = self.pipeline
+        guard let pipeline else {
+            clearTask = nil
+            return
+        }
         clearTask = Task { await pipeline.clear() }
     }
 }
@@ -64,6 +71,7 @@ struct ReaderPageImage: View {
     let page: PageCompat
     let source: (any KamiSource)?
     let request: ImageRequest?
+    let offlineLease: OfflineChapterLease?
     let requestGeneration: Int
     @ObservedObject var store: ReaderImageStore
     let layout: Layout
@@ -72,6 +80,7 @@ struct ReaderPageImage: View {
     let foreground: Color
     let onSingleTap: (CGFloat) -> Void
     let onRequestRefresh: @MainActor (ImageRequest?) -> Bool
+    var onReadOnline: (() -> Void)? = nil
 
     @State private var image: UIImage?
     @State private var loading = true
@@ -131,6 +140,9 @@ struct ReaderPageImage: View {
                         .multilineTextAlignment(.center)
                     Button("Retry") { attempt &+= 1 }
                         .buttonStyle(.bordered)
+                    if let onReadOnline {
+                        Button("Read online", action: onReadOnline).buttonStyle(.bordered)
+                    }
                 }
                 .foregroundStyle(foreground)
                 .padding()
@@ -156,7 +168,7 @@ struct ReaderPageImage: View {
         image = nil
         var resolvedRequest = request
         let requestedAttempt = attempt
-        if requestedAttempt != lastResolvedAttempt {
+        if offlineLease == nil, requestedAttempt != lastResolvedAttempt {
             // Retry obtains a new source-owned URL/header snapshot. Ordinary
             // page reactivation keeps the most recently published request.
             resolvedRequest = await source?.getImageRequest(page: page)
@@ -164,7 +176,7 @@ struct ReaderPageImage: View {
                   onRequestRefresh(resolvedRequest) else { return }
             lastResolvedAttempt = requestedAttempt
         }
-        guard let resolvedRequest else {
+        guard offlineLease != nil || resolvedRequest != nil else {
             errorText = "The source did not provide a valid image request."
             loading = false
             return
@@ -175,7 +187,14 @@ struct ReaderPageImage: View {
             let policy: ReaderImageLoadPolicy = requestedAttempt == lastLoadedAttempt
                 ? .useCache
                 : .reload
-            let data = try await store.data(for: resolvedRequest, policy: policy)
+            let data: Data
+            if let offlineLease {
+                data = try await store.data(for: offlineLease, ordinal: page.index)
+            } else if let resolvedRequest {
+                data = try await store.data(for: resolvedRequest, policy: policy)
+            } else {
+                throw CancellationError()
+            }
             try Task.checkCancellation()
             lastLoadedAttempt = requestedAttempt
             let decoded = try await ReaderImageDecoder.decode(
@@ -189,7 +208,9 @@ struct ReaderPageImage: View {
             return
         } catch {
             guard !Task.isCancelled else { return }
-            errorText = error.localizedDescription
+            errorText = offlineLease == nil
+                ? error.localizedDescription
+                : "This downloaded page could not be read. Retry the local file or re-download the chapter from Downloads."
             loading = false
         }
     }
@@ -297,18 +318,6 @@ private struct ZoomableReaderImage: View {
     }
 }
 
-private enum ReaderImageDecodeError: Error, LocalizedError {
-    case invalidImage
-    case dimensionsTooLarge
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidImage: return "The page response is not a supported image."
-        case .dimensionsTooLarge: return "The page image dimensions exceed the safety limit."
-        }
-    }
-}
-
 private struct DecodedReaderImage: @unchecked Sendable {
     let image: UIImage
 }
@@ -318,48 +327,10 @@ private enum ReaderImageDecoder {
         _ data: Data,
         maximumPixelDimension: Int
     ) async throws -> DecodedReaderImage {
-        let decoding = Task.detached(priority: .userInitiated) {
-            try Task.checkCancellation()
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-                  let properties = CGImageSourceCopyPropertiesAtIndex(
-                      source,
-                      0,
-                      nil
-                  ) as? [CFString: Any],
-                  let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
-                  let height = properties[kCGImagePropertyPixelHeight] as? NSNumber else {
-                throw ReaderImageDecodeError.invalidImage
-            }
-            let pixelWidth = width.intValue
-            let pixelHeight = height.intValue
-            guard pixelWidth > 0, pixelHeight > 0,
-                  pixelWidth <= 100_000, pixelHeight <= 100_000,
-                  Int64(pixelWidth) * Int64(pixelHeight) <= 250_000_000 else {
-                throw ReaderImageDecodeError.dimensionsTooLarge
-            }
-
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCacheImmediately: true,
-                kCGImageSourceThumbnailMaxPixelSize:
-                    max(512, min(maximumPixelDimension, 8_192)),
-            ]
-            try Task.checkCancellation()
-            guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(
-                source,
-                0,
-                options as CFDictionary
-            ) else {
-                throw ReaderImageDecodeError.invalidImage
-            }
-            try Task.checkCancellation()
-            return DecodedReaderImage(image: UIImage(cgImage: thumbnail))
-        }
-        return try await withTaskCancellationHandler {
-            try await decoding.value
-        } onCancel: {
-            decoding.cancel()
-        }
+        let result = try await NativeImageValidation.thumbnail(
+            data: data, maximumPixelDimension: maximumPixelDimension
+        )
+        try Task.checkCancellation()
+        return DecodedReaderImage(image: UIImage(cgImage: result.image))
     }
 }

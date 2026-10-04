@@ -4,9 +4,12 @@ Last updated: 2026-10-03 (America/Lima)
 
 ## Canonical continuation — 2026-10-03
 
-The active continuation is `assistant/library-updates-20261003`, based on
-`0ae9c4ded6e5dd01f577798122789827ec2e3842` from
-[PR #11](https://github.com/taizaki69/Kami/pull/11). That settings checkpoint
+The active continuation is `assistant/offline-downloads-20261003`, based on
+`36e038af443e36cd85dc2dd0c682c34fc2ec93d2` from
+[PR #12](https://github.com/taizaki69/Kami/pull/12). That updates checkpoint
+passed Linux/macOS tests, simulator/device compilation and unsigned IPA CI.
+It builds on `0ae9c4ded6e5dd01f577798122789827ec2e3842` from
+[PR #11](https://github.com/taizaki69/Kami/pull/11). The settings checkpoint
 passed Linux/macOS tests, simulator/device compilation and unsigned IPA CI.
 It builds on `ecc97bc20adbb57dd62c4d1618319306a3f02c08` from
 [PR #10](https://github.com/taizaki69/Kami/pull/10). PR #10 contains the earlier
@@ -29,7 +32,7 @@ The app clears/recreates browse and reader sessions when a source is replaced.
 Read the current
 [README](README.md), [task tracker](TODO.md), and
 [dated verification record](docs/VERIFICATION-2026-10-03.md) for current scope.
-The current work adds a schema-4 discovery ledger, manual scanning with bounded
+The updates checkpoint adds a schema-4 discovery ledger, manual scanning with bounded
 source concurrency, cancellation and recoverable summaries, an actual Updates
 feed with pagination and per-manga issues, and History resume from persisted
 chapter state. Missing source chapters retain progress/history. Native MangaDex
@@ -37,7 +40,15 @@ uses the bounded cancellable transport and rejects failed or incomplete API
 responses. Local logs and durable checkpoints are in
 `.git/checkpoints/20261003-library-updates/`; published workflow evidence is
 recorded on the implementation PR. Do not infer Apple success from a Linux parse.
-The broad objective remains active; downloads, scheduled background updates,
+The current work adds schema-5 manual downloads, per-attempt publication and
+cleanup receipts, a bounded file store, a dedicated transfer coordinator and
+source-independent offline reading. Local recovery never starts transfers or
+promotes incomplete files. Retry begins at page zero with a fresh source;
+deletion waits for open local readers and retains domain reading data. See
+[Downloads](docs/DOWNLOADS.md). Download checkpoint files and logs are in
+`.git/checkpoints/20261003-offline-downloads/`. Do not infer verification from
+implementation alone; use the exact implementation PR and dated record.
+The broad objective remains active; background downloads, scheduled updates,
 broader extension APIs and other daily-reader capabilities are still required.
 
 Linux verifies the portable packages and can exercise SQLite through an

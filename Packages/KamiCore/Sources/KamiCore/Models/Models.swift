@@ -148,6 +148,7 @@ public struct HistoryEntry: Hashable, Sendable {
     }
 }
 
-public enum DownloadState: Int, Codable, Sendable {
+public enum DownloadState: Int, Codable, Sendable, Hashable {
     case queued = 0, downloading = 1, finished = 2, failed = 3
+    case paused = 4, cancelled = 5, deleting = 6
 }

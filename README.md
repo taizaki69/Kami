@@ -24,6 +24,14 @@ parallel and one manga at a time per source. They do not run automatically in
 the background. Native MangaDex requests share the bounded, cancellable HTTP
 transport and reject HTTP failures and incomplete chapter catalogs.
 
+The [download manager](docs/DOWNLOADS.md) queues selected library chapters for
+foreground transfer and persists progress and failures. Paused or interrupted
+chapters retry from the beginning. Completed chapters open locally with their
+saved reading progress even when the source is disabled or absent. Local reads
+verify their files and never silently fall back to network. Deleting a download
+preserves chapter progress and history; an open reader retains its files until
+it closes. Source changes invalidate unfinished attempts before publication.
+
 Extension installation authenticates the exact APK hash, package/version,
 signer and declared source IDs. Repository trust or explicit certificate
 confirmation is persisted and checked again at startup. The source factory
@@ -80,7 +88,7 @@ conformance fixtures. Historical paths under `measurement/` are retained; the
 manifest's `role` field determines measurement membership. Source acquisition
 provenance, fixture hashes and separate third-party notices are preserved.
 
-Downloads, scheduled background updates, migration and backup UI, further
+Background downloads, scheduled background updates, migration and backup UI, further
 source settings, Cloudflare cookie bridging, iPad spreads and physical-device performance verification
 remain on the [task tracker](TODO.md). The broader daily-reader and extension
 compatibility objective is still in progress.

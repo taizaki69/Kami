@@ -15,6 +15,8 @@ struct KamiApp: App {
 
 struct RootTabView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var sceneID = UUID()
 
     var body: some View {
         TabView {
@@ -29,5 +31,8 @@ struct RootTabView: View {
             ExtensionsView()
                 .tabItem { Label("Extensions", systemImage: "puzzlepiece") }
         }
+        .onAppear { model.downloadsSceneChanged(sceneID: sceneID, active: scenePhase == .active) }
+        .onChange(of: scenePhase) { _, phase in model.downloadsSceneChanged(sceneID: sceneID, active: phase == .active) }
+        .onDisappear { model.downloadsSceneChanged(sceneID: sceneID, active: false) }
     }
 }

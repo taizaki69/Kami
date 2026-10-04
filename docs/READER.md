@@ -22,6 +22,12 @@
   as one cancellable load. Reader dismissal runs disappearance cleanup, which
   increments the load generation; stale page-list or image-request completions
   are ignored.
+- Completed downloads use a source-independent local read lease. Opening a
+  saved chapter verifies its manifest and complete file set; each page read
+  checks its size and hash before using the shared ImageIO decoder. Local retry
+  uses local files, while online reading is an explicit separate action.
+  Disabling a source does not close a local reader. Download deletion waits
+  for active leases to close and keeps progress/history. See [Downloads](DOWNLOADS.md).
 
 ## Image request and memory boundary
 
@@ -116,8 +122,8 @@ unverified.
 2. Dual-page spreads on iPad and landscape, including cover-page separation.
 3. Fit-width/fit-height controls, crop-borders, brightness override, and
    tap-centered zoom with stricter pan bounds.
-4. Memory-pressure-driven cache purging, long-image tiling, and integration
-   with the future persistent download/disk cache.
+4. Memory-pressure-driven cache purging and long-image tiling. Persistent
+   chapter downloads now have a separate bounded store and local read leases.
 5. Add Baozi image-transform regressions only after a portable bounded
    pixel/JPEG codec exists; a metadata-only Bitmap shim is not compatibility.
 6. Physical-device profiling and accessibility testing, including 500-page

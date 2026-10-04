@@ -350,6 +350,7 @@ struct HistoryView: View {
         defer { if generation == reloadGeneration { loading = false } }
         do {
             let history = try await model.store.history()
+            await model.refreshDownloadAvailability(chapterIDs: history.compactMap { $0.1.id })
             guard !Task.isCancelled, generation == reloadGeneration else { return }
             entries = history.compactMap { manga, chapter, date in
                 guard manga.id != nil, chapter.id != nil else { return nil }
@@ -381,6 +382,12 @@ private struct ChapterReadingLink: View {
                     VStack(alignment: .leading, spacing: 3) {
                         if showManga { Text(manga.title).lineLimit(2) }
                         Text(chapter.name).font(showManga ? .caption : .body)
+                        if isDownloaded {
+                            Label("Downloaded · read offline", systemImage: "arrow.down.circle.fill")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else if sourceAvailable {
+                            Text("Read online").font(.caption).foregroundStyle(.secondary)
+                        }
                         if !sourceAvailable {
                             Label("Source unavailable", systemImage: "pause.circle")
                                 .font(.caption).foregroundStyle(.secondary)
@@ -391,18 +398,22 @@ private struct ChapterReadingLink: View {
                     if chapter.read { Image(systemName: "checkmark").accessibilityLabel("Read") }
                 }
             }
-            .disabled(!sourceAvailable)
+            .disabled(!sourceAvailable && !isDownloaded)
             .accessibilityLabel(readingLabel)
-            .accessibilityHint(sourceAvailable
+            .accessibilityHint(isDownloaded
+                               ? "Read this downloaded chapter without a network connection."
+                               : sourceAvailable
                                ? "Continue reading this chapter from your saved progress."
                                : "Review this source in Extensions to continue reading.")
         }
     }
 
     private var sourceAvailable: Bool { model.source(id: manga.sourceId) != nil }
+    private var isDownloaded: Bool { chapter.id.map { model.isChapterDownloaded($0) } ?? false }
 
     private var readingLabel: String {
         var parts = [manga.title, chapter.name]
+        if isDownloaded { parts.append("Downloaded, read offline") }
         if chapter.read { parts.append("Read") }
         if let lastRead { parts.append(lastRead) }
         if !sourceAvailable { parts.append("Source unavailable") }

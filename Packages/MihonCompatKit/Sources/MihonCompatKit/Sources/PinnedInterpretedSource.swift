@@ -1452,7 +1452,9 @@ private actor PinnedInterpretedRuntime {
                         stage: .imageRequest,
                         error: PinnedInterpretedSourceError.runtimeBusy
                     )
-                    return validated
+                    // A URL/header projection cannot replace the configured
+                    // client/tags/interceptors just because the pool is full.
+                    return nil
                 }
 
                 let id = UUID()

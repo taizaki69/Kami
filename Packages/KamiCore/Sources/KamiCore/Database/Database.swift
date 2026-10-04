@@ -5,7 +5,7 @@ import Foundation
 /// Versioned schema migrations. Every change ships as a new step; the
 /// `user_version` pragma tracks the applied version.
 enum Migrations {
-    static let latest: Int = 4
+    static let latest: Int = 5
 
     static let steps: [Int: String] = [
         1: """
@@ -101,6 +101,65 @@ enum Migrations {
             tries INTEGER NOT NULL DEFAULT 0,
             queue_order INTEGER NOT NULL DEFAULT 0
         );
+        """,
+        5: """
+        CREATE TABLE download_job (
+            job_id TEXT PRIMARY KEY,
+            chapter_id INTEGER NOT NULL UNIQUE REFERENCES chapter(id) ON DELETE CASCADE,
+            manga_id INTEGER NOT NULL REFERENCES manga(id) ON DELETE CASCADE,
+            source_id INTEGER NOT NULL,
+            manga_url_digest TEXT NOT NULL,
+            chapter_url_digest TEXT NOT NULL,
+            state INTEGER NOT NULL CHECK(state IN (0,1,2,3,4,5,6)),
+            revision INTEGER NOT NULL CHECK(revision > 0),
+            attempt_id TEXT,
+            library_revision INTEGER NOT NULL DEFAULT 0,
+            origin_package TEXT,
+            origin_fingerprint TEXT,
+            configuration_revision INTEGER,
+            publication_state TEXT NOT NULL DEFAULT 'none'
+                CHECK(publication_state IN ('none','working','prepared','complete')),
+            page_count INTEGER CHECK(page_count BETWEEN 1 AND 2048),
+            completed_pages INTEGER NOT NULL DEFAULT 0 CHECK(completed_pages >= 0),
+            stored_bytes INTEGER NOT NULL DEFAULT 0 CHECK(stored_bytes >= 0),
+            manifest_sha256 TEXT,
+            reason TEXT,
+            queue_order INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX download_queue ON download_job(state,queue_order,job_id);
+        CREATE UNIQUE INDEX one_active_download ON download_job(state) WHERE state=1;
+        CREATE TABLE download_page (
+            job_id TEXT NOT NULL REFERENCES download_job(job_id) ON DELETE CASCADE,
+            attempt_id TEXT NOT NULL,
+            ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 0 AND 2047),
+            byte_count INTEGER NOT NULL CHECK(byte_count BETWEEN 1 AND 33554432),
+            sha256 TEXT NOT NULL CHECK(length(sha256)=64),
+            PRIMARY KEY(job_id,attempt_id,ordinal)
+        );
+        -- No job foreign key: cleanup survives deletion of a domain row.
+        CREATE TABLE download_cleanup (
+            attempt_id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            manga_id INTEGER NOT NULL,
+            chapter_id INTEGER NOT NULL,
+            source_id INTEGER NOT NULL,
+            manga_url_digest TEXT NOT NULL,
+            chapter_url_digest TEXT NOT NULL,
+            stored_bytes INTEGER NOT NULL CHECK(stored_bytes >= 0)
+        );
+        -- Legacy progress and "finished" were never evidence of files.
+        INSERT INTO download_job(
+            job_id,chapter_id,manga_id,source_id,manga_url_digest,chapter_url_digest,
+            state,revision,library_revision,reason,queue_order,created_at,updated_at
+        )
+        SELECT upper(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-' ||
+            hex(randomblob(2)) || '-' || hex(randomblob(2)) || '-' || hex(randomblob(6))),
+            c.id,m.id,m.source_id,'','',4,1,m.library_revision,'legacyUnverified',
+            d.queue_order,0,0
+        FROM download d JOIN chapter c ON c.id=d.chapter_id JOIN manga m ON m.id=c.manga_id;
+        DROP TABLE download;
         """,
         2: """
         ALTER TABLE installed_extension ADD COLUMN apk_sha256 TEXT NOT NULL DEFAULT '';

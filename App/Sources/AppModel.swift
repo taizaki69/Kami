@@ -27,6 +27,12 @@ enum ExtensionConfigurationSaveError: Error, LocalizedError {
     }
 }
 
+struct ChapterDownloadStatus {
+    let jobID: UUID
+    let state: DownloadState
+    let reason: DownloadFailureReason?
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     let store: LibraryStore
@@ -37,6 +43,9 @@ final class AppModel: ObservableObject {
     let sourceFactory: ExtensionSourceFactory
     let preferencesService: ExtensionPreferencesService
     let libraryUpdateService: LibraryUpdateService
+    private let durableDatabaseAvailable: Bool
+    private let downloadContentStore: DownloadContentStore?
+    private var downloadService: LibraryDownloadService?
 
     @Published private(set) var librarySnapshot = LibrarySnapshot()
     @Published private(set) var libraryError: String?
@@ -59,6 +68,30 @@ final class AppModel: ObservableObject {
     @Published private(set) var libraryUpdateProgress: LibraryUpdateProgress?
     @Published private(set) var libraryUpdateIsRunning = false
     @Published private(set) var libraryUpdateIsCancelling = false
+    @Published private(set) var downloads: [DownloadItem] = []
+    @Published private(set) var downloadsSummary: DownloadQueueSummary?
+    @Published private(set) var downloadsLoading = false
+    @Published private(set) var downloadsError: String?
+    @Published private(set) var downloadsHasMore = false
+    @Published private(set) var downloadsLoadingMore = false
+    @Published private(set) var downloadsPaginationError: String?
+    @Published private(set) var downloadProgress: DownloadProgress?
+    @Published private(set) var downloadQueueIsRunning = false
+    @Published private(set) var downloadQueueIsPausing = false
+    @Published private(set) var downloadBusyJobs = Set<UUID>()
+    @Published private(set) var downloadBusyChapters = Set<Int64>()
+    @Published private(set) var downloadCancellingJobs = Set<UUID>()
+    @Published private(set) var downloadOperationErrors: [Int64: String] = [:]
+    @Published private(set) var downloadedChapterCounts: [Int64: Int] = [:]
+    @Published private var downloadStates: [Int64: ChapterDownloadStatus] = [:]
+    private var downloadsReloadGeneration: UInt64 = 0
+    private var downloadsNextCursor: DownloadQueueCursor?
+    private var downloadTask: Task<Void, Never>?
+    private var downloadsForegroundActive = true
+    private var activeDownloadScenes = Set<UUID>()
+    private var downloadCountsGeneration: UInt64 = 0
+    private var downloadChapterGenerations: [Int64: UInt64] = [:]
+    private var downloadMangaByChapter: [Int64: Int64] = [:]
     private var libraryUpdatesReloadGeneration: UInt64 = 0
     private var libraryUpdateTask: Task<Void, Never>?
     private var libraryUpdateDiscoveries: [LibraryChapterDiscovery] = []
@@ -83,10 +116,12 @@ final class AppModel: ObservableObject {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let dbPath = url.appendingPathComponent("kami.sqlite").path
 
-        let store = (try? LibraryStore(path: dbPath)) ?? (try! LibraryStore(inMemory: true))
+        let persistentStore = try? LibraryStore(path: dbPath)
+        let store = persistentStore ?? (try! LibraryStore(inMemory: true))
         let storeClient = ExtensionStoreClient()
         let admissionService = ExtensionAdmissionService(store: store)
         self.store = store
+        self.durableDatabaseAvailable = persistentStore != nil
         self.registry = SourceRegistry()
         self.storeClient = storeClient
         self.admissionService = admissionService
@@ -99,10 +134,27 @@ final class AppModel: ObservableObject {
         self.sourceFactory = ExtensionSourceFactory()
         self.preferencesService = ExtensionPreferencesService(store: store)
         self.libraryUpdateService = LibraryUpdateService(store: store)
+        if persistentStore != nil {
+            do {
+                self.downloadContentStore = try DownloadContentStore(root: url.appendingPathComponent("Downloads", isDirectory: true))
+            } catch {
+                self.downloadContentStore = nil
+                self.downloadsError = "Downloads are unavailable. Please try reopening the app after checking device storage."
+            }
+        } else {
+            self.downloadContentStore = nil
+            self.downloadsError = "Saved storage could not be opened. Downloaded files have been preserved. Reopen the app to try again."
+        }
+        if let content = downloadContentStore {
+            self.downloadService = LibraryDownloadService(store: store, contentStore: content) { [weak self] sourceID in
+                await self?.downloadSourceContext(sourceID: sourceID) ?? .unavailable
+            }
+        }
         reloadLibrary()
         Task { [weak self] in
             await self?.restoreInstalledExtensions()
             await self?.reloadExtensionRepositories()
+            await self?.refreshDownloads()
         }
     }
 
@@ -157,6 +209,9 @@ final class AppModel: ObservableObject {
     func setLibrary(_ inLibrary: Bool, mangaId: Int64) async throws {
         try await store.setLibrary(inLibrary, mangaId: mangaId)
         await refreshLibrary()
+        await refreshDownloadCounts()
+        await refreshDownloadAvailability(mangaID: mangaId)
+        await refreshDownloads(preservingLoadedRows: true)
     }
 
     func libraryErrorMessage(for error: Error) -> String {
@@ -177,6 +232,7 @@ final class AppModel: ObservableObject {
         do {
             _ = try await libraryUpdateService.prepare()
             let snapshot = try await store.libraryUpdatesSnapshot()
+            await refreshDownloadAvailability(chapterIDs: snapshot.discoveries.compactMap { $0.chapter.id })
             guard !Task.isCancelled, generation == libraryUpdatesReloadGeneration else { return }
             libraryUpdatesSnapshot = snapshot
             libraryUpdateDiscoveries = snapshot.discoveries
@@ -242,6 +298,7 @@ final class AppModel: ObservableObject {
         }
         do {
             let page = try await store.libraryUpdatesSnapshot(after: cursor)
+            await refreshDownloadAvailability(chapterIDs: page.discoveries.compactMap { $0.chapter.id })
             guard !Task.isCancelled, generation == libraryUpdatesReloadGeneration else { return }
             var seen = Set(libraryUpdateDiscoveries.map(\.id))
             libraryUpdateDiscoveries += page.discoveries.filter { seen.insert($0.id).inserted }
@@ -276,6 +333,319 @@ final class AppModel: ObservableObject {
             }
         }
         return contexts
+    }
+
+    func downloadState(for chapterID: Int64) -> ChapterDownloadStatus? { downloadStates[chapterID] }
+
+    func isChapterDownloaded(_ chapterID: Int64) -> Bool { downloadStates[chapterID]?.state == .finished }
+
+    func refreshDownloadCounts() async {
+        guard durableDatabaseAvailable else { return }
+        downloadCountsGeneration &+= 1
+        let generation = downloadCountsGeneration
+        do {
+            let counts = try await store.downloadedChapterCountsByManga()
+            guard !Task.isCancelled, generation == downloadCountsGeneration else { return }
+            downloadedChapterCounts = counts
+        } catch {
+            guard !Task.isCancelled, generation == downloadCountsGeneration else { return }
+            downloadsError = "Saved download information could not be loaded. Please try again."
+        }
+    }
+
+    func refreshDownloadAvailability(chapterIDs: [Int64]) async {
+        guard durableDatabaseAvailable else { return }
+        let ids = Array(Set(chapterIDs)).sorted()
+        do {
+            for start in stride(from: 0, to: ids.count, by: 500) {
+                let batch = Array(ids[start..<min(start + 500, ids.count)])
+                let generations = Dictionary(uniqueKeysWithValues: batch.map { ($0, downloadChapterGenerations[$0, default: 0]) })
+                let states = try await store.downloadChapterStates(chapterIDs: batch)
+                guard !Task.isCancelled else { return }
+                for id in batch where downloadChapterGenerations[id, default: 0] == (generations[id] ?? 0) {
+                    downloadStates[id] = states[id].map {
+                        ChapterDownloadStatus(jobID: $0.jobID, state: $0.state, reason: $0.reason)
+                    }
+                }
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            downloadsError = "Saved download information could not be loaded. Please try again."
+        }
+    }
+
+    func refreshDownloadAvailability(mangaID: Int64) async {
+        guard durableDatabaseAvailable else { return }
+        let generations = downloadChapterGenerations
+        do {
+            let states = try await store.downloadChapterStates(mangaID: mangaID)
+            guard !Task.isCancelled else { return }
+            for (chapterID, state) in states where downloadChapterGenerations[chapterID, default: 0] == (generations[chapterID] ?? 0) {
+                downloadMangaByChapter[chapterID] = mangaID
+                downloadStates[chapterID] = ChapterDownloadStatus(jobID: state.jobID, state: state.state, reason: state.reason)
+            }
+            for (chapterID, parentID) in downloadMangaByChapter where parentID == mangaID && states[chapterID] == nil
+                && downloadChapterGenerations[chapterID, default: 0] == (generations[chapterID] ?? 0) {
+                downloadStates.removeValue(forKey: chapterID)
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            downloadsError = "Saved download information could not be loaded. Please try again."
+        }
+    }
+
+    /// Recovery and cleanup only. Opening Downloads never starts transfers.
+    func refreshDownloads(preservingLoadedRows: Bool = false) async {
+        guard let service = downloadService else { return }
+        downloadsReloadGeneration &+= 1
+        let generation = downloadsReloadGeneration
+        downloadsLoading = true
+        downloadsLoadingMore = false
+        defer { if generation == downloadsReloadGeneration { downloadsLoading = false } }
+        do {
+            try await service.prepare()
+            let desiredCount = preservingLoadedRows ? max(100, downloads.count) : 100
+            var snapshot = try await store.downloadsSnapshot()
+            var items = snapshot.items
+            while snapshot.hasMore && items.count < desiredCount {
+                guard !Task.isCancelled, generation == downloadsReloadGeneration else { return }
+                guard let cursor = snapshot.nextCursor else { throw DownloadPersistenceError.invalidStoredRecord }
+                snapshot = try await store.downloadsSnapshot(limit: min(500, desiredCount - items.count), after: cursor)
+                items += snapshot.items
+            }
+            guard !Task.isCancelled, generation == downloadsReloadGeneration else { return }
+            var seen = Set<UUID>()
+            downloads = items.filter { seen.insert($0.jobID).inserted }
+            downloadsSummary = snapshot.summary
+            downloadsHasMore = snapshot.hasMore
+            downloadsNextCursor = snapshot.nextCursor
+            downloadsPaginationError = nil
+            downloadsError = nil
+            for item in downloads { applyDownloadItem(item) }
+            await refreshDownloadAvailability(chapterIDs: Array(downloadStates.keys))
+            await refreshDownloadCounts()
+        } catch {
+            guard !Task.isCancelled, generation == downloadsReloadGeneration else { return }
+            downloadsError = downloadErrorMessage(error)
+        }
+    }
+
+    func loadMoreDownloads() async {
+        guard !downloadsLoading, !downloadsLoadingMore, downloadsHasMore else { return }
+        guard let cursor = downloadsNextCursor else {
+            downloadsPaginationError = "More downloads could not be loaded. Reload the list and try again."
+            return
+        }
+        let generation = downloadsReloadGeneration
+        downloadsLoadingMore = true
+        defer { if generation == downloadsReloadGeneration { downloadsLoadingMore = false } }
+        do {
+            let snapshot = try await store.downloadsSnapshot(after: cursor)
+            guard !Task.isCancelled, generation == downloadsReloadGeneration else { return }
+            var seen = Set(downloads.map(\.jobID))
+            downloads += snapshot.items.filter { seen.insert($0.jobID).inserted }
+            downloadsSummary = snapshot.summary
+            downloadsHasMore = snapshot.hasMore
+            downloadsNextCursor = snapshot.nextCursor
+            downloadsPaginationError = nil
+            for item in snapshot.items { applyDownloadItem(item) }
+        } catch {
+            guard !Task.isCancelled, generation == downloadsReloadGeneration else { return }
+            downloadsPaginationError = "More downloads could not be loaded. Please try again."
+        }
+    }
+
+    func enqueueDownload(chapterID: Int64) async {
+        guard !downloadBusyChapters.contains(chapterID) else { return }
+        downloadBusyChapters.insert(chapterID)
+        downloadOperationErrors.removeValue(forKey: chapterID)
+        defer { downloadBusyChapters.remove(chapterID) }
+        do {
+            guard let service = downloadService else { throw LibraryDownloadServiceError.storageUnavailable }
+            let item = try await service.enqueue(chapterID: chapterID)
+            applyDownloadItem(item)
+            await refreshDownloads(preservingLoadedRows: true)
+            await startDownloads()
+        } catch {
+            downloadOperationErrors[chapterID] = downloadErrorMessage(error)
+        }
+    }
+
+    func retryDownload(jobID: UUID) async {
+        guard !downloadBusyJobs.contains(jobID) else { return }
+        downloadBusyJobs.insert(jobID)
+        defer { downloadBusyJobs.remove(jobID) }
+        var chapterID: Int64?
+        do {
+            chapterID = try await store.downloadItem(jobID: jobID)?.chapter.id
+            if let chapterID { downloadOperationErrors.removeValue(forKey: chapterID) }
+            guard let service = downloadService else { throw LibraryDownloadServiceError.storageUnavailable }
+            let item = try await service.retry(jobID: jobID)
+            applyDownloadItem(item)
+            await refreshDownloads(preservingLoadedRows: true)
+            await startDownloads()
+        } catch {
+            if let chapterID { downloadOperationErrors[chapterID] = downloadErrorMessage(error) }
+            else { downloadsError = downloadErrorMessage(error) }
+        }
+    }
+
+    func cancelDownload(jobID: UUID) async {
+        guard !downloadBusyJobs.contains(jobID) else { return }
+        downloadBusyJobs.insert(jobID)
+        downloadCancellingJobs.insert(jobID)
+        defer {
+            downloadBusyJobs.remove(jobID)
+            downloadCancellingJobs.remove(jobID)
+        }
+        var chapterID: Int64?
+        do {
+            chapterID = try await store.downloadItem(jobID: jobID)?.chapter.id
+            if let chapterID { downloadOperationErrors.removeValue(forKey: chapterID) }
+            guard let service = downloadService else { throw LibraryDownloadServiceError.storageUnavailable }
+            if let item = try await service.cancel(jobID: jobID) { applyDownloadItem(item) }
+            await refreshDownloads(preservingLoadedRows: true)
+        } catch {
+            if let chapterID { downloadOperationErrors[chapterID] = downloadErrorMessage(error) }
+            else { downloadsError = downloadErrorMessage(error) }
+        }
+    }
+
+    func deleteDownload(jobID: UUID) async {
+        guard !downloadBusyJobs.contains(jobID) else { return }
+        downloadBusyJobs.insert(jobID)
+        defer { downloadBusyJobs.remove(jobID) }
+        var chapterID: Int64?
+        do {
+            chapterID = try await store.downloadItem(jobID: jobID)?.chapter.id
+            if let chapterID { downloadOperationErrors.removeValue(forKey: chapterID) }
+            guard let service = downloadService else { throw LibraryDownloadServiceError.storageUnavailable }
+            if let item = try await service.delete(jobID: jobID) { applyDownloadItem(item) }
+            else {
+                downloads.removeAll { $0.jobID == jobID }
+                if let chapterID {
+                    downloadStates.removeValue(forKey: chapterID)
+                    downloadChapterGenerations[chapterID, default: 0] &+= 1
+                }
+            }
+            await refreshDownloads(preservingLoadedRows: true)
+        } catch {
+            if let chapterID { downloadOperationErrors[chapterID] = downloadErrorMessage(error) }
+            else { downloadsError = downloadErrorMessage(error) }
+        }
+    }
+
+    /// Only user actions enqueue/retry/start call this. The task belongs to
+    /// AppModel and keeps consuming progress when the screen disappears.
+    func startDownloads() async {
+        guard downloadTask == nil, downloadsForegroundActive, let service = downloadService else { return }
+        downloadQueueIsRunning = true
+        downloadQueueIsPausing = false
+        downloadsError = nil
+        downloadProgress = nil
+        downloadTask = Task { [weak self] in
+            guard let self else { return }
+            var failure: String?
+            do {
+                guard self.downloadsForegroundActive, !self.downloadQueueIsPausing else {
+                    self.downloadQueueIsRunning = false
+                    self.downloadQueueIsPausing = false
+                    self.downloadTask = nil
+                    return
+                }
+                let run = try await service.start()
+                if self.downloadQueueIsPausing || !self.downloadsForegroundActive {
+                    try await service.pause()
+                }
+                for await progress in run.updates {
+                    guard progress.runID == run.id else { continue }
+                    self.downloadProgress = progress
+                    if let item = progress.item {
+                        let prior = self.downloadStates[item.chapter.id ?? 0]?.state
+                        self.applyDownloadItem(item)
+                        if prior != item.state { await self.refreshDownloads(preservingLoadedRows: true) }
+                    }
+                    if let error = progress.error { failure = self.downloadErrorMessage(error) }
+                }
+            } catch {
+                failure = self.downloadErrorMessage(error)
+            }
+            await self.refreshDownloads(preservingLoadedRows: true)
+            if let failure { self.downloadsError = failure }
+            self.downloadQueueIsRunning = false
+            self.downloadQueueIsPausing = false
+            self.downloadTask = nil
+        }
+    }
+
+    func pauseDownloads() async {
+        guard downloadQueueIsRunning, !downloadQueueIsPausing, let service = downloadService else { return }
+        downloadQueueIsPausing = true
+        do { try await service.pause() }
+        catch { downloadsError = downloadErrorMessage(error) }
+        await refreshDownloads(preservingLoadedRows: true)
+    }
+
+    func downloadsSceneChanged(sceneID: UUID, active: Bool) {
+        if active { activeDownloadScenes.insert(sceneID) }
+        else { activeDownloadScenes.remove(sceneID) }
+        downloadsForegroundActive = !activeDownloadScenes.isEmpty
+        if !downloadsForegroundActive { Task { await pauseDownloads() } }
+    }
+
+    func openOfflineChapter(chapterID: Int64, sourceID: Int64) async throws -> OfflineReaderChapter? {
+        guard let service = downloadService else { throw LibraryDownloadServiceError.storageUnavailable }
+        try await service.prepare()
+        guard let bundle = try await store.offlineChapter(chapterID: chapterID) else { return nil }
+        guard bundle.manga.sourceId == sourceID else { throw DownloadPersistenceError.sourceIdentityMismatch }
+        let lease = try await service.openOfflineChapter(chapterID: chapterID)
+        do {
+            guard lease.identity == bundle.identity else { throw DownloadPersistenceError.staleAttempt }
+            let current = try await store.chapters(mangaId: bundle.chapter.mangaId)
+            let downloaded = try await store.downloadedChapters(mangaID: bundle.chapter.mangaId)
+            try Task.checkCancellation()
+            var seen = Set(current.compactMap(\.id))
+            var neighbours = current + downloaded.filter { chapter in
+                guard let id = chapter.id else { return false }
+                return seen.insert(id).inserted
+            }
+            if !neighbours.contains(where: { $0.id == chapterID }) { neighbours.append(bundle.chapter) }
+            neighbours.sort {
+                $0.sourceOrder == $1.sourceOrder ? ($0.id ?? 0) < ($1.id ?? 0) : $0.sourceOrder < $1.sourceOrder
+            }
+            return OfflineReaderChapter(manga: bundle.manga, chapter: bundle.chapter, neighbours: neighbours, lease: lease)
+        } catch {
+            await lease.close()
+            throw error
+        }
+    }
+
+    private func applyDownloadItem(_ item: DownloadItem) {
+        if let chapterID = item.chapter.id {
+            downloadChapterGenerations[chapterID, default: 0] &+= 1
+            downloadStates[chapterID] = ChapterDownloadStatus(jobID: item.jobID, state: item.state, reason: item.reason)
+            downloadMangaByChapter[chapterID] = item.chapter.mangaId
+        }
+        if let index = downloads.firstIndex(where: { $0.jobID == item.jobID }) { downloads[index] = item }
+    }
+
+    private func downloadSourceContext(sourceID: Int64) -> DownloadSourceContext {
+        guard let registration = registry.registrationSnapshot(id: sourceID) else { return .unavailable }
+        if case let .downloadedExtension(packageName) = registration.origin,
+           extensionBusyPackages.contains(packageName) { return .configurationUnavailable }
+        do {
+            let configuration = try sourceExecutionConfiguration(id: sourceID, revision: registration.revision)
+            try registration.checkAvailability()
+            return .available(registration: registration, expectedConfiguration: configuration)
+        } catch { return .configurationUnavailable }
+    }
+
+    private func downloadErrorMessage(_ error: Error) -> String {
+        (error as? LibraryDownloadServiceError)?.errorDescription
+            ?? (error as? DownloadPersistenceError)?.errorDescription
+            ?? (error as? DownloadContentError)?.errorDescription
+            ?? (error as? DownloadImageValidationError)?.errorDescription
+            ?? "The download could not finish. Your reading data and completed downloads have been kept."
     }
 
     func source(id: Int64) -> (any KamiSource)? {
@@ -375,8 +745,10 @@ final class AppModel: ObservableObject {
         extensionErrors.removeValue(forKey: packageName)
         extensionMessage = nil
         if saved.enabled || enableAfterSaving {
-            revokeExtension(packageName: packageName)
             do {
+                if await revokeExtension(packageName: packageName) != nil {
+                    throw LibraryDownloadServiceError.storageUnavailable
+                }
                 if !saved.enabled {
                     try await store.setExtensionEnabled(true, packageName: packageName)
                 }
@@ -494,8 +866,12 @@ final class AppModel: ObservableObject {
                 }
             } else {
                 try await store.setExtensionEnabled(false, packageName: packageName)
-                revokeExtension(packageName: installed.packageName)
-                extensionErrors.removeValue(forKey: packageName)
+                if let warning = await revokeExtension(packageName: installed.packageName) {
+                    extensionErrors[packageName] = warning
+                    extensionMessage = "The source is disabled. \(warning)"
+                } else {
+                    extensionErrors.removeValue(forKey: packageName)
+                }
             }
             await reloadInstalledExtensions()
         } catch {
@@ -534,7 +910,9 @@ final class AppModel: ObservableObject {
             do {
                 // Installed bytes have already changed. The old runtime must
                 // not survive an update that cannot construct its replacement.
-                revokeExtension(packageName: admission.packageName)
+                if await revokeExtension(packageName: admission.packageName) != nil {
+                    throw LibraryDownloadServiceError.storageUnavailable
+                }
                 try await activateExtension(packageName: admission.packageName)
             } catch {
                 let message = await failActivation(packageName: admission.packageName, error: error)
@@ -542,8 +920,11 @@ final class AppModel: ObservableObject {
                 extensionMessage = "Installed securely; source is inactive. \(message)"
                 return
             }
-        } else {
-            revokeExtension(packageName: admission.packageName)
+        } else if let warning = await revokeExtension(packageName: admission.packageName) {
+            extensionErrors[admission.packageName] = warning
+            await reloadInstalledExtensions()
+            extensionMessage = "Installed securely; the source is disabled. \(warning)"
+            return
         }
         await reloadInstalledExtensions()
         extensionMessage = "Installed \(admission.packageName) \(admission.versionName) securely."
@@ -565,6 +946,14 @@ final class AppModel: ObservableObject {
         try Task.checkCancellation()
         try await preferencesService.verifyCurrentExecution(configuration)
         try Task.checkCancellation()
+        let priorSourceIDs = publishedSourceIDs(packageName: packageName)
+        if !priorSourceIDs.isEmpty {
+            // A fresh restore has no old facade to revoke. Keep its durable
+            // queued chapters waiting for the user's explicit Start action.
+            try await invalidateDownloadSources(sourceIDs: priorSourceIDs.union(sources.map(\.id)))
+            try await preferencesService.verifyCurrentExecution(configuration)
+            try Task.checkCancellation()
+        }
         try registry.replaceDownloaded(sources: sources, admission: admission)
         sourceExecutionStates = sourceExecutionStates.filter { $0.value.packageName != packageName }
         for source in sources {
@@ -578,20 +967,46 @@ final class AppModel: ObservableObject {
         extensionErrors.removeValue(forKey: packageName)
     }
 
-    private func revokeExtension(packageName: String) {
+    private func publishedSourceIDs(packageName: String) -> Set<Int64> {
+        Set(registry.sources.compactMap { source in
+            registry.origin(of: source.id) == .downloadedExtension(packageName: packageName) ? source.id : nil
+        }).union(sourceExecutionStates.compactMap { id, execution in
+            execution.packageName == packageName ? id : nil
+        })
+    }
+
+    private func invalidateDownloadSources(sourceIDs: Set<Int64>) async throws {
+        guard let service = downloadService, !sourceIDs.isEmpty else { return }
+        try await service.invalidateSources(sourceIDs: sourceIDs)
+        await refreshDownloads(preservingLoadedRows: true)
+    }
+
+    /// Durable invalidation precedes registry revocation. If storage fails,
+    /// still revoke the facade and report that download cleanup needs attention.
+    private func revokeExtension(packageName: String) async -> String? {
+        var warning: String?
+        let sourceIDs = publishedSourceIDs(packageName: packageName)
+            .union(installedExtension(packageName: packageName)?.sourceIDs ?? [])
+        do {
+            try await invalidateDownloadSources(sourceIDs: sourceIDs)
+        } catch {
+            warning = "Pending downloads could not be fully stopped or cleaned up. Open Downloads to retry."
+            downloadsError = warning
+        }
         registry.removeDownloaded(packageName: packageName)
         sourceExecutionStates = sourceExecutionStates.filter { $0.value.packageName != packageName }
         sourceGeneration &+= 1
+        return warning
     }
 
     private func failActivation(packageName: String, error: Error) async -> String {
-        revokeExtension(packageName: packageName)
         var message = describeExtensionError(error)
         do {
             try await store.setExtensionEnabled(false, packageName: packageName)
         } catch {
             message += " The source is inactive, but its disabled setting could not be saved. Try disabling it again."
         }
+        if let warning = await revokeExtension(packageName: packageName) { message += " " + warning }
         extensionErrors[packageName] = message
         extensionMessage = "Source is inactive: \(message)"
         return message

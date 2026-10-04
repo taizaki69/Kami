@@ -294,6 +294,45 @@ final class BaoziManhuaInterpretedSourceTests: XCTestCase {
         XCTAssertTrue(source.compatibilityReport().findings.isEmpty)
     }
 
+    func testBaoziImageCapacityFailsClosedAndRetainedRequestKeepsRedirectInterceptor() async throws {
+        let imageURL = "https://static.baozimh.com/chapter/001.jpg"
+        let rewrittenURL = "https://cn.baozimh.com/chapter/002.jpg"
+        let transport = SingleExchangeRoutingTransport(responses: [
+            imageURL: .init(finalURL: imageURL, statusCode: 302,
+                headers: [.init(name: "Location", value: "https://redirect.example/chapter/002.jpg")]),
+            rewrittenURL: .init(finalURL: rewrittenURL, statusCode: 200, body: [4, 5]),
+        ])
+        let source = try PinnedInterpretedSource.baoziManhua1629(
+            apkBytes: corpusAPK(), transport: transport,
+            preferences: try InterpretedExtensionPreferences(strings: ["BAOZI_BANNER": "0"])
+        )
+        let page = PageCompat(index: 0, imageURL: "https://static.baozicdn.com/chapter/001.jpg")
+        // Hold the real production capacity. A plain projected request here
+        // would silently lose the configured client and redirect interceptor.
+        var retained: [ImageRequest] = []
+        for _ in 0..<4_096 {
+            let generated = await source.getImageRequest(page: page)
+            let request = try XCTUnwrap(generated)
+            XCTAssertNotNil(request.sourceExecutionID)
+            retained.append(request)
+        }
+        let overflow = await source.getImageRequest(page: page)
+        XCTAssertNil(overflow)
+        let before = await transport.snapshot()
+        XCTAssertTrue(before.isEmpty)
+
+        let executed = try await retained[0].executeSourceRequest()
+        XCTAssertEqual(executed?.finalURL, rewrittenURL)
+        XCTAssertEqual(executed?.body, [4, 5])
+        let requests = await transport.snapshot()
+        let automatic = await transport.automaticExecutionCount()
+        XCTAssertEqual(requests.map(\.url), [imageURL, rewrittenURL])
+        XCTAssertEqual(automatic, 0)
+        XCTAssertEqual(retained.count, 4_096)
+        // Capacity is a budget failure, not a fabricated compatibility gap.
+        XCTAssertTrue(source.compatibilityReport().findings.isEmpty)
+    }
+
     func testBaoziRejectsInvalidPreferencesBeforeAnyTransport() async throws {
         let apk = try corpusAPK()
         let invalidPreferences: [InterpretedExtensionPreferences] = [
