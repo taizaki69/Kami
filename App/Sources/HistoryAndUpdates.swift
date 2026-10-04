@@ -36,14 +36,15 @@ private struct ChapterReadingRoute: Hashable {
     let manga: Manga
     let chapterID: Int64
     let chapterURL: String
+    let presentation: LibraryPresentationGeneration
 }
 
 @MainActor
 struct UpdatesView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var refreshTask: Task<Void, Never>?
 
     var body: some View {
+        let presentation = model.libraryPresentation
         NavigationStack {
             List {
                 checkSection
@@ -53,7 +54,7 @@ struct UpdatesView: View {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(.orange)
                         Button("Reload saved results") {
-                            Task { await model.refreshLibraryUpdates() }
+                            model.performLibraryOperation(expected: presentation.generation) { await model.refreshLibraryUpdates() }
                         }
                     }
                 }
@@ -66,7 +67,8 @@ struct UpdatesView: View {
                     ForEach(model.libraryUpdateGroups) { group in
                         Section {
                             ForEach(group.discoveries) { discovery in
-                                ChapterReadingLink(manga: discovery.manga, chapter: discovery.chapter)
+                                ChapterReadingLink(manga: discovery.manga, chapter: discovery.chapter,
+                                                   presentation: presentation.generation)
                             }
                         } header: {
                             VStack(alignment: .leading, spacing: 2) {
@@ -87,7 +89,7 @@ struct UpdatesView: View {
                             ProgressView("Loading more saved chapters…")
                         } else if model.libraryUpdatesHasMore {
                             Button("Load more saved chapters") {
-                                Task { await model.loadMoreLibraryUpdates() }
+                                model.performLibraryOperation(expected: presentation.generation) { await model.loadMoreLibraryUpdates() }
                             }
                             .disabled(model.libraryUpdatesLoading)
                         }
@@ -96,18 +98,14 @@ struct UpdatesView: View {
                 issuesSection
             }
             .navigationTitle("Updates")
-            .refreshable { await model.checkLibraryForUpdates() }
+            .refreshable { await model.runLibraryOperation(expected: presentation.generation) { await model.checkLibraryForUpdates() } }
             .navigationDestination(for: ChapterReadingRoute.self) { route in
                 PersistedChapterReaderDestination(manga: route.manga, chapterID: route.chapterID,
-                                                 chapterURL: route.chapterURL)
+                                                 chapterURL: route.chapterURL, presentation: route.presentation)
             }
-            .onAppear {
-                refreshTask?.cancel()
-                refreshTask = Task { await model.refreshLibraryUpdates() }
-            }
-            .onDisappear {
-                refreshTask?.cancel()
-                refreshTask = nil
+            .task(id: presentation) {
+                guard !presentation.isExclusive else { return }
+                await model.runLibraryOperation(expected: presentation.generation) { await model.refreshLibraryUpdates() }
             }
         }
     }
@@ -123,7 +121,8 @@ struct UpdatesView: View {
     private var loadingFinishedResults: Bool { model.libraryUpdateProgress?.phase == .finished }
 
     private var checkSection: some View {
-        Section {
+        let presentation = model.libraryPresentation
+        return Section {
             if model.libraryUpdateIsRunning {
                 HStack {
                     ProgressView()
@@ -145,7 +144,7 @@ struct UpdatesView: View {
                 Text(checkTitle).font(.headline)
                 Text(checkDescription).font(.footnote).foregroundStyle(.secondary)
                 Button("Check for updates") {
-                    Task { await model.checkLibraryForUpdates() }
+                    model.performLibraryOperation(expected: presentation.generation) { await model.checkLibraryForUpdates() }
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -295,7 +294,6 @@ struct HistoryView: View {
     @State private var entries: [HistoryReadingEntry] = []
     @State private var loading = true
     @State private var errorText: String?
-    @State private var refreshTask: Task<Void, Never>?
     @State private var reloadGeneration: UInt64 = 0
 
     private static let formatter: RelativeDateTimeFormatter = {
@@ -305,16 +303,18 @@ struct HistoryView: View {
     }()
 
     var body: some View {
+        let presentation = model.libraryPresentation
         NavigationStack {
             List {
                 if let errorText {
                     Section {
                         Label(errorText, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
-                        Button("Retry") { Task { await reload() } }
+                        Button("Retry") { model.performLibraryOperation(expected: presentation.generation) { await reload() } }
                     }
                 }
                 ForEach(entries) { entry in
                     ChapterReadingLink(manga: entry.manga, chapter: entry.chapter,
+                        presentation: presentation.generation,
                         lastRead: Self.formatter.localizedString(
                             for: Date(timeIntervalSince1970: TimeInterval(entry.lastRead)), relativeTo: Date()),
                         showManga: true)
@@ -329,18 +329,16 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("History")
-            .refreshable { await reload() }
+            .refreshable { await model.runLibraryOperation(expected: presentation.generation) { await reload() } }
             .navigationDestination(for: ChapterReadingRoute.self) { route in
                 PersistedChapterReaderDestination(manga: route.manga, chapterID: route.chapterID,
-                                                 chapterURL: route.chapterURL)
+                                                 chapterURL: route.chapterURL, presentation: route.presentation)
             }
-            .onAppear {
-                refreshTask?.cancel()
-                refreshTask = Task { await reload() }
+            .task(id: presentation) {
+                guard !presentation.isExclusive else { return }
+                await model.runLibraryOperation(expected: presentation.generation) { await reload() }
             }
             .onDisappear {
-                refreshTask?.cancel()
-                refreshTask = nil
                 reloadGeneration &+= 1
             }
         }
@@ -372,13 +370,14 @@ private struct ChapterReadingLink: View {
     @EnvironmentObject private var model: AppModel
     let manga: Manga
     let chapter: Chapter
+    let presentation: LibraryPresentationGeneration
     var lastRead: String?
     var showManga = false
 
     var body: some View {
         if let chapterID = chapter.id {
             NavigationLink(value: ChapterReadingRoute(manga: manga, chapterID: chapterID,
-                                                     chapterURL: chapter.url)) {
+                                                     chapterURL: chapter.url, presentation: presentation)) {
                 HStack(spacing: 12) {
                     if showManga {
                         CoverImage(url: manga.thumbnailURL, cornerRadius: 4).frame(width: 36, height: 52)

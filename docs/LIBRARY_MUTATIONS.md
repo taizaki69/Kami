@@ -70,13 +70,11 @@ concurrent-edit version. Same-generation actions retain their existing merge
 and last-write behavior. No schema migration, epoch rotation API, restore
 preview or merge is added.
 
-Restore still requires shared synchronous intent registration before scheduling,
-exclusive acquisition until workers drain, and presentation invalidation across
-all scenes. The inventory includes reading saves, initial Detail opening,
-scan/download ownership, queued downloads, settings, installation/trust and
-repository writes. For example, initial Detail opening still captures its
-first snapshot after waiting for pending reading saves; a queued opening must
-participate in the future app barrier before restore can be enabled. Scan
+The [shared operation coordinator](LIBRARY_OPERATIONS.md) now registers app
+work before scheduling, retains reader/run/prompt ownership through drainage,
+and publishes scene generation changes under exclusion. Initial Detail and
+persisted-reader opening retain the generation before the reading-save wait.
+Store contexts remain necessary for stale deferred writes. Scan
 completion/skip/failure rows keep their existing operational lifecycle.
 
 The eventual restore transaction must revalidate preview dependencies and

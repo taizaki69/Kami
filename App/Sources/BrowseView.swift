@@ -7,12 +7,13 @@ struct BrowseView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
+        let presentation = model.libraryPresentation.generation
         NavigationStack {
             List {
                 Section("Sources") {
                     ForEach(model.sources, id: \.id) { source in
                         NavigationLink {
-                            SourceBrowseView(source: source)
+                            SourceBrowseView(source: source, presentation: presentation)
                         } label: {
                             HStack {
                                 Image(systemName: "globe")
@@ -58,6 +59,7 @@ struct SourceBrowseView: View {
     let sourceID: Int64
     let sourceName: String
     @State private var defaultFilters: [SourceFilter]
+    @State private var presentation: LibraryPresentationGeneration
 
     @State private var mode: Mode = .popular
     @State private var query = ""
@@ -77,9 +79,10 @@ struct SourceBrowseView: View {
     @State private var requestTask: Task<Void, Never>?
     @State private var filterGeneration = 0
 
-    init(source: any KamiSource) {
+    init(source: any KamiSource, presentation: LibraryPresentationGeneration) {
         self.sourceID = source.id
         self.sourceName = source.name
+        _presentation = State(initialValue: presentation)
         let filters = source.getFilterList()
         _defaultFilters = State(initialValue: filters)
         _appliedFilters = State(initialValue: filters)
@@ -118,7 +121,7 @@ struct SourceBrowseView: View {
                         MangaDetailView(
                             manga: Manga(sourceId: sourceID, from: manga),
                             prefetched: manga,
-                            prefetchedSourceRevision: sessionRevision
+                            prefetchedSourceRevision: sessionRevision, presentation: presentation
                         )
                     } label: {
                         HStack(spacing: 12) {
@@ -170,29 +173,31 @@ struct SourceBrowseView: View {
             }
         }
         .task(id: sourceRevision) {
-            let revision = sourceRevision
-            if sessionRevision != revision {
-                stopRequests()
-                items = []
-                hasNext = false
-                showingFilters = false
-                filterRefreshCompleted = false
-                guard let source = model.source(id: sourceID) else {
-                    sessionRevision = nil
-                    defaultFilters = []
-                    appliedFilters = []
-                    errorText = "Source not available. Enable it in Extensions to browse again."
-                    return
+            await model.runLibraryOperation(expected: presentation) {
+                let revision = sourceRevision
+                if sessionRevision != revision {
+                    stopRequests()
+                    items = []
+                    hasNext = false
+                    showingFilters = false
+                    filterRefreshCompleted = false
+                    guard let source = model.source(id: sourceID) else {
+                        sessionRevision = nil
+                        defaultFilters = []
+                        appliedFilters = []
+                        errorText = "Source not available. Enable it in Extensions to browse again."
+                        return
+                    }
+                    sessionRevision = revision
+                    defaultFilters = source.getFilterList()
+                    appliedFilters = defaultFilters
+                    filterSearchEnabled = false
+                    filterSchemaReady = !source.supportsFilterFetching
                 }
-                sessionRevision = revision
-                defaultFilters = source.getFilterList()
-                appliedFilters = defaultFilters
-                filterSearchEnabled = false
-                filterSchemaReady = !source.supportsFilterFetching
-            }
-            if items.isEmpty { await load(page: 1, reset: true) }
-            if model.source(id: sourceID)?.supportsFilterFetching == true {
-                await refreshFiltersIfNeeded()
+                if items.isEmpty { await load(page: 1, reset: true) }
+                if model.source(id: sourceID)?.supportsFilterFetching == true {
+                    await refreshFiltersIfNeeded()
+                }
             }
         }
         .onDisappear { stopRequests() }
@@ -202,11 +207,13 @@ struct SourceBrowseView: View {
             startLoad(page: 1, reset: true)
         }
         .refreshable {
-            requestTask?.cancel()
-            if model.source(id: sourceID)?.supportsFilterFetching == true {
-                await refreshFiltersIfNeeded()
+            await model.runLibraryOperation(expected: presentation) {
+                requestTask?.cancel()
+                if model.source(id: sourceID)?.supportsFilterFetching == true {
+                    await refreshFiltersIfNeeded()
+                }
+                await load(page: 1, reset: true)
             }
-            await load(page: 1, reset: true)
         }
         .toolbar {
             if hasCurrentSource && !defaultFilters.isEmpty {
@@ -269,7 +276,7 @@ struct SourceBrowseView: View {
     private func startLoad(page: Int, reset: Bool = false) {
         guard hasCurrentSource else { return }
         requestTask?.cancel()
-        requestTask = Task { await load(page: page, reset: reset) }
+        requestTask = model.performLibraryOperation(expected: presentation) { await load(page: page, reset: reset) }
     }
 
     private func load(page requestedPage: Int, reset: Bool = false) async {

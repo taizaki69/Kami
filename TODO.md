@@ -6,8 +6,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-04
 
 The full native-reader and compatibility objective remains active. The current
-continuation binds category, membership and source-result writes to contexts
-issued with their stored snapshots.
+continuation integrates shared operation ownership and scene invalidation,
+building on snapshot-issued contexts for category, membership and source writes.
 It builds on durable FoolSlide website identity, atomic reader state with database-issued reading targets, bounded
 native export to Files, Mihon gzip/raw backup decoding, offline downloads,
 updates, History resume and revocable source registrations. Restoration remains
@@ -62,7 +62,13 @@ must not be used as evidence for the current commit.
       Updates IDs/cursors also compare exact bytes. Five reproduced regressions
       and all 296 Core/SQLite tests pass locally; the implementation PR records
       exact-commit Apple verification separately.
-- [ ] Add shared operation/scene barriers required before enabling restoration.
+- [x] Integrate shared synchronous operation admission across scenes, with
+      reader/run/prompt lifetime ownership, cancellation drainage, old-route
+      generation rejection and publication invalidation. Local checks pass
+      327 Core/SQLite, 112 portable Core and 371 Compat; the implementation PR
+      records exact-head Apple compilation and artifact evidence separately.
+- [ ] Exercise multiple windows, suspended providers and reader cleanup on an
+      Apple device/simulator; package ordering tests do not prove UI interaction.
 - [x] Require an opaque store/epoch context for category, membership and source
       result writes, captured with values before scheduling and retained through
       provider suspension. Reject stale, foreign and malformed generations inside

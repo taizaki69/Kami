@@ -4,26 +4,31 @@ Last updated: 2026-10-04 (America/Lima)
 
 ## Canonical continuation — 2026-10-04
 
-The active continuation is `assistant/library-mutation-contexts-20261004`,
-based on `1c6b43e2a199171766358e51ab9d8e2c5c93a22f` from
-[PR #18](https://github.com/taizaki69/Kami/pull/18). That checkpoint is ready
-and unmerged: Linux 371 Compat + 296 Core/SQLite, macOS 371 Compat + 299 Core,
+The active continuation is `assistant/shared-library-operations-20261004`,
+based on `32482b1ff5e41a6fa758a1bd550c38171dfbf8c3` from
+[PR #19](https://github.com/taizaki69/Kami/pull/19). That checkpoint is ready
+and unmerged: Linux 371 Compat + 310 Core/SQLite, macOS 371 Compat + 313 Core,
 simulator/device and unsigned IPA all passed. Its CI merge tree matches the
 published head. Evidence is in
-`.git/checkpoints/20261004-exact-chapter-url-identity/published-ci-evidence.json`.
-The current increment pairs opaque store/epoch contexts with stored snapshots
-and requires them for category, membership and source-result writes. UI actions
-capture the displayed context before scheduling; source callbacks retain it
-through suspension. Bare upsert/replace helpers are no longer public.
-Local checks pass 310 Core/SQLite, 97 portable Core and 371 Compat tests,
-including 14 new context/rollback/cancellation cases. See
-[library mutations](docs/LIBRARY_MUTATIONS.md) and the
+`.git/checkpoints/20261004-library-mutation-contexts/published-ci-evidence.json`.
+The current increment integrates shared synchronous operation ownership,
+reader/run/prompt lifetimes and generation invalidation across WindowGroup
+scenes. Existing database-issued contexts and reading targets remain required.
+Local checks pass 327 Core/SQLite, 112 portable Core and 371 Compat tests,
+including 15 coordinator and two writer regression cases. See
+[shared operations](docs/LIBRARY_OPERATIONS.md) and its
+[verification record](docs/VERIFICATION-2026-10-04-LIBRARY-OPERATIONS.md).
+Restore is still disabled; immutable preview, durable dependency checks and
+atomic merge remain pending. Publication and exact-head CI checks are automatic;
+PRs stay unmerged. Evidence and continuation records are checkpointed under
+`.git/checkpoints/20261004-shared-library-operations/`.
+
+The mutation-context continuation paired opaque store/epoch contexts with
+stored snapshots and required them for category, membership and source-result
+writes. UI actions capture displayed contexts before scheduling; source
+callbacks retain them through suspension. Raw upsert/replace helpers became
+internal. See [library mutations](docs/LIBRARY_MUTATIONS.md) and its
 [verification record](docs/VERIFICATION-2026-10-04-LIBRARY-MUTATIONS.md).
-Shared exclusive intent/scene barriers, immutable preview and atomic merge
-remain pending. Restore is still disabled. Publication/checks are automatic;
-the implementation PR records exact-head Apple verification when completed.
-Evidence and the next boundary are checkpointed under
-`.git/checkpoints/20261004-library-mutation-contexts/`.
 
 The chapter identity continuation was `assistant/exact-chapter-url-identity-20261004`,
 based on `b15344da383a33b6a2d56d83fe2ed0f46d4a0877` from

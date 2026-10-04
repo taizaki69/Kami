@@ -5,15 +5,16 @@ private struct DownloadReadingRoute: Hashable {
     let manga: Manga
     let chapterID: Int64
     let chapterURL: String
+    let presentation: LibraryPresentationGeneration
 }
 
 @MainActor
 struct DownloadsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var refreshTask: Task<Void, Never>?
 
     var body: some View {
+        let presentation = model.libraryPresentation
         NavigationStack {
             List {
                 Section {
@@ -26,11 +27,11 @@ struct DownloadsView: View {
                             Text(model.downloadQueueIsPausing ? "Pausing downloads…" : "Downloading chapters…")
                         }
                         Button(model.downloadQueueIsPausing ? "Pausing…" : "Pause queue") {
-                            Task { await model.pauseDownloads() }
+                            model.requestDownloadPause(expected: presentation.generation)
                         }
                         .disabled(model.downloadQueueIsPausing)
                     } else if (model.downloadsSummary?.queued ?? 0) > 0 {
-                        Button("Start queued downloads") { Task { await model.startDownloads() } }
+                        Button("Start queued downloads") { model.performLibraryOperation(expected: presentation.generation) { await model.startDownloads() } }
                             .buttonStyle(.borderedProminent)
                     }
                 }
@@ -55,18 +56,18 @@ struct DownloadsView: View {
                 if let error = model.downloadsError {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
-                        Button("Reload downloads") { Task { await model.refreshDownloads() } }
+                        Button("Reload downloads") { model.performLibraryOperation(expected: presentation.generation) { await model.refreshDownloads() } }
                     }
                 }
                 if let item = activeDownload {
                     Section("Current download") {
                         downloadDescription(item)
                         ChapterDownloadControls(manga: item.manga, chapter: item.chapter,
-                                                inLibrary: item.manga.inLibrary)
+                                                inLibrary: item.manga.inLibrary, presentation: presentation.generation)
                     }
                 }
                 ForEach(model.downloads) { item in
-                    downloadRow(item)
+                    downloadRow(item, presentation: presentation.generation)
                 }
                 if model.downloads.isEmpty && model.downloadsError == nil {
                     Section {
@@ -86,7 +87,7 @@ struct DownloadsView: View {
                         if model.downloadsLoadingMore {
                             ProgressView("Loading more downloads…")
                         } else if model.downloadsHasMore {
-                            Button("Load more downloads") { Task { await model.loadMoreDownloads() } }
+                            Button("Load more downloads") { model.performLibraryOperation(expected: presentation.generation) { await model.loadMoreDownloads() } }
                                 .disabled(model.downloadsLoading)
                         }
                     }
@@ -98,16 +99,12 @@ struct DownloadsView: View {
             .navigationDestination(for: DownloadReadingRoute.self) { route in
                 PersistedChapterReaderDestination(manga: route.manga, chapterID: route.chapterID,
                                                  chapterURL: route.chapterURL,
-                                                 openingPolicy: .offlineOnly)
+                                                 openingPolicy: .offlineOnly, presentation: route.presentation)
             }
-            .refreshable { await model.refreshDownloads() }
-            .onAppear {
-                refreshTask?.cancel()
-                refreshTask = Task { await model.refreshDownloads() }
-            }
-            .onDisappear {
-                refreshTask?.cancel()
-                refreshTask = nil
+            .refreshable { await model.runLibraryOperation(expected: presentation.generation) { await model.refreshDownloads() } }
+            .task(id: presentation) {
+                guard !presentation.isExclusive else { return }
+                await model.runLibraryOperation(expected: presentation.generation) { await model.refreshDownloads() }
             }
         }
     }
@@ -118,16 +115,16 @@ struct DownloadsView: View {
         return item
     }
 
-    private func downloadRow(_ item: DownloadItem) -> some View {
+    private func downloadRow(_ item: DownloadItem, presentation: LibraryPresentationGeneration) -> some View {
         Section {
             downloadDescription(item)
             if item.state == .finished, let chapterID = item.chapter.id {
                 NavigationLink("Read offline", value: DownloadReadingRoute(manga: item.manga, chapterID: chapterID,
-                                                                          chapterURL: item.chapter.url))
+                                                                          chapterURL: item.chapter.url, presentation: presentation))
                     .accessibilityHint("Read this downloaded chapter without using its source or a network connection.")
             }
             ChapterDownloadControls(manga: item.manga, chapter: item.chapter,
-                                    inLibrary: item.manga.inLibrary)
+                                    inLibrary: item.manga.inLibrary, presentation: presentation)
         }
     }
 
@@ -215,6 +212,7 @@ struct ChapterDownloadControls: View {
     let manga: Manga
     let chapter: Chapter
     let inLibrary: Bool
+    let presentation: LibraryPresentationGeneration
     @State private var confirmRemoval = false
 
     var body: some View {
@@ -230,11 +228,13 @@ struct ChapterDownloadControls: View {
                     } else {
                         switch state.state {
                         case .queued, .downloading:
-                            Button("Cancel download", role: .cancel) { Task { await model.cancelDownload(jobID: state.jobID) } }
+                            Button("Cancel download", role: .cancel) {
+                                model.requestDownloadCancellation(jobID: state.jobID, expected: presentation)
+                            }
                         case .finished:
                             Button("Delete download", role: .destructive) { confirmRemoval = true }
                         case .paused, .failed, .cancelled:
-                            Button("Retry download") { Task { await model.retryDownload(jobID: state.jobID) } }
+                            Button("Retry download") { model.performLibraryOperation(expected: presentation) { await model.retryDownload(jobID: state.jobID) } }
                                 .disabled(!sourceAvailable || !inLibrary)
                             if !inLibrary {
                                 Text("Add this manga to your library before downloading.")
@@ -247,14 +247,14 @@ struct ChapterDownloadControls: View {
                         case .deleting:
                             Text("Close this chapter if it is open. Its files will be removed when reading finishes.")
                                 .font(.footnote).foregroundStyle(.secondary)
-                            Button("Retry removal") { Task { await model.deleteDownload(jobID: state.jobID) } }
+                            Button("Retry removal") { model.performLibraryOperation(expected: presentation) { await model.deleteDownload(jobID: state.jobID) } }
                         }
                     }
                     if model.downloadBusyJobs.contains(state.jobID) && !model.downloadCancellingJobs.contains(state.jobID) {
                         ProgressView("Updating download…")
                     }
                 } else {
-                    Button("Download chapter") { Task { await model.enqueueDownload(chapterID: chapterID) } }
+                    Button("Download chapter") { model.performLibraryOperation(expected: presentation) { await model.enqueueDownload(chapterID: chapterID) } }
                         .disabled(!sourceAvailable || !inLibrary || model.downloadBusyChapters.contains(chapterID))
                     if !inLibrary {
                         Text("Add this manga to your library before downloading.").font(.caption).foregroundStyle(.secondary)
@@ -270,7 +270,7 @@ struct ChapterDownloadControls: View {
                       || model.downloadState(for: chapterID).map { model.downloadBusyJobs.contains($0.jobID) } == true)
             .confirmationDialog("Delete this download?", isPresented: $confirmRemoval, titleVisibility: .visible) {
                 if let state = model.downloadState(for: chapterID) {
-                    Button("Delete download", role: .destructive) { Task { await model.deleteDownload(jobID: state.jobID) } }
+                    Button("Delete download", role: .destructive) { model.performLibraryOperation(expected: presentation) { await model.deleteDownload(jobID: state.jobID) } }
                 }
                 Button("Keep download", role: .cancel) {}
             } message: {

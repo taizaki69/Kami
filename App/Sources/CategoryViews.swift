@@ -27,12 +27,13 @@ struct CategoriesView: View {
 
     var body: some View {
         let snapshot = model.librarySnapshot
+        let presentation = model.libraryPresentation
         NavigationStack {
             List {
                 if let message = model.libraryError {
                     Section {
                         Label(message, systemImage: "exclamationmark.triangle")
-                        Button("Retry") { Task { await model.refreshLibrary() } }
+                        Button("Retry") { model.performLibraryOperation(expected: presentation.generation) { await model.refreshLibrary() } }
                     }
                 }
                 if model.categories.isEmpty {
@@ -92,8 +93,11 @@ struct CategoriesView: View {
                     .disabled(busy)
                 }
             }
-            .refreshable { await model.refreshLibrary() }
-            .task { await model.refreshLibrary() }
+            .refreshable { await model.runLibraryOperation(expected: presentation.generation) { await model.refreshLibrary() } }
+            .task(id: presentation) {
+                guard !presentation.isExclusive else { return }
+                await model.runLibraryOperation(expected: presentation.generation) { await model.refreshLibrary() }
+            }
             .sheet(item: $nameRequest) { request in
                 CategoryNameSheet(category: request.category) { name in
                     guard let context = request.context else { throw LibraryMutationError.snapshotUnavailable }
@@ -145,11 +149,12 @@ struct CategoriesView: View {
     private func perform(_ operation: @escaping @MainActor () async throws -> Void) {
         guard !busy else { return }
         busy = true
-        Task {
+        let worker = model.performLibraryOperation {
             defer { busy = false }
             do { try await operation() }
             catch { errorText = model.libraryErrorMessage(for: error) }
         }
+        if worker == nil { busy = false }
     }
 }
 
@@ -209,7 +214,7 @@ private struct CategoryNameSheet: View {
         let savedName = name
         saving = true
         errorText = nil
-        Task {
+        let worker = model.performLibraryOperation {
             defer { saving = false }
             do {
                 try await onSave(savedName)
@@ -218,6 +223,7 @@ private struct CategoryNameSheet: View {
                 errorText = model.libraryErrorMessage(for: error)
             }
         }
+        if worker == nil { saving = false }
     }
 }
 
@@ -240,6 +246,7 @@ struct CategoryAssignmentSheet: View {
     }
 
     var body: some View {
+        let presentation = model.libraryPresentation
         NavigationStack {
             Form {
                 Section {
@@ -292,11 +299,14 @@ struct CategoryAssignmentSheet: View {
                         .disabled(!ready || saving || !selectionAvailable || !draft.hasChanges)
                 }
             }
-            .task {
-                await model.refreshLibrary()
-                guard !Task.isCancelled else { return }
-                resetDraft()
-                ready = true
+            .task(id: presentation) {
+                guard !presentation.isExclusive else { return }
+                await model.runLibraryOperation(expected: presentation.generation) {
+                    await model.refreshLibrary()
+                    guard !Task.isCancelled else { return }
+                    resetDraft()
+                    ready = true
+                }
             }
             .onChange(of: model.categories) { _, categories in
                 draft.restrict(to: Set(categories.compactMap(\.id)))
@@ -349,7 +359,7 @@ struct CategoryAssignmentSheet: View {
         guard ready, selectionAvailable, draft.hasChanges, let context, !saving else { return }
         let savedDraft = draft
         saving = true
-        Task {
+        let worker = model.performLibraryOperation {
             defer { saving = false }
             do {
                 try await model.updateCategories(savedDraft, context: context)
@@ -358,5 +368,6 @@ struct CategoryAssignmentSheet: View {
                 errorText = model.libraryErrorMessage(for: error)
             }
         }
+        if worker == nil { saving = false }
     }
 }

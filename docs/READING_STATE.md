@@ -46,6 +46,11 @@ validating the original target. Explicit initial opening uses
 `readingSnapshot(sourceID:mangaURL:requestedChapterID:)`; retained readers must
 not call it to adopt a newer epoch after a suspended operation.
 
+The [shared operation coordinator](LIBRARY_OPERATIONS.md) additionally owns
+queued/active reading writes and the lifetime of open readers across scenes.
+Observer cancellation cannot release that ownership. Old routes carry a frozen
+presentation generation before their first asynchronous snapshot lookup.
+
 ## Reader behavior
 
 Detail, History, Updates and Downloads pass the captured snapshot into the

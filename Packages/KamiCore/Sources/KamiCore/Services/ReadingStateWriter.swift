@@ -122,9 +122,11 @@ public final class ReadingStateWriter {
     private let persist: Persistence
     private let pendingLimit: Int
     private let failureLimit: Int
+    private let operationCoordinator: LibraryOperationCoordinator
     private var pending: [Pending] = []
     private var active: Pending?
-    private var worker: Task<Void, Never>?
+    private var worker: Task<Void, Error>?
+    private var startingWorker = false
     private var sequence: UInt64 = 0
     private var retainedFailures: [Failure] = []
     // Only targets with retained failures need a later successful-intent barrier.
@@ -158,7 +160,7 @@ public final class ReadingStateWriter {
         }
     }
 
-    public convenience init(store: LibraryStore) {
+    public convenience init(store: LibraryStore, operationCoordinator: LibraryOperationCoordinator? = nil) {
         self.init(persisting: { target, intent in
             switch intent {
             case let .progress(page, reachedEnd, lastRead):
@@ -167,20 +169,22 @@ public final class ReadingStateWriter {
             case let .read(read):
                 return try await store.setChapterRead(read, target: target)
             }
-        })
+        }, operationCoordinator: operationCoordinator)
     }
 
     /// Deterministic test seam; production uses the guarded LibraryStore APIs.
     init(
         persisting: @escaping Persistence,
         maximumPendingIntents: Int = ReadingStateWriter.maximumPendingIntents,
-        maximumFailures: Int = ReadingStateWriter.maximumFailures
+        maximumFailures: Int = ReadingStateWriter.maximumFailures,
+        operationCoordinator: LibraryOperationCoordinator? = nil
     ) {
         precondition((1...Self.maximumPendingIntents).contains(maximumPendingIntents))
         precondition((1...Self.maximumFailures).contains(maximumFailures))
         self.persist = persisting
         self.pendingLimit = maximumPendingIntents
         self.failureLimit = maximumFailures
+        self.operationCoordinator = operationCoordinator ?? LibraryOperationCoordinator()
     }
 
     public func enqueueProgress(
@@ -250,12 +254,23 @@ public final class ReadingStateWriter {
             return receipt
         }
         pending.append(item)
-        publishFailures()
-        if worker == nil {
+        if worker == nil, !startingWorker {
             // Unstructured and never exposed: observer cancellation cannot
             // cancel this worker or discard the last reading event.
-            worker = Task { [self] in await run() }
+            startingWorker = true
+            do {
+                worker = try operationCoordinator.start(expected: operationCoordinator.state.presentation) { [self] in
+                    await run()
+                }
+            } catch {
+                pending.removeAll { $0.receipt === receipt }
+                let finite = finiteError(error)
+                recordFailure(item, error: finite)
+                receipt.resolve(.failure(finite))
+            }
+            startingWorker = false
         }
+        publishFailures()
         return receipt
     }
 
@@ -364,6 +379,7 @@ public final class ReadingStateWriter {
     private func finiteError(_ error: Error) -> Error {
         if let error = error as? ReadingStateError { return error }
         if let error = error as? ReadingStateWriterError { return error }
+        if let error = error as? LibraryOperationError { return error }
         return ReadingStateError.storageUnavailable
     }
 

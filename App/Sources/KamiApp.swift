@@ -31,6 +31,20 @@ struct RootTabView: View {
             ExtensionsView()
                 .tabItem { Label("Extensions", systemImage: "puzzlepiece") }
         }
+        .id(model.libraryPresentation.generation)
+        .disabled(model.libraryPresentation.isExclusive)
+        .overlay {
+            if model.libraryPresentation.isExclusive {
+                ProgressView("Updating library…")
+                    .padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .alert("Library operation unavailable", isPresented: Binding(
+            get: { model.libraryOperationError != nil },
+            set: { if !$0 { model.libraryOperationError = nil } }
+        )) {
+            Button("OK", role: .cancel) { model.libraryOperationError = nil }
+        } message: { Text(model.libraryOperationError ?? "") }
         .safeAreaInset(edge: .top) { ReadingSaveFailureBanner() }
         .onAppear { model.downloadsSceneChanged(sceneID: sceneID, active: scenePhase == .active) }
         .onChange(of: scenePhase) { _, phase in model.downloadsSceneChanged(sceneID: sceneID, active: phase == .active) }
