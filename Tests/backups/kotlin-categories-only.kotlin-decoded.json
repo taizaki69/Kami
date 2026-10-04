@@ -1,0 +1,18 @@
+{
+    "manga": [],
+    "categories": [
+        {
+            "name": "Reference reading",
+            "order": 7,
+            "id": 101,
+            "flags": 9
+        },
+        {
+            "name": "Reference archived",
+            "order": 4294967301,
+            "id": 202,
+            "flags": 64
+        }
+    ],
+    "sources": []
+}

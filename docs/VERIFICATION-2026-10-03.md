@@ -439,3 +439,15 @@ Tras la corrección, Linux pasa 181/181 Core con SQLite y 66/66 Core portable.
 Los logs `core-sqlite-png-final.log`, `core-portable-png-final.log` y la evidencia
 del fallo inicial quedan en el mismo checkpoint. El PR registra los workflows
 del commit corregido; los builds anteriores no se atribuyen a ese nuevo hash.
+
+El commit corregido `c794982271b95b4c6d91e73917b5392363e481ce` quedó verificado
+en [PR #13](https://github.com/taizaki69/Kami/pull/13), listo y sin fusionar:
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/37223381655) pasa
+333 Compat + 181 Core/SQLite en Linux y 333 Compat + 184 Core en macOS;
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/37223381868) pasa
+simulador y dispositivo genérico;
+[IPA](https://github.com/taizaki69/Kami/actions/runs/37223381673) genera el
+artefacto sin firma `11311396038` (4,377,417 bytes,
+SHA-256 `0038c9a70d319bd3fc123c45eb39a63256fe882f84146b5352f4cd90ee58b53f`).
+Los tres workflows declaran ese mismo `head_sha`. Esta evidencia no demuestra
+interacción en un dispositivo físico ni disponibilidad de sitios.

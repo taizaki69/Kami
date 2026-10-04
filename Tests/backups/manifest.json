@@ -1,0 +1,416 @@
+{
+  "formatVersion": 1,
+  "provenanceType": "Kotlin reference serializer fixture",
+  "limitations": "Independently authored minimal schema. Not an exported user Mihon backup, Android app run, source-mapping proof, full-schema or runtime APK compatibility evidence.",
+  "upstreamReference": {
+    "repository": "mihonapp/mihon",
+    "commit": "7aacaa349019ff42b8b05403d8beebe94c8f6dfc",
+    "libraryVersionsURL": "https://github.com/mihonapp/mihon/blob/7aacaa349019ff42b8b05403d8beebe94c8f6dfc/gradle/libs.versions.toml",
+    "modelURLs": [
+      "https://github.com/mihonapp/mihon/blob/7aacaa349019ff42b8b05403d8beebe94c8f6dfc/app/src/main/java/eu/kanade/tachiyomi/data/backup/models/Backup.kt",
+      "https://github.com/mihonapp/mihon/blob/7aacaa349019ff42b8b05403d8beebe94c8f6dfc/app/src/main/java/eu/kanade/tachiyomi/data/backup/models/BackupManga.kt",
+      "https://github.com/mihonapp/mihon/blob/7aacaa349019ff42b8b05403d8beebe94c8f6dfc/app/src/main/java/eu/kanade/tachiyomi/data/backup/models/BackupCategory.kt",
+      "https://github.com/mihonapp/mihon/blob/7aacaa349019ff42b8b05403d8beebe94c8f6dfc/app/src/main/java/eu/kanade/tachiyomi/data/backup/models/BackupChapter.kt",
+      "https://github.com/mihonapp/mihon/blob/7aacaa349019ff42b8b05403d8beebe94c8f6dfc/app/src/main/java/eu/kanade/tachiyomi/data/backup/models/BackupHistory.kt",
+      "https://github.com/mihonapp/mihon/blob/7aacaa349019ff42b8b05403d8beebe94c8f6dfc/app/src/main/java/eu/kanade/tachiyomi/data/backup/models/BackupSource.kt"
+    ],
+    "updateStrategyURL": "https://github.com/mihonapp/mihon/blob/7aacaa349019ff42b8b05403d8beebe94c8f6dfc/source-api/src/main/kotlin/eu/kanade/tachiyomi/source/model/UpdateStrategy.kt"
+  },
+  "producer": {
+    "sourcePath": "ReferenceBackupProducer.kt",
+    "sourceSHA256": "165f835511d5762a444f7ebeaed4064f6d682e6fbd55ae4dd1fe0115198df004",
+    "recipePath": "reproduce.py",
+    "recipeSHA256": "f06867e057457ab6ec9f539fdfe9583e04249da8382e176d23dd8dddcb11a556",
+    "verificationPath": "verify-fixtures.py",
+    "verificationSHA256": "9fe85ee727d8cfc57c8b0539467d7a2bc59c1251b8207d0a1a515d2108cd8218",
+    "mainClass": "kami.backup.fixture.ReferenceBackupProducerKt",
+    "independentlyAuthoredSchema": true,
+    "copiedUpstreamApplicationCode": false,
+    "kotlinVersion": "2.4.20",
+    "serializationVersion": "1.11.0",
+    "jreVersion": "Temurin 21.0.12.1+1",
+    "jvmTarget": "17",
+    "platform": "Linux x86_64",
+    "protobufOptions": "Default ProtoBuf instance; encodeDefaults=false",
+    "expectedJSONOptions": "Kotlin decodeFromByteArray then Json with encodeDefaults=true, prettyPrint=true",
+    "gzipOptions": "Pinned JRE GZIPOutputStream; one member; flags=0; mtime=0; XFL=0; OS=255",
+    "jreArchive": "OpenJDK21U-jre_x64_linux_hotspot_21.0.12.1_1.tar.gz",
+    "compilerArchive": "kotlin-compiler-2.4.20.zip",
+    "javaRelativeExecutable": "jre/jdk-21.0.12.1+1-jre/bin/java",
+    "compilerLibRelativePath": "kotlin/kotlinc/lib",
+    "runtimeJarNames": [
+      "kotlinx-serialization-core-jvm-1.11.0.jar",
+      "kotlinx-serialization-json-jvm-1.11.0.jar",
+      "kotlinx-serialization-protobuf-jvm-1.11.0.jar"
+    ],
+    "regenerateCommand": "python3 Tests/backups/reproduce.py --tools-dir .git/checkpoints/20261004-backup-decoding/reference-producer-tools",
+    "independentCheckCommand": "python3 Tests/backups/verify-fixtures.py"
+  },
+  "dependencies": [
+    {
+      "name": "OpenJDK21U-jre_x64_linux_hotspot_21.0.12.1_1.tar.gz",
+      "url": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_x64_linux_hotspot_21.0.12.1_1.tar.gz",
+      "version": "21.0.12.1+1",
+      "sha256": "2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500",
+      "size": 52059408,
+      "metadataURL": "https://api.github.com/repos/adoptium/temurin21-binaries/releases/tags/jdk-21.0.12.1%2B1",
+      "checksumAuthority": "GitHub release asset digest, pinned from official Adoptium release",
+      "metadataObservedURL": "https://api.github.com/repos/adoptium/temurin21-binaries/releases/latest"
+    },
+    {
+      "name": "kotlin-compiler-2.4.20.zip",
+      "url": "https://github.com/JetBrains/kotlin/releases/download/v2.4.20/kotlin-compiler-2.4.20.zip",
+      "version": "2.4.20",
+      "sha256": "59e9ca74c7904ef2c122b12114937673ccce68de820a663f0ed66ccf8799e0b7",
+      "size": 89729132,
+      "metadataURL": "https://api.github.com/repos/JetBrains/kotlin/releases/tags/v2.4.20",
+      "checksumAuthority": "GitHub release asset digest, pinned from official JetBrains release"
+    },
+    {
+      "name": "kotlinx-serialization-protobuf-jvm-1.11.0.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-protobuf-jvm/1.11.0/kotlinx-serialization-protobuf-jvm-1.11.0.jar",
+      "version": "1.11.0",
+      "sha256": "3a48b3959b6ddf54d9674bd4b4e3302694a24d24141b38ca98b6ac4fc657675f",
+      "sha512": "1a4be9946afcc2052e10549db074c50e433c38aa5e93574d9fe2feba516986996b4ce88d697a8f91d0a198391f2abe922374ebbc2bcf3eb695158beae6ce5af5",
+      "size": 114950,
+      "metadataURL": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-protobuf-jvm/1.11.0/kotlinx-serialization-protobuf-jvm-1.11.0.module",
+      "checksumAuthority": "JetBrains Gradle module metadata published at Maven Central"
+    },
+    {
+      "name": "kotlinx-serialization-core-jvm-1.11.0.jar",
+      "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-core-jvm/1.11.0/kotlinx-serialization-core-jvm-1.11.0.jar",
+      "version": "1.11.0",
+      "sha256": "f4a801c647d4351327cd9e1ac4113e2be9ea37a64ab0abae269c25a52e28f35d",
+      "sha512": "098993238d26951acc7172117685861d8728fba697bfa20bd6b246fc74b6bcb0b73cc36cdf9bfc14e8b40845259c78f59a4698f6e8dfff2ae6c673113ecfc135",
+      "size": 404509,
+      "metadataURL": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-core-jvm/1.11.0/kotlinx-serialization-core-jvm-1.11.0.module",
+      "checksumAuthority": "JetBrains Gradle module metadata published at Maven Central"
+    },
+    {
+      "name": "kotlinx-serialization-json-jvm-1.11.0.jar",
+      "size": 294166,
+      "sha256": "563a25b4eb5c9128ae9c2479f3d1a5c44dcd176112b91cf03682e906eba5c935",
+      "sha512": "4cf6dc06159bda70017887719eaf529ad28d30f714c007d4895f80ffce6d5c849c98d5fb6ba7de142749c424be94e5935f367053a92c2ca4118cecd653af87cc",
+      "version": "1.11.0",
+      "url": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-json-jvm/1.11.0/kotlinx-serialization-json-jvm-1.11.0.jar",
+      "metadataURL": "https://repo.maven.apache.org/maven2/org/jetbrains/kotlinx/kotlinx-serialization-json-jvm/1.11.0/kotlinx-serialization-json-jvm-1.11.0.module",
+      "checksumAuthority": "JetBrains Gradle module metadata published at Maven Central"
+    }
+  ],
+  "wireExpectations": {
+    "kotlin-defaults": {
+      "favoriteTrueField100OmittedOnMangaIndex": 0,
+      "favoriteFalseField100PresentOnMangaIndex": 1,
+      "unpackedCategoryOrders": [
+        "7",
+        "4294967301"
+      ],
+      "categoryIDs": [
+        "101",
+        "202"
+      ],
+      "sourceIDs": [
+        "9007199254740993",
+        "9223372036854775807"
+      ],
+      "chapterNumberFloat32": [
+        2.25,
+        3.5
+      ],
+      "updateStrategyOnlyFetchOnceField105Varint": 1,
+      "defaultAlwaysUpdateField105Omitted": true,
+      "initializedTrueField111Varint": 1,
+      "defaultInitializedFalseField111Omitted": true,
+      "favoriteModifiedAtField107Seconds": "1760000123",
+      "historyLastReadMilliseconds": [
+        "1780009876543",
+        "1780009999999"
+      ],
+      "historyReadDurationLong": [
+        "90123",
+        "5000000001"
+      ]
+    },
+    "kotlin-categories-only": {
+      "firstRawBytesHex": "12",
+      "decodedMangaCount": 0
+    },
+    "kotlin-sources-only": {
+      "firstRawBytesHex": "aa06",
+      "decodedMangaCount": 0
+    },
+    "kotlin-negative-source": {
+      "sourceID": "-9223372036854775808",
+      "nullableFavoriteModifiedAtZeroField107Present": true
+    },
+    "kotlin-empty-root": {
+      "rawByteCount": 0,
+      "gzipByteCount": 20,
+      "decodedEmptyLists": true
+    }
+  },
+  "schemaNotes": {
+    "categoryMembershipReference": "category.order, not category.id",
+    "sourceIdentity": "Signed Long; preserve exact values above 2^53 and negative values",
+    "chapterNumber": "IEEE-754 Float encoded as fixed32 wire type 5",
+    "timestamps": "dateAdded/dateFetch/dateUpload/history.lastRead are raw epoch milliseconds in these invented records; favoriteModifiedAt is seconds",
+    "historyDuration": "Raw Long retained without interpretation/conversion",
+    "emptyRoot": "Constructor-required repeated manga=[] is omitted by ProtoBuf and decodes as an empty list",
+    "updateStrategyOrdinalMapping": {
+      "ALWAYS_UPDATE": 0,
+      "ONLY_FETCH_ONCE": 1
+    }
+  },
+  "fixtures": [
+    {
+      "name": "kotlin-defaults",
+      "rawPath": "kotlin-defaults.pb",
+      "gzipPath": "kotlin-defaults.tachibk",
+      "expectedJSONPath": "kotlin-defaults.kotlin-decoded.json",
+      "rawSHA256": "83b847969c0345fc83b7b13b16e4196d2a65164dfa7c05e0ac899a2157fde8ec",
+      "rawByteCount": 762,
+      "gzipSHA256": "51c05db54fc3705326822d7f3d1ed63190ce5c917ddb85cfe353d5ece6d99f4e",
+      "gzipByteCount": 492,
+      "expectedJSONSHA256": "b7967557f8975b87bd04cdbcab1ba4d443dc0bf2aef55081ae35c8c7cba4bd34",
+      "expectedJSONByteCount": 3878,
+      "expectedValues": {
+        "manga": [
+          {
+            "sourceId": 9007199254740993,
+            "url": "/manga/reference-default",
+            "title": "Reference default favorite",
+            "artist": "Fixture artist",
+            "author": "Fixture author",
+            "description": "No personal data.\nIndependent serializer fixture.",
+            "genres": [
+              "Reference",
+              "Action"
+            ],
+            "status": 1,
+            "thumbnailUrl": "https://fixtures.invalid/reference-cover.jpg",
+            "dateAdded": 1770000012345,
+            "chapters": [
+              {
+                "url": "/chapter/reference-1",
+                "name": "Reference chapter 2.25",
+                "scanlator": "Fixture team",
+                "read": true,
+                "bookmark": false,
+                "lastPageRead": 7,
+                "dateFetch": 1780000000111,
+                "dateUpload": 1779999999999,
+                "chapterNumber": 2.25,
+                "sourceOrder": 3
+              },
+              {
+                "url": "/chapter/reference-2",
+                "name": "Reference chapter 3.5",
+                "scanlator": null,
+                "read": false,
+                "bookmark": true,
+                "lastPageRead": 4294967311,
+                "dateFetch": 0,
+                "dateUpload": 0,
+                "chapterNumber": 3.5,
+                "sourceOrder": 4294967305
+              }
+            ],
+            "categoryOrders": [
+              7,
+              4294967301
+            ],
+            "favorite": true,
+            "history": [
+              {
+                "url": "/chapter/reference-1",
+                "lastRead": 1780009876543,
+                "readDuration": 90123
+              },
+              {
+                "url": "/chapter/reference-2",
+                "lastRead": 1780009999999,
+                "readDuration": 5000000001
+              }
+            ],
+            "updateStrategy": "ONLY_FETCH_ONCE",
+            "favoriteModifiedAt": 1760000123,
+            "initialized": true
+          },
+          {
+            "sourceId": 9223372036854775807,
+            "url": "/manga/reference-nonfavorite",
+            "title": "Reference explicit nonfavorite",
+            "artist": null,
+            "author": null,
+            "description": null,
+            "genres": [],
+            "status": 0,
+            "thumbnailUrl": null,
+            "dateAdded": 0,
+            "chapters": [
+              {
+                "url": "/chapter/default-scalars",
+                "name": "Default scalar chapter",
+                "scanlator": null,
+                "read": false,
+                "bookmark": false,
+                "lastPageRead": 0,
+                "dateFetch": 0,
+                "dateUpload": 0,
+                "chapterNumber": 0.0,
+                "sourceOrder": 0
+              }
+            ],
+            "categoryOrders": [
+              7
+            ],
+            "favorite": false,
+            "history": [],
+            "updateStrategy": "ALWAYS_UPDATE",
+            "favoriteModifiedAt": null,
+            "initialized": false
+          }
+        ],
+        "categories": [
+          {
+            "name": "Reference reading",
+            "order": 7,
+            "id": 101,
+            "flags": 9
+          },
+          {
+            "name": "Reference archived",
+            "order": 4294967301,
+            "id": 202,
+            "flags": 64
+          }
+        ],
+        "sources": [
+          {
+            "name": "Reference high-precision source",
+            "sourceId": 9007199254740993
+          },
+          {
+            "name": "Reference maximum signed source",
+            "sourceId": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "name": "kotlin-categories-only",
+      "rawPath": "kotlin-categories-only.pb",
+      "gzipPath": "kotlin-categories-only.tachibk",
+      "expectedJSONPath": "kotlin-categories-only.kotlin-decoded.json",
+      "rawSHA256": "aa2e4eeb4a299e0651887924ca014f5f6f095f07916ca9db43bbf4363903d90f",
+      "rawByteCount": 62,
+      "gzipSHA256": "43549f84a71443e43ddf60b4e1322b2e18785959d3ca025e1871719c074cea19",
+      "gzipByteCount": 74,
+      "expectedJSONSHA256": "637d59ecb681557710cbf761db3e3b54f4c51be0c7f8206a64c07a79a15ac9de",
+      "expectedJSONByteCount": 340,
+      "expectedValues": {
+        "manga": [],
+        "categories": [
+          {
+            "name": "Reference reading",
+            "order": 7,
+            "id": 101,
+            "flags": 9
+          },
+          {
+            "name": "Reference archived",
+            "order": 4294967301,
+            "id": 202,
+            "flags": 64
+          }
+        ],
+        "sources": []
+      }
+    },
+    {
+      "name": "kotlin-sources-only",
+      "rawPath": "kotlin-sources-only.pb",
+      "gzipPath": "kotlin-sources-only.tachibk",
+      "expectedJSONPath": "kotlin-sources-only.kotlin-decoded.json",
+      "rawSHA256": "19174cfa25828a9a9a7946452841f9d1c337cff753f1fe7c81a360b20cc7333d",
+      "rawByteCount": 91,
+      "gzipSHA256": "56448f8f6c091f6297d6d7d9885b87e9a3a498a3b03659ad1b2cbd9d03745384",
+      "gzipByteCount": 86,
+      "expectedJSONSHA256": "b3db489b16d4a8bdc331b117e78359a8e6deb4c3cf2cd89ae7c76081b8876329",
+      "expectedJSONByteCount": 302,
+      "expectedValues": {
+        "manga": [],
+        "categories": [],
+        "sources": [
+          {
+            "name": "Reference high-precision source",
+            "sourceId": 9007199254740993
+          },
+          {
+            "name": "Reference maximum signed source",
+            "sourceId": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "name": "kotlin-negative-source",
+      "rawPath": "kotlin-negative-source.pb",
+      "gzipPath": "kotlin-negative-source.tachibk",
+      "expectedJSONPath": "kotlin-negative-source.kotlin-decoded.json",
+      "rawSHA256": "73699dbdfb0da61d384d17b6c9941ed3eee49d64b599f36f73576f78bab08b82",
+      "rawByteCount": 125,
+      "gzipSHA256": "8bfd8f2243f101c2b7cf3efd39555e1884149d56bb5c269f23d01327a81f20c8",
+      "gzipByteCount": 88,
+      "expectedJSONSHA256": "8a164f65caf3d4818ee07a59fe4efe884970ba4133c7a71cc1e25e0a6ea35734",
+      "expectedJSONByteCount": 801,
+      "expectedValues": {
+        "manga": [
+          {
+            "sourceId": -9223372036854775808,
+            "url": "/manga/reference-negative",
+            "title": "Reference negative signed source",
+            "artist": null,
+            "author": null,
+            "description": null,
+            "genres": [],
+            "status": 0,
+            "thumbnailUrl": null,
+            "dateAdded": 0,
+            "chapters": [],
+            "categoryOrders": [],
+            "favorite": true,
+            "history": [],
+            "updateStrategy": "ALWAYS_UPDATE",
+            "favoriteModifiedAt": 0,
+            "initialized": false
+          }
+        ],
+        "categories": [],
+        "sources": [
+          {
+            "name": "Reference negative signed source",
+            "sourceId": -9223372036854775808
+          }
+        ]
+      }
+    },
+    {
+      "name": "kotlin-empty-root",
+      "rawPath": "kotlin-empty-root.pb",
+      "gzipPath": "kotlin-empty-root.tachibk",
+      "expectedJSONPath": "kotlin-empty-root.kotlin-decoded.json",
+      "rawSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rawByteCount": 0,
+      "gzipSHA256": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+      "gzipByteCount": 20,
+      "expectedJSONSHA256": "2511ccc854909c3f03ca150f2c7eff723249e2af144f38761be866889dc82ce1",
+      "expectedJSONByteCount": 61,
+      "expectedValues": {
+        "manga": [],
+        "categories": [],
+        "sources": []
+      }
+    }
+  ]
+}

@@ -1,11 +1,15 @@
 # Kami Continuation Handoff
 
-Last updated: 2026-10-03 (America/Lima)
+Last updated: 2026-10-04 (America/Lima)
 
-## Canonical continuation — 2026-10-03
+## Canonical continuation — 2026-10-04
 
-The active continuation is `assistant/offline-downloads-20261003`, based on
-`36e038af443e36cd85dc2dd0c682c34fc2ec93d2` from
+The active continuation is `assistant/backup-decoding-20261004`, based on
+`c794982271b95b4c6d91e73917b5392363e481ce` from
+[PR #13](https://github.com/taizaki69/Kami/pull/13). That downloads checkpoint
+passed Linux/macOS tests, simulator/device compilation and unsigned IPA CI,
+including the PNG truncation regression first exposed by Apple CI.
+It builds on `36e038af443e36cd85dc2dd0c682c34fc2ec93d2` from
 [PR #12](https://github.com/taizaki69/Kami/pull/12). That updates checkpoint
 passed Linux/macOS tests, simulator/device compilation and unsigned IPA CI.
 It builds on `0ae9c4ded6e5dd01f577798122789827ec2e3842` from
@@ -31,7 +35,8 @@ an installation identity change invalidates them without granting new trust.
 The app clears/recreates browse and reader sessions when a source is replaced.
 Read the current
 [README](README.md), [task tracker](TODO.md), and
-[dated verification record](docs/VERIFICATION-2026-10-03.md) for current scope.
+[current verification record](docs/VERIFICATION-2026-10-04.md) and
+[earlier verification record](docs/VERIFICATION-2026-10-03.md) for current scope.
 The updates checkpoint adds a schema-4 discovery ledger, manual scanning with bounded
 source concurrency, cancellation and recoverable summaries, an actual Updates
 feed with pagination and per-manga issues, and History resume from persisted
@@ -40,7 +45,7 @@ uses the bounded cancellable transport and rejects failed or incomplete API
 responses. Local logs and durable checkpoints are in
 `.git/checkpoints/20261003-library-updates/`; published workflow evidence is
 recorded on the implementation PR. Do not infer Apple success from a Linux parse.
-The current work adds schema-5 manual downloads, per-attempt publication and
+The downloads checkpoint adds schema-5 manual downloads, per-attempt publication and
 cleanup receipts, a bounded file store, a dedicated transfer coordinator and
 source-independent offline reading. Local recovery never starts transfers or
 promotes incomplete files. Retry begins at page zero with a fresh source;
@@ -48,6 +53,22 @@ deletion waits for open local readers and retains domain reading data. See
 [Downloads](docs/DOWNLOADS.md). Download checkpoint files and logs are in
 `.git/checkpoints/20261003-offline-downloads/`. Do not infer verification from
 implementation alone; use the exact implementation PR and dated record.
+
+The current work corrects the backup-format premise: the pinned Mihon and
+Tachiyomi-era producers use gzip/raw protobuf, not current-zstd/legacy-zlib.
+The bounded reader retains typed library state and reports opaque unsupported
+fields without granting source or repository trust. Five pairs of small
+Kotlin reference-serializer fixtures and their decoded expectations are locked
+under `Tests/backups/`; none is a user export from a running Android app.
+See [backup compatibility](docs/BACKUP_COMPATIBILITY.md) for defaults, limits,
+schema coverage and API changes. Logs and publication state are under
+`.git/checkpoints/20261004-backup-decoding/`.
+Native library export, immutable preview and atomic restore are the next
+product work. They must include hidden chapters/all history, preserve discovery
+baselines, reject stale previews and use exact source/URL identities. Foo needs
+content binding; MangaDex source-ID/URL mapping needs separate verified evidence.
+The design evidence is retained under
+`.git/checkpoints/20261003-offline-downloads/next-backup-*.md`.
 The broad objective remains active; background downloads, scheduled updates,
 broader extension APIs and other daily-reader capabilities are still required.
 

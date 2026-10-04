@@ -3,13 +3,15 @@
 Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocked
 
 
-## Active continuation — 2026-10-03
+## Active continuation — 2026-10-04
 
 The full native-reader and compatibility objective remains active. The current
-implementation adds manual chapter downloads and source-independent offline
-reading on top of verified updates, History resume, persistent FoolSlide
-settings and revocable source registrations.
-See [verification](docs/VERIFICATION-2026-10-03.md) for actual test/build evidence.
+implementation corrects and bounds Mihon gzip/raw backup decoding on top of
+verified downloads/offline reading, updates, History resume, persistent FoolSlide
+settings and revocable source registrations. Native export and restoration
+remain pending.
+See [current verification](docs/VERIFICATION-2026-10-04.md) and
+[earlier verification](docs/VERIFICATION-2026-10-03.md) for actual evidence.
 Completed items below retain some historical checkpoint counts; those counts
 must not be used as evidence for the current commit.
 
@@ -39,6 +41,10 @@ must not be used as evidence for the current commit.
       separately from physical-device interaction and performance.
 - [ ] Continue migration/backup UI and remaining reader controls,
       without treating a passing compatibility suite as completion of the app.
+- [~] Verify strict gzip/raw backup decoding against real Kotlin serializer
+      output; retain library data and explicit unsupported-field coverage.
+- [ ] Add versioned native library export, immutable restore preview and atomic
+      merge with stale-plan rejection, exact identities and source conflict reports.
 
 ## P0 — Extension research & foundation
 
@@ -53,7 +59,10 @@ must not be used as evidence for the current commit.
 - [x] Extension store client: `index.pb` + `index.min.json` + gzip unwrap +
       external-list indirection — validated against live Keiyoushi index
       (1372 extensions parsed)
-- [x] Backup reader for legacy (zlib) `.tachibk` + proto schema decode
+- [~] Bounded gzip/raw `.tachibk` reader with verified Mihon defaults and an
+      unsupported-field report. The former legacy-zlib/current-zstd claim was
+      incorrect; see `docs/BACKUP_COMPATIBILITY.md`. This is a library DTO
+      decoder, not a completed backup restore flow.
 - [x] `compat-audit` CLI (inspect/missing/index/methods/disasm/opcodes/plan/gaps) —
       deterministic file and directory inspection, run on the locked corpus
 - [x] SHA/URL-locked behavior-stratified current lib 1.6 measurement corpus —
@@ -289,7 +298,9 @@ must not be used as evidence for the current commit.
       `compat-audit promote-gap` emits a deterministic focused XCTest seed.
       App-facing user-selected export/share remains —
       [#4](https://github.com/taizaki69/Kami/issues/4)
-- [ ] zstd decompression for current-Mihon backups (schema work done)
+- [~] Verify bounded gzip/raw backup decoding against the Kotlin serializer;
+      complete native export, previewed restore and source-identity handling.
+      Current Mihon does not require the previously assumed zstd feature.
 
 ## P1 — Daily driver
 

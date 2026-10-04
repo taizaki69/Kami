@@ -4,7 +4,7 @@ A native iOS manga reader with a Swift runtime for measured Mihon/Tachiyomi
 extension APKs. Created and maintained by
 [taizaki69](https://github.com/taizaki69).
 
-## Current scope — 2026-10-03
+## Current scope — 2026-10-04
 
 Kami includes a native MangaDex source, a persistent library, history and
 reading progress, source browsing and filters, and an LTR/RTL/webtoon reader
@@ -31,6 +31,12 @@ saved reading progress even when the source is disabled or absent. Local reads
 verify their files and never silently fall back to network. Deleting a download
 preserves chapter progress and history; an open reader retains its files until
 it closes. Source changes invalidate unfinished attempts before publication.
+
+The [backup decoder](docs/BACKUP_COMPATIBILITY.md) reads bounded Mihon gzip/raw
+protobuf into typed library records and reports unsupported fields. Kotlin
+reference fixtures check producer defaults, exact 64-bit identities, category
+orders, chapters and history. This is groundwork for backup import; native
+export, restore preview, atomic database merge and Files UI remain pending.
 
 Extension installation authenticates the exact APK hash, package/version,
 signer and declared source IDs. Repository trust or explicit certificate
@@ -137,7 +143,8 @@ The role-selected audit validates the manifest and each selected APK's hash
 before static analysis. It does not execute or admit an extension. Windows
 continues to use `scripts/windows_dev_test.bat` for the portable packages.
 
-[Verification evidence](docs/VERIFICATION-2026-10-03.md) separates Linux package
+[Current verification](docs/VERIFICATION-2026-10-04.md) and the
+[earlier record](docs/VERIFICATION-2026-10-03.md) separate Linux package
 results, SQLite persistence coverage, deterministic audits and Apple workflows
 for the implementation commit. Linux success is not an iOS build or interaction
 test. Simulator/device compilation and the unsigned IPA use the existing Apple

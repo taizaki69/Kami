@@ -183,16 +183,21 @@ Mihon's settings UI is now "Extension stores"; terminology renamed in 0.20.0
 
 ## 5. Backup format (`.tachibk`)
 
-Mihon backups are a **zstd-compressed protobuf** stream. Protobuf messages are
+Correction verified on 2026-10-04: Mihon main `7aacaa349019ff42b8b05403d8beebe94c8f6dfc`,
+release v0.20.4 and the inspected Tachiyomi-era source write **gzip-compressed
+protobuf** and read gzip or raw protobuf. The earlier zstd claim was incorrect.
+See [the pinned sources and implemented subset](BACKUP_COMPATIBILITY.md).
+Protobuf messages are
 generated with kotlinx.serialization.protobuf annotations
 (`data/backup/models/Backup*.kt`, `@ProtoNumber` field tags): `Backup` (backupManga,
 backupCategories, backupSources, backupPreferences, backupExtensionStores, …),
 `BackupManga` (url, title, artist, author, description, genre, status, chapters,
 categories, history, tracking, …), `BackupChapter` (url, name, scanlator,
 read, bookmark, lastPageRead, …), `BackupSource` (sourceId, name), `BackupHistory`.
-Full schema is codified in `Backup.kt` and per-model files. Import compatibility
-requires: protobuf wire decoding + zstd decompression + source-ID → installed
-extension mapping.
+The upstream schema is codified in `Backup.kt` and per-model files. A complete
+import also needs faithful field/default handling, category order references,
+source-specific URL identity, an explicit unsupported-data report and a
+transactional restoration flow. Successful decoding grants no extension trust.
 
 ## 6. Strategies assessed for iOS
 
@@ -249,7 +254,7 @@ simplest `ParsedHttpSource` shapes; cannot be the general strategy.
    opcode, and host-API coverage remain driven by the audit corpus.
    This is the long-running engineering track; see
    `EXTENSION_RUNTIME.md` for the staged plan and honest status.
-5. **Backup import** (.tachibk protobuf+zstd) independent of the runtime, so users
+5. **Backup import** (.tachibk protobuf+gzip) independent of the runtime, so users
    can migrate libraries before extension compat reaches their sources.
 
 ### 6.1 Current local corpus measurement (2026-09-18)
@@ -387,7 +392,7 @@ feasibility problem**. The blockers, honestly categorized:
 | DEX execution | **Partial M1/M2 plus eight pinned app-facing profiles work**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual entry and nested async selection under one instruction budget, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, stable public source-wrapper routing across measured R8 layouts, pinned constructors/getters, and BatCave, Kawii Manga, MangaMelon, Baozi, TuttoAnimeManga, Mangas-Origines.fr, Komikcast/VoraToon, and Yomu Comics popular/search/latest/details/chapters/pages execute through bounded async response delivery and exact compatibility models; MangaMelon, Baozi, and Mangas-Origines.fr additionally prove exact static filters, while Komikcast and Yomu prove bounded exact dynamic genre paths and their respective image headers; arbitrary dynamic filters and general downloaded-extension compatibility remain open |
 | Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI including query trimming/form encoding and bounded string/collection helpers, bounded lists/sets/maps and comparator sorting, structured coroutine lambdas, atomics/reflection, source filters with validated app-state reapplication, source-base constructors, bounded scalar preferences for Baozi, bounded OkHttp requests, a bounded application/network interceptor chain for source operations and source-scoped reader images, source-scoped async transport, response/body/Okio values including UTF-8/ByteString/Base64 request encoding, bounded Jsoup HTML/CSS including direct-child, sibling, attribute, `eachText`, and `:containsData` semantics, generated-serializer JSON encoding/decoding including defaults/longs/string memo objects, a measured locale/time-zone/Java-time subset, and reached `SManga`/`MangasPage`/`SChapter`/`SMangaUpdate`/`Page` models; bounded dynamic genre support is proven for the exact Komikcast and Yomu profiles; Komikcast uses a source-private in-memory virtual cache with logical zstd identity, while arbitrary dynamic filters, persistent preference UI/storage, native zstd semantics, Android bitmap banner transforms, additional DOM APIs, and the long tail remain open |
 | Cloudflare/WebView | Native WKWebView bridge design (see NETWORKING.md) |
-| Backup import | Proto decoding done; zstd decompression pending |
+| Backup import | Bounded gzip/raw library DTO decoding; explicit unsupported-field report. Native export, previewed transactional restore and migration UI remain open; see BACKUP_COMPATIBILITY.md |
 
 ## Sources
 

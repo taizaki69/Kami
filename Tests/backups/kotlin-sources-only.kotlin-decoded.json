@@ -1,0 +1,14 @@
+{
+    "manga": [],
+    "categories": [],
+    "sources": [
+        {
+            "name": "Reference high-precision source",
+            "sourceId": 9007199254740993
+        },
+        {
+            "name": "Reference maximum signed source",
+            "sourceId": 9223372036854775807
+        }
+    ]
+}
