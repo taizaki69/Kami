@@ -10,6 +10,7 @@ struct PersistedChapterReaderDestination: View {
     let chapterID: Int64
     let chapterURL: String
     var openingPolicy: ReaderOpeningPolicy = .automatic
+    @State private var presentation: LibraryPresentationGeneration
 
     @State private var chapter: Chapter?
     @State private var readingSnapshot: MangaReadingSnapshot?
@@ -21,12 +22,22 @@ struct PersistedChapterReaderDestination: View {
     @State private var loadGeneration: UInt64 = 0
     @State private var resolvedPolicy: ReaderOpeningPolicy = .automatic
 
+    init(manga: Manga, chapterID: Int64, chapterURL: String,
+         openingPolicy: ReaderOpeningPolicy = .automatic, presentation: LibraryPresentationGeneration) {
+        self.manga = manga
+        self.chapterID = chapterID
+        self.chapterURL = chapterURL
+        self.openingPolicy = openingPolicy
+        _presentation = State(initialValue: presentation)
+    }
+
     var body: some View {
         ZStack {
             if loading {
                 ProgressView("Opening chapter…")
             } else if let chapter, let readingSnapshot {
-                ReaderView(snapshot: readingSnapshot, chapter: chapter, openingPolicy: resolvedPolicy)
+                ReaderView(snapshot: readingSnapshot, chapter: chapter, openingPolicy: resolvedPolicy,
+                           presentation: presentation)
             } else {
                 ContentUnavailableView {
                     Label("Chapter unavailable", systemImage: "book.closed")
@@ -39,7 +50,7 @@ struct PersistedChapterReaderDestination: View {
         }
         .navigationTitle(manga.title)
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: retry) { await load() }
+        .task(id: retry) { await model.runLibraryOperation(expected: presentation) { await load() } }
         .onDisappear { loadGeneration &+= 1 }
     }
 

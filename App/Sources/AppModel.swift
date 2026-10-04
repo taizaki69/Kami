@@ -33,6 +33,11 @@ struct ChapterDownloadStatus {
     let reason: DownloadFailureReason?
 }
 
+struct LibraryPresentationState: Equatable {
+    let generation: LibraryPresentationGeneration
+    let isExclusive: Bool
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     let store: LibraryStore
@@ -44,6 +49,9 @@ final class AppModel: ObservableObject {
     let preferencesService: ExtensionPreferencesService
     let libraryUpdateService: LibraryUpdateService
     let readingStateWriter: ReadingStateWriter
+    let libraryOperations: LibraryOperationCoordinator
+    @Published private(set) var libraryPresentation: LibraryPresentationState
+    @Published var libraryOperationError: String?
     private let durableDatabaseAvailable: Bool
     private let downloadContentStore: DownloadContentStore?
     private var downloadService: LibraryDownloadService?
@@ -90,6 +98,7 @@ final class AppModel: ObservableObject {
     private var downloadsReloadGeneration: UInt64 = 0
     private var downloadsNextCursor: DownloadQueueCursor?
     private var downloadTask: Task<Void, Never>?
+    private var downloadRunOperation: LibraryOperationLease?
     private var downloadsForegroundActive = true
     private var activeDownloadScenes = Set<UUID>()
     private var downloadCountsGeneration: UInt64 = 0
@@ -97,6 +106,8 @@ final class AppModel: ObservableObject {
     private var downloadMangaByChapter: [Int64: Int64] = [:]
     private var libraryUpdatesReloadGeneration: UInt64 = 0
     private var libraryUpdateTask: Task<Void, Never>?
+    private var libraryUpdateOperation: LibraryOperationLease?
+    private var pendingTrustOperation: (id: UUID, lease: LibraryOperationLease)?
     private var libraryUpdateDiscoveries: [LibraryChapterDiscovery] = []
     private var libraryUpdatesNextCursor: LibraryChapterDiscoveryCursor?
     private var libraryReloadGeneration: UInt64 = 0
@@ -137,7 +148,10 @@ final class AppModel: ObservableObject {
         self.sourceFactory = ExtensionSourceFactory()
         self.preferencesService = ExtensionPreferencesService(store: store)
         self.libraryUpdateService = LibraryUpdateService(store: store)
-        self.readingStateWriter = ReadingStateWriter(store: store)
+        let operations = LibraryOperationCoordinator()
+        self.libraryOperations = operations
+        self.libraryPresentation = .init(generation: operations.state.presentation, isExclusive: false)
+        self.readingStateWriter = ReadingStateWriter(store: store, operationCoordinator: operations)
         if persistentStore != nil {
             do {
                 self.downloadContentStore = try DownloadContentStore(root: url.appendingPathComponent("Downloads", isDirectory: true))
@@ -159,8 +173,9 @@ final class AppModel: ObservableObject {
             self.readingWriteFailures = failures
             self.discardedReadingWriteFailures = self.readingStateWriter.discardedFailureCount
         }
+        operations.onStateChanged = { [weak self] state in self?.acceptOperationState(state) }
         reloadLibrary()
-        Task { [weak self] in
+        performLibraryOperation { [weak self] in
             await self?.restoreInstalledExtensions()
             await self?.reloadExtensionRepositories()
             await self?.refreshDownloads()
@@ -168,7 +183,108 @@ final class AppModel: ObservableObject {
     }
 
     func reloadLibrary() {
-        Task { await refreshLibrary() }
+        performLibraryOperation { await self.refreshLibrary() }
+    }
+
+    /// Reserve synchronously before scheduling. The worker owns its lease;
+    /// cancelling its observer requests cancellation but waits for drainage.
+    @discardableResult
+    func performLibraryOperation(
+        expected: LibraryPresentationGeneration? = nil,
+        lease: LibraryOperationLease? = nil,
+        _ operation: @escaping @MainActor @Sendable () async -> Void
+    ) -> Task<Void, Never>? {
+        do {
+            let worker: Task<Void, Error>
+            if let lease {
+                if let expected, expected != lease.presentation { throw LibraryOperationError.stalePresentation }
+                worker = try lease.start(operation)
+            }
+            else { worker = try libraryOperations.start(expected: expected ?? libraryPresentation.generation, operation) }
+            return Task { @MainActor in
+                await withTaskCancellationHandler {
+                    do { try await worker.value }
+                    catch is CancellationError {}
+                    catch { self.libraryOperationError = error.localizedDescription }
+                } onCancel: { worker.cancel() }
+            }
+        } catch {
+            libraryOperationError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// SwiftUI owns lifecycle Task creation. Its closure must pass the
+    /// presentation captured by that view, before any lifecycle suspension.
+    func runLibraryOperation(
+        expected: LibraryPresentationGeneration,
+        _ operation: @escaping @MainActor @Sendable () async -> Void
+    ) async {
+        guard !Task.isCancelled else { return }
+        guard let worker = performLibraryOperation(expected: expected, operation) else { return }
+        await withTaskCancellationHandler {
+            if Task.isCancelled { worker.cancel() }
+            await worker.value
+        } onCancel: { worker.cancel() }
+    }
+
+    private func requireLibraryOperation() throws {
+        try libraryOperations.validateCurrentOperation()
+    }
+
+    private func acceptsLibraryOperation() -> Bool {
+        do { try requireLibraryOperation(); return true }
+        catch { libraryOperationError = error.localizedDescription; return false }
+    }
+
+    private func reserveLibraryLifetime() -> LibraryOperationLease? {
+        do {
+            try requireLibraryOperation()
+            return try libraryOperations.open(expected: libraryPresentation.generation)
+        } catch {
+            libraryOperationError = error.localizedDescription
+            return nil
+        }
+    }
+
+    private func acceptOperationState(_ state: LibraryOperationState) {
+        if state.presentation != libraryPresentation.generation {
+            // Clear all cached domain presentation before exposing the new
+            // generation to every WindowGroup scene. Registry trust is separate.
+            libraryReloadGeneration &+= 1
+            libraryUpdatesReloadGeneration &+= 1
+            downloadsReloadGeneration &+= 1
+            downloadCountsGeneration &+= 1
+            librarySnapshot = LibrarySnapshot()
+            libraryUpdatesSnapshot = nil
+            libraryUpdateDiscoveries = []
+            libraryUpdateGroups = []
+            libraryUpdatesNextCursor = nil
+            libraryUpdatesHasMore = false
+            libraryUpdatesLoading = false
+            libraryUpdatesLoadingMore = false
+            libraryUpdatesPaginationError = nil
+            libraryUpdateProgress = nil
+            downloads = []
+            downloadsSummary = nil
+            downloadsNextCursor = nil
+            downloadsHasMore = false
+            downloadsLoading = false
+            downloadsLoadingMore = false
+            downloadsPaginationError = nil
+            downloadProgress = nil
+            downloadedChapterCounts = [:]
+            downloadStates = [:]
+            downloadMangaByChapter = [:]
+            downloadChapterGenerations = [:]
+            downloadOperationErrors = [:]
+            libraryError = nil
+            libraryUpdatesError = nil
+            downloadsError = nil
+            libraryOperationError = nil
+        }
+        let next = LibraryPresentationState(generation: state.presentation, isExclusive: state.isExclusive)
+        if next != libraryPresentation { libraryPresentation = next }
     }
 
     func waitForReadingSaves() async {
@@ -177,6 +293,7 @@ final class AppModel: ObservableObject {
     }
 
     func prepareLibraryBackup() async throws -> PreparedLibraryBackup {
+        try requireLibraryOperation()
         guard durableDatabaseAvailable else { throw LibraryBackupExportError.storageUnavailable }
         try Task.checkCancellation()
         let store = self.store
@@ -196,6 +313,7 @@ final class AppModel: ObservableObject {
     }
 
     func refreshLibrary() async {
+        guard acceptsLibraryOperation() else { return }
         libraryReloadGeneration &+= 1
         let generation = libraryReloadGeneration
         loading = true
@@ -214,32 +332,38 @@ final class AppModel: ObservableObject {
     }
 
     func createCategory(name: String, context: LibraryMutationContext) async throws {
+        try requireLibraryOperation()
         _ = try await store.createCategory(name: name, context: context)
         await refreshLibrary()
     }
 
     func renameCategory(id: Int64, name: String, context: LibraryMutationContext) async throws {
+        try requireLibraryOperation()
         try await store.renameCategory(id: id, name: name, context: context)
         await refreshLibrary()
     }
 
     func reorderCategories(ids: [Int64], context: LibraryMutationContext) async throws {
+        try requireLibraryOperation()
         try await store.reorderCategories(ids: ids, context: context)
         await refreshLibrary()
     }
 
     func deleteCategories(ids: Set<Int64>, context: LibraryMutationContext) async throws {
+        try requireLibraryOperation()
         try await store.deleteCategories(ids: ids, context: context)
         await refreshLibrary()
     }
 
     func updateCategories(_ draft: CategoryAssignmentDraft, context: LibraryMutationContext) async throws {
+        try requireLibraryOperation()
         try await store.updateCategories(adding: draft.additions, removing: draft.removals,
                                          mangaIDs: draft.mangaIDs, context: context)
         await refreshLibrary()
     }
 
     func setLibrary(_ inLibrary: Bool, mangaId: Int64, context: LibraryMutationContext) async throws {
+        try requireLibraryOperation()
         try await store.setLibrary(inLibrary, mangaId: mangaId, context: context)
         await refreshLibrary()
         await refreshDownloadCounts()
@@ -256,6 +380,7 @@ final class AppModel: ObservableObject {
     /// Reading the ledger may recover an interrupted run, but never starts
     /// source requests. The service coalesces this one-time local recovery.
     func refreshLibraryUpdates() async {
+        guard acceptsLibraryOperation() else { return }
         libraryUpdatesReloadGeneration &+= 1
         let generation = libraryUpdatesReloadGeneration
         libraryUpdatesLoading = true
@@ -282,13 +407,18 @@ final class AppModel: ObservableObject {
     }
 
     func checkLibraryForUpdates() async {
+        guard acceptsLibraryOperation() else { return }
         guard libraryUpdateTask == nil else { return }
+        guard let operation = reserveLibraryLifetime() else { return }
+        libraryUpdateOperation = operation
         libraryUpdateIsRunning = true
         libraryUpdateIsCancelling = false
         libraryUpdateProgress = nil
         libraryUpdatesError = nil
-        let task = Task { [weak self] in
+        let task = performLibraryOperation(lease: operation) { [weak self] in
+            defer { operation.close() }
             guard let self else { return }
+            defer { self.libraryUpdateOperation = nil }
             var scanError: String?
             do {
                 // Capture the facade and its configuration token together on
@@ -316,10 +446,16 @@ final class AppModel: ObservableObject {
             self.libraryUpdateTask = nil
         }
         libraryUpdateTask = task
-        await task.value
+        if task == nil {
+            operation.close()
+            libraryUpdateOperation = nil
+            libraryUpdateIsRunning = false
+        }
+        await task?.value
     }
 
     func loadMoreLibraryUpdates() async {
+        guard acceptsLibraryOperation() else { return }
         guard !libraryUpdatesLoading, !libraryUpdatesLoadingMore, libraryUpdatesHasMore else { return }
         guard let cursor = libraryUpdatesNextCursor else {
             libraryUpdatesPaginationError = "More saved updates could not be loaded. Reload the list and try again."
@@ -349,7 +485,9 @@ final class AppModel: ObservableObject {
     func cancelLibraryUpdate() {
         guard libraryUpdateIsRunning, !libraryUpdateIsCancelling else { return }
         libraryUpdateIsCancelling = true
-        Task { await libraryUpdateService.cancel() }
+        if performLibraryOperation(lease: libraryUpdateOperation, {
+            await self.libraryUpdateService.cancel()
+        }) == nil { libraryUpdateIsCancelling = false }
     }
 
     private func libraryUpdateSourceContexts() -> [Int64: LibraryUpdateSourceContext] {
@@ -374,6 +512,7 @@ final class AppModel: ObservableObject {
     func isChapterDownloaded(_ chapterID: Int64) -> Bool { downloadStates[chapterID]?.state == .finished }
 
     func refreshDownloadCounts() async {
+        guard acceptsLibraryOperation() else { return }
         guard durableDatabaseAvailable else { return }
         downloadCountsGeneration &+= 1
         let generation = downloadCountsGeneration
@@ -388,6 +527,7 @@ final class AppModel: ObservableObject {
     }
 
     func refreshDownloadAvailability(chapterIDs: [Int64]) async {
+        guard acceptsLibraryOperation() else { return }
         guard durableDatabaseAvailable else { return }
         let ids = Array(Set(chapterIDs)).sorted()
         do {
@@ -409,6 +549,7 @@ final class AppModel: ObservableObject {
     }
 
     func refreshDownloadAvailability(mangaID: Int64) async {
+        guard acceptsLibraryOperation() else { return }
         guard durableDatabaseAvailable else { return }
         let generations = downloadChapterGenerations
         do {
@@ -430,6 +571,7 @@ final class AppModel: ObservableObject {
 
     /// Recovery and cleanup only. Opening Downloads never starts transfers.
     func refreshDownloads(preservingLoadedRows: Bool = false) async {
+        guard acceptsLibraryOperation() else { return }
         guard let service = downloadService else { return }
         downloadsReloadGeneration &+= 1
         let generation = downloadsReloadGeneration
@@ -465,6 +607,7 @@ final class AppModel: ObservableObject {
     }
 
     func loadMoreDownloads() async {
+        guard acceptsLibraryOperation() else { return }
         guard !downloadsLoading, !downloadsLoadingMore, downloadsHasMore else { return }
         guard let cursor = downloadsNextCursor else {
             downloadsPaginationError = "More downloads could not be loaded. Reload the list and try again."
@@ -490,6 +633,7 @@ final class AppModel: ObservableObject {
     }
 
     func enqueueDownload(chapterID: Int64) async {
+        guard acceptsLibraryOperation() else { return }
         guard !downloadBusyChapters.contains(chapterID) else { return }
         downloadBusyChapters.insert(chapterID)
         downloadOperationErrors.removeValue(forKey: chapterID)
@@ -506,6 +650,7 @@ final class AppModel: ObservableObject {
     }
 
     func retryDownload(jobID: UUID) async {
+        guard acceptsLibraryOperation() else { return }
         guard !downloadBusyJobs.contains(jobID) else { return }
         downloadBusyJobs.insert(jobID)
         defer { downloadBusyJobs.remove(jobID) }
@@ -525,6 +670,7 @@ final class AppModel: ObservableObject {
     }
 
     func cancelDownload(jobID: UUID) async {
+        guard acceptsLibraryOperation() else { return }
         guard !downloadBusyJobs.contains(jobID) else { return }
         downloadBusyJobs.insert(jobID)
         downloadCancellingJobs.insert(jobID)
@@ -546,6 +692,7 @@ final class AppModel: ObservableObject {
     }
 
     func deleteDownload(jobID: UUID) async {
+        guard acceptsLibraryOperation() else { return }
         guard !downloadBusyJobs.contains(jobID) else { return }
         downloadBusyJobs.insert(jobID)
         defer { downloadBusyJobs.remove(jobID) }
@@ -572,13 +719,18 @@ final class AppModel: ObservableObject {
     /// Only user actions enqueue/retry/start call this. The task belongs to
     /// AppModel and keeps consuming progress when the screen disappears.
     func startDownloads() async {
+        guard acceptsLibraryOperation() else { return }
         guard downloadTask == nil, downloadsForegroundActive, let service = downloadService else { return }
+        guard let operation = reserveLibraryLifetime() else { return }
+        downloadRunOperation = operation
         downloadQueueIsRunning = true
         downloadQueueIsPausing = false
         downloadsError = nil
         downloadProgress = nil
-        downloadTask = Task { [weak self] in
+        downloadTask = performLibraryOperation(lease: operation) { [weak self] in
+            defer { operation.close() }
             guard let self else { return }
+            defer { self.downloadRunOperation = nil }
             var failure: String?
             do {
                 guard self.downloadsForegroundActive, !self.downloadQueueIsPausing else {
@@ -610,9 +762,15 @@ final class AppModel: ObservableObject {
             self.downloadQueueIsPausing = false
             self.downloadTask = nil
         }
+        if downloadTask == nil {
+            operation.close()
+            downloadRunOperation = nil
+            downloadQueueIsRunning = false
+        }
     }
 
     func pauseDownloads() async {
+        guard acceptsLibraryOperation() else { return }
         guard downloadQueueIsRunning, !downloadQueueIsPausing, let service = downloadService else { return }
         downloadQueueIsPausing = true
         do { try await service.pause() }
@@ -620,14 +778,31 @@ final class AppModel: ObservableObject {
         await refreshDownloads(preservingLoadedRows: true)
     }
 
+    /// A run's cancellation controls borrow its lifetime so reaching the
+    /// global admission limit cannot prevent that run from draining.
+    func requestDownloadPause(expected: LibraryPresentationGeneration) {
+        performLibraryOperation(expected: expected, lease: downloadRunOperation) {
+            await self.pauseDownloads()
+        }
+    }
+
+    func requestDownloadCancellation(jobID: UUID, expected: LibraryPresentationGeneration) {
+        performLibraryOperation(expected: expected, lease: downloadRunOperation) {
+            await self.cancelDownload(jobID: jobID)
+        }
+    }
+
     func downloadsSceneChanged(sceneID: UUID, active: Bool) {
         if active { activeDownloadScenes.insert(sceneID) }
         else { activeDownloadScenes.remove(sceneID) }
         downloadsForegroundActive = !activeDownloadScenes.isEmpty
-        if !downloadsForegroundActive { Task { await pauseDownloads() } }
+        if !downloadsForegroundActive, let operation = downloadRunOperation {
+            performLibraryOperation(lease: operation) { await self.pauseDownloads() }
+        }
     }
 
     func openOfflineChapter(target: ChapterWriteTarget) async throws -> OfflineReaderChapter? {
+        try requireLibraryOperation()
         guard let service = downloadService else { throw LibraryDownloadServiceError.storageUnavailable }
         _ = try await store.validateReadingTarget(target)
         try await service.prepare()
@@ -743,6 +918,7 @@ final class AppModel: ObservableObject {
     }
 
     func extensionConfiguration(packageName: String) async throws -> ExtensionConfigurationSnapshot {
+        try requireLibraryOperation()
         let snapshot = try await preferencesService.configuration(packageName: packageName)
         try Task.checkCancellation()
         extensionConfigurations[packageName] = snapshot
@@ -750,6 +926,7 @@ final class AppModel: ObservableObject {
     }
 
     func refreshInstalledExtensions() async {
+        guard acceptsLibraryOperation() else { return }
         await reloadInstalledExtensions()
     }
 
@@ -762,6 +939,7 @@ final class AppModel: ObservableObject {
         userValues: [InterpretedExtensionPreferenceSchema.FieldID: InterpretedExtensionPreferenceSchema.Value],
         enableAfterSaving: Bool = false
     ) async throws -> ExtensionConfigurationSnapshot {
+        try requireLibraryOperation()
         let packageName = snapshot.packageName
         guard !extensionBusyPackages.contains(packageName) else {
             throw ExtensionConfigurationSaveError.busy
@@ -798,6 +976,7 @@ final class AppModel: ObservableObject {
     }
 
     func addExtensionRepository(url: String) async throws {
+        try requireLibraryOperation()
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         let index = try await storeClient.fetchIndex(trimmed)
         let record = try await store.upsertExtensionRepository(
@@ -815,6 +994,7 @@ final class AppModel: ObservableObject {
     }
 
     func removeExtensionRepository(url: String) async {
+        guard acceptsLibraryOperation() else { return }
         try? await store.removeExtensionRepository(url: url)
         extensionRepositories.removeAll { $0.record.url == url }
     }
@@ -824,6 +1004,7 @@ final class AppModel: ObservableObject {
         repositoryURL: String,
         repositorySigningKey: String?
     ) async {
+        guard acceptsLibraryOperation() else { return }
         let packageName = extensionEntry.packageName
         guard !extensionBusyPackages.contains(packageName) else { return }
         extensionBusyPackages.insert(packageName)
@@ -840,6 +1021,20 @@ final class AppModel: ObservableObject {
             case let .installed(admission):
                 try await finishInstall(admission)
             case let .requiresUserTrust(preparation):
+                guard pendingTrustOperation == nil else {
+                    await installationService.cancel(preparation)
+                    let message = "Finish the pending signer confirmation before installing another extension."
+                    extensionErrors[packageName] = message
+                    extensionMessage = message
+                    return
+                }
+                do {
+                    let lifetime = try libraryOperations.open(expected: libraryPresentation.generation)
+                    pendingTrustOperation = (preparation.id, lifetime)
+                } catch {
+                    await installationService.cancel(preparation)
+                    throw error
+                }
                 pendingExtensionTrust = preparation
             }
         } catch {
@@ -850,12 +1045,27 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func confirmInstall(
+    func confirmPendingInstall(_ preparation: ExtensionInstallPreparation, fingerprint: String) {
+        guard let pending = pendingTrustOperation, pending.id == preparation.id else { return }
+        performLibraryOperation(lease: pending.lease) {
+            await self.confirmInstall(preparation, fingerprint: fingerprint)
+        }
+    }
+
+    private func confirmInstall(
         _ preparation: ExtensionInstallPreparation,
         fingerprint: String
     ) async {
+        guard acceptsLibraryOperation() else { return }
         let packageName = preparation.packageName
-        guard !extensionBusyPackages.contains(packageName) else { return }
+        guard let pending = pendingTrustOperation, pending.id == preparation.id else { return }
+        guard !extensionBusyPackages.contains(packageName) else {
+            pendingExtensionTrust = preparation
+            extensionMessage = "This extension is busy. Try its signer confirmation after the current operation finishes."
+            return
+        }
+        pendingTrustOperation = nil
+        defer { pending.lease.close() }
         extensionBusyPackages.insert(packageName)
         pendingExtensionTrust = nil
         extensionMessage = nil
@@ -876,11 +1086,15 @@ final class AppModel: ObservableObject {
     }
 
     func cancelInstall(_ preparation: ExtensionInstallPreparation) {
+        guard let pending = pendingTrustOperation, pending.id == preparation.id else { return }
+        pendingTrustOperation = nil
         pendingExtensionTrust = nil
-        Task { await installationService.cancel(preparation) }
+        performLibraryOperation(lease: pending.lease) { await self.installationService.cancel(preparation) }
+        pending.lease.close()
     }
 
     func setExtensionEnabled(_ enabled: Bool, packageName: String) async {
+        guard acceptsLibraryOperation() else { return }
         guard let installed = installedExtension(packageName: packageName),
               !extensionBusyPackages.contains(packageName) else { return }
         extensionBusyPackages.insert(packageName)
@@ -1112,9 +1326,9 @@ final class AppModel: ObservableObject {
 
     func toggleLibrary(_ manga: Manga, context: LibraryMutationContext) {
         guard let id = manga.id else { return }
-        Task {
+        performLibraryOperation { [self] in
             do {
-                try await setLibrary(!manga.inLibrary, mangaId: id, context: context)
+                try await self.setLibrary(!manga.inLibrary, mangaId: id, context: context)
             } catch {
                 libraryError = libraryErrorMessage(for: error)
             }

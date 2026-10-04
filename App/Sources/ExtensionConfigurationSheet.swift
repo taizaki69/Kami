@@ -9,6 +9,7 @@ struct ExtensionConfigurationSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     let packageName: String
+    let presentation: LibraryPresentationGeneration
 
     @State private var snapshot: ExtensionConfigurationSnapshot?
     @State private var baseURL = ""
@@ -80,7 +81,7 @@ struct ExtensionConfigurationSheet: View {
                             .font(.footnote)
                             .foregroundStyle(.orange)
                         Button("Reload saved settings") {
-                            Task { await load() }
+                            model.performLibraryOperation(expected: presentation) { await load() }
                         }
                         .disabled(saving || loading)
                     }
@@ -105,7 +106,7 @@ struct ExtensionConfigurationSheet: View {
                 }
             }
             .interactiveDismissDisabled(saving)
-            .task { await load() }
+            .task { await model.runLibraryOperation(expected: presentation) { await load() } }
         }
     }
 
@@ -156,7 +157,7 @@ struct ExtensionConfigurationSheet: View {
             return
         }
         saving = true
-        Task {
+        let worker = model.performLibraryOperation(expected: presentation) {
             defer { saving = false }
             do {
                 _ = try await model.saveExtensionConfiguration(
@@ -172,5 +173,6 @@ struct ExtensionConfigurationSheet: View {
                 errorText = model.configurationErrorMessage(for: error)
             }
         }
+        if worker == nil { saving = false }
     }
 }

@@ -79,6 +79,55 @@ final class ReadingStateWriterTests: XCTestCase {
         }
     }
 
+    func testSharedBarrierOwnsQueuedReadingUntilCancelledObserverAndWorkerDrain() async throws {
+        let f = try await fixture(1)
+        let coordinator = LibraryOperationCoordinator()
+        let presentation = coordinator.state.presentation
+        let gate = Gate()
+        let writer = ReadingStateWriter(persisting: { target, intent in
+            await gate.wait()
+            return try await Self.persist(f, target, intent)
+        }, operationCoordinator: coordinator)
+        let receipt = writer.enqueueProgress(target: f.targets[0], page: 7, reachedEnd: true, lastRead: 99)
+        XCTAssertEqual(coordinator.state.activeOperations, 1, "The intent is owned before its worker starts")
+        let observer = Task { try? await receipt.value() }
+        await gate.waitUntilEntered()
+        observer.cancel()
+        do { _ = try coordinator.beginExclusive(expected: presentation); XCTFail("Reading is still pending") }
+        catch { XCTAssertEqual(error as? LibraryOperationError, .operationsInProgress) }
+        gate.release()
+        await writer.captureFrontier().wait()
+        _ = await observer.value
+        let saved = try await f.store.validateReadingTarget(f.targets[0])
+        XCTAssertEqual(saved.lastPageRead, 7)
+        XCTAssertTrue(saved.read)
+        XCTAssertEqual(coordinator.state.activeOperations, 0)
+        let exclusive = try coordinator.beginExclusive(expected: presentation)
+        try coordinator.finishExclusive(exclusive)
+    }
+
+    func testExclusiveBarrierRetainsRejectedReadingForRetryAfterAbort() async throws {
+        let f = try await fixture(1)
+        let coordinator = LibraryOperationCoordinator()
+        let writer = ReadingStateWriter(store: f.store, operationCoordinator: coordinator)
+        let generation = coordinator.state.presentation
+        let exclusive = try coordinator.beginExclusive(expected: generation)
+        let receipt = writer.enqueueRead(true, target: f.targets[0])
+        do { _ = try await receipt.value(); XCTFail("Exclusive work must reject the save") }
+        catch { XCTAssertEqual(error as? LibraryOperationError, .exclusiveInProgress) }
+        XCTAssertEqual(coordinator.state.activeOperations, 0)
+        let before = try await f.store.validateReadingTarget(f.targets[0])
+        XCTAssertFalse(before.read)
+        let failure = try XCTUnwrap(writer.failures.first)
+        XCTAssertTrue(failure.canRetry)
+        try coordinator.finishExclusive(exclusive)
+        let retried = try await writer.retry(failure).value()
+        XCTAssertTrue(retried.read)
+        XCTAssertTrue(writer.failures.isEmpty)
+        XCTAssertEqual(coordinator.state.presentation, generation)
+        XCTAssertEqual(coordinator.state.activeOperations, 0)
+    }
+
     func testCloseAndNextCancelOnlyObserverAndDrainBothCapturedEvents() async throws {
         let f = try await fixture()
         let gate = Gate()

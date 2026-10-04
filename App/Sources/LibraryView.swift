@@ -2,6 +2,11 @@ import SwiftUI
 import MihonCompatKit
 import KamiCore
 
+private struct LibraryMangaRoute: Hashable {
+    let manga: Manga
+    let presentation: LibraryPresentationGeneration
+}
+
 @MainActor
 struct LibraryView: View {
     @EnvironmentObject var model: AppModel
@@ -18,6 +23,7 @@ struct LibraryView: View {
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 12)]
 
     var body: some View {
+        let presentation = model.libraryPresentation
         let snapshot = model.librarySnapshot
         let filtered = snapshot.filteredManga(category: category, search: search)
         NavigationStack {
@@ -27,7 +33,7 @@ struct LibraryView: View {
                     HStack {
                         Label(message, systemImage: "exclamationmark.triangle")
                         Spacer()
-                        Button("Retry") { Task { await model.refreshLibrary() } }
+                        Button("Retry") { model.performLibraryOperation(expected: presentation.generation) { await model.refreshLibrary() } }
                     }
                     .font(.footnote)
                     .padding()
@@ -40,13 +46,13 @@ struct LibraryView: View {
                     } else {
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(filtered) { manga in
-                                mangaCell(manga, context: snapshot.mutationContext)
+                                mangaCell(manga, context: snapshot.mutationContext, presentation: presentation.generation)
                             }
                         }
                         .padding()
                     }
                 }
-                .refreshable { await model.refreshLibrary() }
+                .refreshable { await model.runLibraryOperation(expected: presentation.generation) { await model.refreshLibrary() } }
             }
             .navigationTitle("Library")
             .searchable(text: $search, prompt: "Search library")
@@ -82,12 +88,15 @@ struct LibraryView: View {
             .safeAreaInset(edge: .bottom) {
                 if selecting { selectionBar(filtered: filtered, context: snapshot.mutationContext) }
             }
-            .navigationDestination(for: Manga.self) { manga in
-                MangaDetailView(manga: manga)
+            .navigationDestination(for: LibraryMangaRoute.self) { route in
+                MangaDetailView(manga: route.manga, presentation: route.presentation)
             }
-            .task {
-                await model.refreshLibrary()
-                await model.refreshDownloadCounts()
+            .task(id: presentation) {
+                guard !presentation.isExclusive else { return }
+                await model.runLibraryOperation(expected: presentation.generation) {
+                    await model.refreshLibrary()
+                    await model.refreshDownloadCounts()
+                }
             }
             .sheet(isPresented: $showDownloads) { DownloadsView() }
             .sheet(isPresented: $showCategories) { CategoriesView() }
@@ -146,7 +155,8 @@ struct LibraryView: View {
     }
 
     @ViewBuilder
-    private func mangaCell(_ manga: Manga, context: LibraryMutationContext?) -> some View {
+    private func mangaCell(_ manga: Manga, context: LibraryMutationContext?,
+                           presentation: LibraryPresentationGeneration) -> some View {
         if selecting, let id = manga.id {
             Button {
                 guard context == selectionContext else { return }
@@ -166,7 +176,7 @@ struct LibraryView: View {
             .accessibilityLabel(manga.title)
             .accessibilityValue(selectedIDs.contains(id) ? "Selected" : "Not selected")
         } else {
-            NavigationLink(value: manga) { MangaCoverCell(manga: manga) }
+            NavigationLink(value: LibraryMangaRoute(manga: manga, presentation: presentation)) { MangaCoverCell(manga: manga) }
                 .buttonStyle(.plain)
                 .contextMenu {
                     if let id = manga.id {

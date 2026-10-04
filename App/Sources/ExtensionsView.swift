@@ -15,6 +15,7 @@ struct ExtensionsView: View {
     @State private var errorText: String?
 
     var body: some View {
+        let presentation = model.libraryPresentation
         NavigationStack {
             List {
                 if let errorText {
@@ -27,7 +28,7 @@ struct ExtensionsView: View {
                 if !model.installedExtensions.isEmpty {
                     Section("Installed") {
                         ForEach(model.installedExtensions, id: \.packageName) { installed in
-                            InstalledExtensionRow(installed: installed)
+                            InstalledExtensionRow(installed: installed, presentation: presentation.generation)
                         }
                     }
                 }
@@ -48,7 +49,8 @@ struct ExtensionsView: View {
                                 ExtensionRow(
                                     extension: extensionEntry,
                                     repositoryURL: repo.record.url,
-                                    repositorySigningKey: repo.record.signingKey
+                                    repositorySigningKey: repo.record.signingKey,
+                                    presentation: presentation.generation
                                 )
                             }
                         } else {
@@ -64,7 +66,7 @@ struct ExtensionsView: View {
                             Text(repo.sectionTitle)
                             Spacer()
                             Button(role: .destructive) {
-                                Task {
+                                model.performLibraryOperation(expected: presentation.generation) {
                                     await model.removeExtensionRepository(
                                         url: repo.record.url
                                     )
@@ -82,7 +84,7 @@ struct ExtensionsView: View {
                 }
             }
             .navigationTitle("Extensions")
-            .refreshable { await model.refreshInstalledExtensions() }
+            .refreshable { await model.runLibraryOperation(expected: presentation.generation) { await model.refreshInstalledExtensions() } }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { adding = true } label: { Image(systemName: "plus") }
@@ -102,12 +104,7 @@ struct ExtensionsView: View {
                     title: Text("Trust extension signer?"),
                     message: Text("\(preparation.extensionName) \(preparation.versionName) was signed with \(preparation.signatureScheme.rawValue.uppercased()). Verify this SHA-256 certificate signer set before continuing:\n\n\(displayedFingerprints)"),
                     primaryButton: .default(Text("Trust & Install")) {
-                        Task {
-                            await model.confirmInstall(
-                                preparation,
-                                fingerprint: fingerprint
-                            )
-                        }
+                        model.confirmPendingInstall(preparation, fingerprint: fingerprint)
                     },
                     secondaryButton: .cancel {
                         model.cancelInstall(preparation)
@@ -126,7 +123,8 @@ struct ExtensionsView: View {
     }
 
     private var addRepoSheet: some View {
-        NavigationStack {
+        let presentation = model.libraryPresentation
+        return NavigationStack {
             Form {
                 TextField("Repository URL", text: $repoURL)
                     .keyboardType(.URL)
@@ -147,7 +145,7 @@ struct ExtensionsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
                         adding = false
-                        Task { await addRepo() }
+                        model.performLibraryOperation(expected: presentation.generation) { await addRepo() }
                     }
                     .disabled(repoURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
                 }
@@ -188,6 +186,7 @@ struct ExtensionsView: View {
 private struct InstalledExtensionRow: View {
     @EnvironmentObject var model: AppModel
     let installed: InstalledExtensionTrust
+    let presentation: LibraryPresentationGeneration
     @State private var showingConfiguration = false
 
     var body: some View {
@@ -214,7 +213,7 @@ private struct InstalledExtensionRow: View {
             Toggle("Enabled", isOn: Binding(
                 get: { installed.enabled },
                 set: { enabled in
-                    Task {
+                    model.performLibraryOperation(expected: presentation) {
                         await model.setExtensionEnabled(enabled, packageName: installed.packageName)
                     }
                 }
@@ -232,7 +231,7 @@ private struct InstalledExtensionRow: View {
             }
         }
         .sheet(isPresented: $showingConfiguration) {
-            ExtensionConfigurationSheet(packageName: installed.packageName)
+            ExtensionConfigurationSheet(packageName: installed.packageName, presentation: presentation)
         }
     }
 
@@ -255,6 +254,7 @@ private struct ExtensionRow: View {
     let `extension`: ExtensionRepositoryIndex.Extension
     let repositoryURL: String
     let repositorySigningKey: String?
+    let presentation: LibraryPresentationGeneration
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -280,7 +280,7 @@ private struct ExtensionRow: View {
                         .controlSize(.small)
                 } else {
                     Button(actionLabel) {
-                        Task {
+                        model.performLibraryOperation(expected: presentation) {
                             await model.install(
                                 extension: `extension`,
                                 repositoryURL: repositoryURL,

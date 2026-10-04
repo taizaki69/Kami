@@ -78,6 +78,7 @@ struct LibraryBackupsView: View {
     @State private var saved = false
 
     var body: some View {
+        let presentation = model.libraryPresentation.generation
         NavigationStack {
             List {
                 Section {
@@ -121,7 +122,7 @@ struct LibraryBackupsView: View {
                         }
                     } else {
                         Button {
-                            prepare()
+                            prepare(expected: presentation)
                         } label: {
                             Label(prepared == nil ? "Prepare backup" : "Prepare a new backup",
                                   systemImage: "externaldrive.badge.plus")
@@ -168,14 +169,14 @@ struct LibraryBackupsView: View {
         }
     }
 
-    private func prepare() {
+    private func prepare(expected: LibraryPresentationGeneration) {
         guard operationID == nil else { return }
         let id = UUID()
         operationID = id
         prepared = nil
         saved = false
         errorMessage = nil
-        preparation = Task {
+        preparation = model.performLibraryOperation(expected: expected) {
             do {
                 let backup = try await model.prepareLibraryBackup()
                 guard operationID == id, !Task.isCancelled else { return }
@@ -191,6 +192,7 @@ struct LibraryBackupsView: View {
             operationID = nil
             preparation = nil
         }
+        if preparation == nil { operationID = nil }
     }
 
     private func cancelPreparation() {

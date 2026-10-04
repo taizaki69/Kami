@@ -9,6 +9,7 @@ struct MangaDetailView: View {
     let manga: Manga
     var prefetched: SMangaCompat?
     var prefetchedSourceRevision: UInt64?
+    @State private var presentation: LibraryPresentationGeneration
 
     @State private var detail: SMangaCompat?
     @State private var chapters: [Chapter] = []
@@ -25,6 +26,14 @@ struct MangaDetailView: View {
     @State private var loadedSourceRevision: UInt64?
     @State private var showDownloads = false
 
+    init(manga: Manga, prefetched: SMangaCompat? = nil, prefetchedSourceRevision: UInt64? = nil,
+         presentation: LibraryPresentationGeneration) {
+        self.manga = manga
+        self.prefetched = prefetched
+        self.prefetchedSourceRevision = prefetchedSourceRevision
+        _presentation = State(initialValue: presentation)
+    }
+
     var body: some View {
         let snapshot = readingSnapshot
         let savedInLibrary = inLibrary
@@ -33,7 +42,9 @@ struct MangaDetailView: View {
                 Section {
                     Label(errorText, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
-                    Button("Reload manga") { Task { await load() } }.disabled(loading)
+                    Button("Reload manga") {
+                        model.performLibraryOperation(expected: presentation) { await load() }
+                    }.disabled(loading)
                 }
             }
             if let detail {
@@ -101,7 +112,8 @@ struct MangaDetailView: View {
                         NavigationLink {
                             if let snapshot {
                                 ReaderView(snapshot: snapshot, chapter: chapter,
-                                           openingPolicy: isDownloaded(chapter) ? .offlineOnly : .automatic)
+                                           openingPolicy: isDownloaded(chapter) ? .offlineOnly : .automatic,
+                                           presentation: presentation)
                             }
                         } label: {
                             HStack {
@@ -123,7 +135,8 @@ struct MangaDetailView: View {
                         }
                         .disabled(snapshot?.target(for: chapter) == nil
                                   || (!hasCurrentSource && !isDownloaded(chapter)))
-                        ChapterDownloadControls(manga: manga, chapter: chapter, inLibrary: inLibrary)
+                        ChapterDownloadControls(manga: manga, chapter: chapter, inLibrary: inLibrary,
+                                                presentation: presentation)
                     }
                     .swipeActions {
                         Button(chapter.read ? "Unread" : "Read") {
@@ -142,8 +155,10 @@ struct MangaDetailView: View {
                 Button { showDownloads = true } label: { Label("Downloads", systemImage: "arrow.down.circle") }
             }
         }
-        .task(id: model.sourceRevision(for: manga.sourceId)) { await load() }
-        .refreshable { await load() }
+        .task(id: model.sourceRevision(for: manga.sourceId)) {
+            await model.runLibraryOperation(expected: presentation) { await load() }
+        }
+        .refreshable { await model.runLibraryOperation(expected: presentation) { await load() } }
         .onDisappear { loadGeneration &+= 1 }
         .sheet(item: $categoryAssignment) { request in
             CategoryAssignmentSheet(mangaIDs: request.mangaIDs, title: request.title, context: request.context)
@@ -282,7 +297,7 @@ struct MangaDetailView: View {
         guard let snapshot, let id = snapshot.manga.id, !libraryBusy else { return }
         let context = snapshot.mutationContext
         libraryBusy = true
-        Task {
+        let worker = model.performLibraryOperation(expected: presentation) {
             defer { libraryBusy = false }
             do {
                 try await model.setLibrary(adding, mangaId: id, context: context)
@@ -295,6 +310,7 @@ struct MangaDetailView: View {
                 libraryError = model.libraryErrorMessage(for: error)
             }
         }
+        if worker == nil { libraryBusy = false }
     }
 
     private func categoryLabel(mangaId: Int64) -> String {

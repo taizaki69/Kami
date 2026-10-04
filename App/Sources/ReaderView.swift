@@ -23,6 +23,8 @@ struct ReaderView: View {
     let sourceID: Int64
     let openingPolicy: ReaderOpeningPolicy
     @State private var readingSnapshot: MangaReadingSnapshot
+    @State private var presentation: LibraryPresentationGeneration
+    @State private var sessionOperation: LibraryOperationLease?
     @State private var chapter: Chapter
     @State private var offlineLease: OfflineChapterLease?
     @State private var loadingProvider = true
@@ -34,11 +36,12 @@ struct ReaderView: View {
     @State private var providerGeneration: UInt64 = 0
 
     init(snapshot: MangaReadingSnapshot, chapter: Chapter,
-         openingPolicy: ReaderOpeningPolicy = .automatic) {
+         openingPolicy: ReaderOpeningPolicy = .automatic, presentation: LibraryPresentationGeneration) {
         self.mangaTitle = snapshot.manga.title
         self.sourceID = snapshot.manga.sourceId
         self.openingPolicy = openingPolicy
         _readingSnapshot = State(initialValue: snapshot)
+        _presentation = State(initialValue: presentation)
         _chapter = State(initialValue: chapter)
         _requireOffline = State(initialValue: openingPolicy == .offlineOnly)
         _requestedOnline = State(initialValue: openingPolicy == .onlineOnly)
@@ -65,6 +68,7 @@ struct ReaderView: View {
                     mangaTitle: mangaTitle,
                     chapter: $chapter,
                     readingSnapshot: readingSnapshot,
+                    presentation: presentation,
                     sourceID: sourceID,
                     sourceRevision: revision,
                     source: offlineLease == nil ? model.source(id: sourceID) : nil,
@@ -74,14 +78,24 @@ struct ReaderView: View {
                 .id(offlineLease.map { "offline:\($0.id)" } ?? "online:\(sourceID):\(revision)")
             }
         }
-        .task(id: retryID) { await resolveProvider() }
+        .task(id: retryID) {
+            await model.runLibraryOperation(expected: presentation) { await resolveProvider() }
+        }
         .onDisappear {
             providerGeneration &+= 1
             let lease = offlineLease
             offlineLease = nil
-            Task {
-                await lease?.close()
-                await model.refreshDownloads()
+            let operation = sessionOperation
+            sessionOperation = nil
+            if let operation {
+                model.performLibraryOperation(lease: operation) {
+                    await lease?.close()
+                    await model.waitForReadingSaves()
+                    await model.refreshDownloads()
+                }
+                operation.close()
+            } else {
+                Task { await lease?.close() }
             }
         }
     }
@@ -111,6 +125,10 @@ struct ReaderView: View {
             return
         }
         do {
+            guard !Task.isCancelled, generation == providerGeneration else { return }
+            if sessionOperation == nil {
+                sessionOperation = try model.libraryOperations.open(expected: presentation)
+            }
             await model.waitForReadingSaves()
             guard !Task.isCancelled, generation == providerGeneration else { return }
             let stored = try await model.store.validateReadingTarget(target)
@@ -150,6 +168,7 @@ struct ReaderView: View {
 
 @MainActor
 private struct ReaderSessionView: View {
+    let presentation: LibraryPresentationGeneration
     let mangaTitle: String
     let readingSnapshot: MangaReadingSnapshot
     private let chapters: [Chapter]
@@ -190,11 +209,13 @@ private struct ReaderSessionView: View {
     @State private var offlineLease: OfflineChapterLease?
     @State private var leaseChapterID: Int64?
     @State private var localSessionActive = true
+    @State private var sessionOperation: LibraryOperationLease?
 
     init(
         mangaTitle: String,
         chapter: Binding<Chapter>,
         readingSnapshot: MangaReadingSnapshot,
+        presentation: LibraryPresentationGeneration,
         sourceID: Int64,
         sourceRevision: UInt64,
         source: (any KamiSource)?,
@@ -203,6 +224,7 @@ private struct ReaderSessionView: View {
     ) {
         self.mangaTitle = mangaTitle
         self.readingSnapshot = readingSnapshot
+        self.presentation = presentation
         self.chapters = readingSnapshot.readerChapters
         self._chapter = chapter
         self.sourceID = sourceID
@@ -311,7 +333,7 @@ private struct ReaderSessionView: View {
                 webtoonGap: $webtoonGap
             )
         }
-        .task(id: reloadID) { await load() }
+        .task(id: reloadID) { await model.runLibraryOperation(expected: presentation) { await load() } }
         .onAppear {
             localSessionActive = true
             normalizeStoredSettings()
@@ -333,9 +355,21 @@ private struct ReaderSessionView: View {
             imageStore.stop()
             let lease = offlineLease
             offlineLease = nil
-            Task {
-                await lease?.close()
-                await model.refreshDownloads()
+            let operation = sessionOperation
+            sessionOperation = nil
+            if let operation {
+                // The child may have advanced to a different offline chapter
+                // than its parent. Keep its own file cleanup and final save
+                // owned regardless of parent/child disappearance order.
+                model.performLibraryOperation(lease: operation) {
+                    await lease?.close()
+                    await model.waitForReadingSaves()
+                    await model.refreshDownloads()
+                }
+                operation.close()
+            } else {
+                // No load began; the parent still owns the initial file lease.
+                Task { await lease?.close() }
             }
         }
         .onChange(of: keepScreenAwake) { _, _ in
@@ -363,6 +397,7 @@ private struct ReaderSessionView: View {
 
     private var isSessionCurrent: Bool {
         localSessionActive && !readingStateExpired
+            && presentation == model.libraryPresentation.generation
             && (offlineOnly || model.isSourceCurrent(id: sourceID, revision: sourceRevision))
     }
 
@@ -667,7 +702,16 @@ private struct ReaderSessionView: View {
     }
 
     private func load() async {
-        guard !readingStateExpired else { return }
+        guard !Task.isCancelled, isSessionCurrent else { return }
+        do {
+            if sessionOperation == nil {
+                sessionOperation = try model.libraryOperations.open(expected: presentation)
+            }
+        } catch {
+            errorText = error.localizedDescription
+            loading = false
+            return
+        }
         loadGeneration &+= 1
         let generation = loadGeneration
         let target = readingSnapshot.target(for: chapter)
