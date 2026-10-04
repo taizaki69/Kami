@@ -64,15 +64,22 @@ la auditoría del rol measurement conserva ocho artefactos, cuatro candidatos
 estructurales, cuatro bloqueados por wrappers y 359 gaps, con cero errores y
 cero opcodes no soportados. Reducir un recuento estático no probaría ejecución.
 
-Los logs, hashes y estado de publicación quedan en
-`.git/checkpoints/20261004-backup-decoding/`. El PR de implementación registra
-los workflows y resultados del commit publicado exacto. No se atribuyen los
-workflows del padre a esta entrega. Apple CI pendiente durante la preparación
-local se resolverá y documentará en ese PR antes de marcarlo listo.
+El [PR #14](https://github.com/taizaki69/Kami/pull/14) quedó listo, sin merge, en
+`8b7d98046dd04cd1ba99d2e27ee856629876f64e`. Su
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/37226517208) pasó con
+371 Compat + 181 Core/SQLite en Linux y 371 Compat + 184 Core en macOS.
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/37226517222) compiló
+simulador y dispositivo;
+[IPA Package](https://github.com/taizaki69/Kami/actions/runs/37226517185) produjo
+el artefacto unsigned 11311689959 de 4.413.732 bytes, SHA-256
+`61eb98e180116440263023a0b29d46355d13385e0eaec570582344f7936c0b11`.
+Los tres workflows declaran ese mismo head SHA. Logs, hashes y metadata quedan
+en `.git/checkpoints/20261004-backup-decoding/`.
 
 ## Lo que falta para restaurar
 
-Quedan exportación nativa versionada, lectura acotada desde Files, preview
+La [entrega nativa posterior](VERIFICATION-2026-10-04-NATIVE-BACKUPS.md) añade
+exportación versionada a Files. Quedan lectura acotada desde Files, preview
 inmutable, fusión atómica y protección contra previews/lectores obsoletos. El
 snapshot debe incluir capítulos ocultos, todo el historial, duración y estado
 durable de descubrimientos. Se necesitan identidad de despliegue para Foo y

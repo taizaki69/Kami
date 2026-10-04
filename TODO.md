@@ -6,11 +6,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-04
 
 The full native-reader and compatibility objective remains active. The current
-implementation corrects and bounds Mihon gzip/raw backup decoding on top of
+implementation adds bounded native library export to Files after Mihon gzip/raw
+backup decoding, on top of
 verified downloads/offline reading, updates, History resume, persistent FoolSlide
-settings and revocable source registrations. Native export and restoration
-remain pending.
-See [current verification](docs/VERIFICATION-2026-10-04.md) and
+settings and revocable source registrations. Restoration remains pending.
+See [native backup verification](docs/VERIFICATION-2026-10-04-NATIVE-BACKUPS.md),
+[Mihon decoder verification](docs/VERIFICATION-2026-10-04.md) and
 [earlier verification](docs/VERIFICATION-2026-10-03.md) for actual evidence.
 Completed items below retain some historical checkpoint counts; those counts
 must not be used as evidence for the current commit.
@@ -41,9 +42,12 @@ must not be used as evidence for the current commit.
       separately from physical-device interaction and performance.
 - [ ] Continue migration/backup UI and remaining reader controls,
       without treating a passing compatibility suite as completion of the app.
-- [~] Verify strict gzip/raw backup decoding against real Kotlin serializer
+- [x] Verify strict gzip/raw backup decoding against real Kotlin serializer
       output; retain library data and explicit unsupported-field coverage.
-- [ ] Add versioned native library export, immutable restore preview and atomic
+- [x] Add versioned native library export: strict bounded JSON, a complete
+      transactional snapshot and cancellable Files export with scope/counts.
+      Includes hidden chapters, full history/duration and discovery state.
+- [ ] Add immutable restore preview and atomic
       merge with stale-plan rejection, exact identities and source conflict reports.
 
 ## P0 — Extension research & foundation

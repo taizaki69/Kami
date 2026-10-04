@@ -20,6 +20,59 @@ public actor LibraryStore {
         try Migrations.apply(db)
     }
 
+    /// A point-in-time archive of all persisted library domain data. This does
+    /// not include installation authority, operational work or downloaded files.
+    /// App callers must separately require an available durable database.
+    public func exportBackupSnapshot(
+        exportID: UUID = UUID(), exportedAt: Int64,
+        policy: LibraryBackupPolicy = .default
+    ) throws -> LibraryBackupDocument {
+        do {
+            return try withLibraryTransaction(readOnly: true) {
+                try LibraryBackupSnapshotReader.read(
+                    db, exportID: exportID, exportedAt: exportedAt, policy: policy,
+                    foolSlideBinding: { try self.backupFoolSlideContentBinding() }
+                )
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as LibraryBackupSnapshotError {
+            throw error
+        } catch let error as LibraryBackupError {
+            throw error
+        } catch {
+            throw LibraryBackupSnapshotError.storageUnavailable
+        }
+    }
+
+    /// Saved settings describe the content's namespace even when an APK is
+    /// disabled or unavailable. This does not authenticate/enable an APK or turn
+    /// a namespace into executable preferences. Invalid provenance stays explicit.
+    private func backupFoolSlideContentBinding() throws -> LibraryBackupDocument.ContentBinding {
+        let unresolved = LibraryBackupDocument.ContentBinding(kind: .unresolved)
+        guard try LibraryBackupSnapshotReader.hasBoundedFoolSlideConfiguration(db),
+              let installed = try installedExtensionTrust(packageName: LibraryBackupSnapshotReader.foolSlidePackage),
+              let schema = InterpretedExtensionProfileCatalog.preferenceSchema(
+                packageName: installed.packageName, versionName: installed.versionName, versionCode: installed.versionCode
+              ) else { return unresolved }
+        let identity = schema.identity
+        guard installed.apkSHA256 == identity.apkSHA256,
+              installed.currentSigners == [identity.signerFingerprint],
+              installed.signerHistory.contains(identity.signerFingerprint),
+              installed.sourceIDs == identity.sourceIDs,
+              identity.sourceIDs == [LibraryBackupSnapshotReader.foolSlideSourceID] else { return unresolved }
+        do {
+            let snapshot = try readExtensionConfiguration(installed: installed, schema: schema)
+            guard snapshot.revision > 0 else { return unresolved }
+            let resolved = try schema.validateUserValues(snapshot.userValues)
+            return .init(kind: .deployment, deploymentURL: resolved.baseURL)
+        } catch is SQLiteDatabase.SQLiteError {
+            throw LibraryBackupSnapshotError.storageUnavailable
+        } catch {
+            return unresolved
+        }
+    }
+
     // MARK: - Manga
 
     public func libraryManga() throws -> [Manga] {

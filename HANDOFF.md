@@ -4,7 +4,12 @@ Last updated: 2026-10-04 (America/Lima)
 
 ## Canonical continuation — 2026-10-04
 
-The active continuation is `assistant/backup-decoding-20261004`, based on
+The active continuation is `assistant/native-library-backups-20261004`, based on
+`8b7d98046dd04cd1ba99d2e27ee856629876f64e` from
+[PR #14](https://github.com/taizaki69/Kami/pull/14). That Mihon decoder checkpoint
+passed all three workflows on its exact head: Linux 371 Compat + 181 Core/SQLite,
+macOS 371 Compat + 184 Core, simulator/device compilation and unsigned IPA.
+It builds on
 `c794982271b95b4c6d91e73917b5392363e481ce` from
 [PR #13](https://github.com/taizaki69/Kami/pull/13). That downloads checkpoint
 passed Linux/macOS tests, simulator/device compilation and unsigned IPA CI,
@@ -35,7 +40,8 @@ an installation identity change invalidates them without granting new trust.
 The app clears/recreates browse and reader sessions when a source is replaced.
 Read the current
 [README](README.md), [task tracker](TODO.md), and
-[current verification record](docs/VERIFICATION-2026-10-04.md) and
+[native backup verification](docs/VERIFICATION-2026-10-04-NATIVE-BACKUPS.md),
+[Mihon decoder verification](docs/VERIFICATION-2026-10-04.md) and
 [earlier verification record](docs/VERIFICATION-2026-10-03.md) for current scope.
 The updates checkpoint adds a schema-4 discovery ledger, manual scanning with bounded
 source concurrency, cancellation and recoverable summaries, an actual Updates
@@ -54,7 +60,7 @@ deletion waits for open local readers and retains domain reading data. See
 `.git/checkpoints/20261003-offline-downloads/`. Do not infer verification from
 implementation alone; use the exact implementation PR and dated record.
 
-The current work corrects the backup-format premise: the pinned Mihon and
+The preceding checkpoint corrects the backup-format premise: the pinned Mihon and
 Tachiyomi-era producers use gzip/raw protobuf, not current-zstd/legacy-zlib.
 The bounded reader retains typed library state and reports opaque unsupported
 fields without granting source or repository trust. Five pairs of small
@@ -63,14 +69,38 @@ under `Tests/backups/`; none is a user export from a running Android app.
 See [backup compatibility](docs/BACKUP_COMPATIBILITY.md) for defaults, limits,
 schema coverage and API changes. Logs and publication state are under
 `.git/checkpoints/20261004-backup-decoding/`.
-Native library export, immutable preview and atomic restore are the next
-product work. They must include hidden chapters/all history, preserve discovery
-baselines, reject stale previews and use exact source/URL identities. Foo needs
-content binding; MangaDex source-ID/URL mapping needs separate verified evidence.
+The current work implements [native library export](docs/NATIVE_BACKUPS.md):
+immutable JSON v1 DTOs, lower-only bounds, strict UTF-8/duplicate-key/schema
+validation, canonical Int64 strings and exact byte identities. A single SQLite
+read transaction includes all stored manga, hidden chapters, every history row
+and duration, empty categories and durable discovery state. Descriptive Foo
+namespace provenance is bounded and validated without loading/enabling an APK.
+Malformed library data fails the whole export; corrupt Foo provenance stays
+explicitly unresolved. No authority, settings, download files or operational
+ledgers are archived or changed.
+
+The Library options menu opens a cancellable export sheet with counts and
+Save to Files. Its immutable bytes are prepared off the main actor, fallback
+storage is rejected, stale tasks cannot publish, and save success comes only
+from the system exporter. The screen states that restore is unavailable.
+Logs/reviews/publication state are in
+`.git/checkpoints/20261004-native-library-backups/`.
+
+Immutable preview and atomic restore are the next product work. They must reject
+stale input/store state and use exact source/URL identities. Foo needs durable
+content binding/conflict handling, and existing reader/source work needs a
+restore epoch/barrier. MangaDex mapping evidence now pins the English ID
+2499283573021220255 and strict /manga/UUID and /chapter/UUID forms through the
+actual Gradle/KSP source-ID chain; see the local
+`20261004-backup-decoding/next-mangadex-mapping.md` checkpoint. That research
+does not enable a production adapter or establish other languages/URL forms.
 The design evidence is retained under
 `.git/checkpoints/20261003-offline-downloads/next-backup-*.md`.
 The broad objective remains active; background downloads, scheduled updates,
 broader extension APIs and other daily-reader capabilities are still required.
+Publish coherent changes as PRs, push fixes and verify the exact head
+automatically without waiting for further confirmation. Merge requires a
+separate instruction.
 
 Linux verifies the portable packages and can exercise SQLite through an
 explicit system module. SwiftUI, simulator/device compilation and IPA packaging

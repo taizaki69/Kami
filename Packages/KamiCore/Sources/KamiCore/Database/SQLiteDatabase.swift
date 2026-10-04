@@ -69,6 +69,18 @@ public final class SQLiteDatabase {
             return nil
         }
         public func bool(_ column: String) -> Bool { int(column) == 1 }
+
+        // Archive reads select text as bounded BLOBs so invalid UTF-8 or an
+        // embedded NUL cannot be silently replaced/truncated by C-string APIs.
+        func bytes(_ column: String) -> [UInt8]? {
+            if case let .blob(value)? = values[column] { return value }
+            return nil
+        }
+
+        func isNull(_ column: String) -> Bool {
+            if case .null? = values[column] { return true }
+            return false
+        }
     }
 
     enum SQLiteValue {

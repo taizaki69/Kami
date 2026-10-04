@@ -162,6 +162,25 @@ final class AppModel: ObservableObject {
         Task { await refreshLibrary() }
     }
 
+    func prepareLibraryBackup() async throws -> PreparedLibraryBackup {
+        guard durableDatabaseAvailable else { throw LibraryBackupExportError.storageUnavailable }
+        try Task.checkCancellation()
+        let store = self.store
+        let worker = Task.detached(priority: .userInitiated) {
+            let document = try await store.exportBackupSnapshot(exportedAt: Int64(Date().timeIntervalSince1970))
+            let bytes = try LibraryBackupCodec().encode(document)
+            try Task.checkCancellation()
+            return PreparedLibraryBackup(document: document, data: bytes)
+        }
+        return try await withTaskCancellationHandler {
+            let backup = try await worker.value
+            try Task.checkCancellation()
+            return backup
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+
     func refreshLibrary() async {
         libraryReloadGeneration &+= 1
         let generation = libraryReloadGeneration
