@@ -221,3 +221,11 @@ El binario Release tiene SHA-256
 `1ab66669c0b90957eda6a57fdccf99d89815af57bbd52a790ad17665e8c4ce44`.
 Las verificaciones Apple y el workflow Linux nuevo siguen pendientes de CI
 para el commit que integre este trabajo.
+
+La primera compilación de simulador del commit `94e4b80` detectó una
+ambigüedad de `Category` al importar el SDK Apple. Las cinco anotaciones de
+tipo de la UI se cualificaron como `KamiCore.Category`; el parser Linux no
+había detectado ese conflicto de tipos. Las nuevas ejecuciones del
+[PR #10](https://github.com/taizaki69/Kami/pull/10) deben confirmar el commit
+corregido. El cuerpo del PR y el checkpoint local registran sus SHA y runs;
+el fallo anterior no se considera una verificación Apple aprobada.

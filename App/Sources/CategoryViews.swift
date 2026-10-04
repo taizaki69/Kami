@@ -9,7 +9,7 @@ struct CategoryAssignmentRequest: Identifiable {
 
 private struct CategoryNameRequest: Identifiable {
     let id = UUID()
-    var category: Category?
+    var category: KamiCore.Category?
 }
 
 @MainActor
@@ -140,7 +140,7 @@ struct CategoriesView: View {
 
 @MainActor
 private struct CategoryNameSheet: View {
-    let category: Category?
+    let category: KamiCore.Category?
     let onSave: @MainActor (String) async throws -> Void
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -149,7 +149,7 @@ private struct CategoryNameSheet: View {
     @State private var errorText: String?
     @FocusState private var nameFocused: Bool
 
-    init(category: Category?, onSave: @escaping @MainActor (String) async throws -> Void) {
+    init(category: KamiCore.Category?, onSave: @escaping @MainActor (String) async throws -> Void) {
         self.category = category
         self.onSave = onSave
         _name = State(initialValue: category?.name ?? "")
@@ -291,7 +291,7 @@ struct CategoryAssignmentSheet: View {
         .interactiveDismissDisabled(saving)
     }
 
-    private func categoryRow(_ category: Category, id: Int64) -> some View {
+    private func categoryRow(_ category: KamiCore.Category, id: Int64) -> some View {
         let membership = draft.membership(of: id)
         let symbol: String
         let value: String

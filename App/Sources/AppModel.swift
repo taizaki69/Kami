@@ -35,7 +35,7 @@ final class AppModel: ObservableObject {
     private var libraryReloadGeneration: UInt64 = 0
 
     var library: [Manga] { librarySnapshot.manga }
-    var categories: [Category] { librarySnapshot.categories }
+    var categories: [KamiCore.Category] { librarySnapshot.categories }
 
     init() {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
