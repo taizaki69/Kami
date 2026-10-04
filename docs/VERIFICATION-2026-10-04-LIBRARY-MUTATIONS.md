@@ -38,6 +38,11 @@ de crear la tarea, por lo que alcanza la API de producción sin renovar el conte
 El helper de fixtures separa la lectura de la aserción de XCTest para propagar
 CancellationError sin registrarlo como un fallo inesperado.
 
+El primer workflow macOS detectó una ambigüedad de `Category` en el nuevo
+helper de fixtures, que Linux no reproduce. El tipo de retorno se califica
+como `KamiCore.Category`; no se omiten tests ni se cambia código de producción.
+La verificación final del PR corresponde al commit corregido.
+
 Los logs, revisión y evidencia de publicación quedan bajo
 `.git/checkpoints/20261004-library-mutation-contexts/`. El PR de implementación
 registra los workflows y artefactos del commit publicado; un parse Linux no

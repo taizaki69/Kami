@@ -17,7 +17,7 @@ extension LibraryStore {
     }
 
     @discardableResult
-    func createCategory(name: String) throws -> Category {
+    func createCategory(name: String) throws -> KamiCore.Category {
         try createCategory(name: name, context: mutationContextForTest())
     }
 
