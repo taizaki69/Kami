@@ -64,6 +64,7 @@ public actor ExtensionPreferencesService {
             do {
                 let stored = try await store.extensionConfigurationSnapshot(installed: installed, schema: schema)
                 guard stored.revision > 0 else { throw ExtensionPreferencesError.configurationRequired }
+                try SourceContentBindingPersistence.requireExecution(stored)
                 runtimePreferences = try schema.validateUserValues(stored.userValues).runtimePreferences
                 snapshot = stored
             } catch {

@@ -50,6 +50,20 @@ struct ExtensionConfigurationSheet: View {
                         Text("When enabled, chapter-page requests send the website's adult-content confirmation. This setting does not filter the catalogue.")
                     }
 
+                    if let binding = snapshot?.contentBinding {
+                        Section("Saved website") {
+                            if let url = binding.deploymentURL {
+                                Text(url).textSelection(.enabled)
+                                Text("Use this exact address when configuring this source again. It cannot change while manga from this website are stored.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            } else {
+                                Label("The original website of the saved manga is unknown.", systemImage: "exclamationmark.triangle")
+                                Text("These settings cannot assign those manga to a different website.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
                     if let snapshot, !snapshot.enabled {
                         Section {
                             Button("Save and enable") { save(enableAfterSaving: true) }
@@ -104,7 +118,7 @@ struct ExtensionConfigurationSheet: View {
     }
 
     private var hasChanges: Bool {
-        snapshot.map { $0.userValues != userValues } ?? false
+        snapshot.map { !$0.matches(userValues: userValues) } ?? false
     }
 
     private func load() async {

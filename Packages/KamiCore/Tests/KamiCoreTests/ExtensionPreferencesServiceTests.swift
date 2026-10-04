@@ -326,12 +326,14 @@ final class ExtensionPreferencesServiceTests: XCTestCase {
         XCTAssertEqual(unchanged, saved)
     }
 
-    func testMissingDeploymentBindingWithExistingMangaCannotBeRetargeted() async throws {
+    func testUnresolvedDeploymentWithExistingMangaCannotBeAssigned() async throws {
         let f = try await fixture()
         defer { try? FileManager.default.removeItem(at: f.directory) }
+        try SQLiteDatabase(path: f.path).run(
+            "INSERT INTO source_content_binding(source_id,kind,revision) VALUES (?,'unresolved',1)", [.int(Self.sourceID)])
         let draft = try await f.preferences.configuration(packageName: Self.package)
         _ = try await f.store.upsert(Manga(sourceId: Self.sourceID, url: "/legacy-relative"))
-        await expect(.deploymentInUse) {
+        await expect(.unresolvedContent) {
             _ = try await f.preferences.saveConfiguration(snapshot: draft, userValues: self.values())
         }
         let current = try await f.preferences.configuration(packageName: Self.package)
@@ -604,6 +606,264 @@ final class ExtensionPreferencesServiceTests: XCTestCase {
         )
         XCTAssertEqual(refreshed?.title, "Refreshed")
         XCTAssertEqual(refreshed?.altTitles, ["Refreshed alias"])
+    }
+
+    func testFirstAuthenticatedSaveForExistingContentRequiresExactStoredWebsiteAndDoesNotEnable() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let db = try SQLiteDatabase(path: f.path)
+        try db.run("INSERT INTO source_content_binding(source_id,kind,deployment_url,revision) VALUES (?,'deployment',?,1)",
+                   [.int(Self.sourceID), .text(Self.baseURL)])
+        let id = try await f.store.upsert(Manga(sourceId: Self.sourceID, url: "/restored", inLibrary: false))
+        let draft = try await f.preferences.configuration(packageName: Self.package)
+        XCTAssertEqual(draft.revision, 0)
+        XCTAssertEqual(draft.contentBinding?.deploymentURL, Self.baseURL)
+        await expect(.deploymentInUse) {
+            _ = try await f.preferences.saveConfiguration(snapshot: draft, userValues: self.values(url: "https://wrong.invalid"))
+        }
+        XCTAssertTrue(try db.query("SELECT * FROM installed_extension_preferences").isEmpty)
+        let saved = try await f.preferences.saveConfiguration(snapshot: draft, userValues: values())
+        XCTAssertEqual(saved.revision, 1)
+        XCTAssertEqual(saved.contentBinding, draft.contentBinding)
+        XCTAssertFalse(saved.enabled)
+        let after = try await f.store.manga(id: id)
+        XCTAssertEqual(after?.url, "/restored")
+        XCTAssertEqual(try db.query("SELECT enabled FROM installed_extension").first?.int("enabled"), 0)
+    }
+
+    func testReadmissionCanDiscardPreferencesWithoutDiscardingContentWebsite() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let saved = try await save(f)
+        _ = try await f.store.upsert(Manga(sourceId: Self.sourceID, url: "/kept"))
+        let db = try SQLiteDatabase(path: f.path)
+        _ = try await f.admission.admit(apkBytes: f.bytes, extension: entry(sourceIDs: [Self.sourceID, 999]), apkPath: f.apk.path)
+        XCTAssertTrue(try db.query("SELECT * FROM installed_extension_preferences").isEmpty)
+        XCTAssertEqual(try SourceContentBindingPersistence.read(db), saved.contentBinding)
+        await expect(.authenticationFailed) { _ = try await f.preferences.configuration(packageName: Self.package) }
+        _ = try await f.admission.admit(apkBytes: f.bytes, extension: entry(), apkPath: f.apk.path)
+        let draft = try await f.preferences.configuration(packageName: Self.package)
+        XCTAssertEqual(draft.revision, 0)
+        let repaired = try await f.preferences.saveConfiguration(snapshot: draft, userValues: values())
+        XCTAssertEqual(repaired.contentBinding, saved.contentBinding)
+    }
+
+    func testNoContentWebsiteChangeAndRevertAdvanceBindingAndRejectAnOldEditor() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let first = try await save(f)
+        let second = try await f.preferences.saveConfiguration(snapshot: first, userValues: values(url: "https://other.invalid"))
+        let third = try await f.preferences.saveConfiguration(snapshot: second, userValues: values())
+        XCTAssertEqual(first.contentBinding?.revision, 1)
+        XCTAssertEqual(second.contentBinding?.revision, 2)
+        XCTAssertEqual(third.contentBinding?.revision, 3)
+        XCTAssertEqual(first.contentBinding?.deploymentURL, third.contentBinding?.deploymentURL)
+        XCTAssertNotEqual(first.contentBinding, third.contentBinding)
+        await expect(.staleConfiguration) {
+            _ = try await f.preferences.saveConfiguration(snapshot: first, userValues: self.values(adult: true))
+        }
+    }
+
+    func testBindingRevisionCASIsIndependentOfThePreferenceRevision() async throws {
+        let f = try await fixture(enabled: true)
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let saved = try await save(f)
+        let token = try await execution(f)
+        let db = try SQLiteDatabase(path: f.path)
+        try db.run("UPDATE source_content_binding SET revision=revision+1")
+        await expect(.staleContentBinding) {
+            _ = try await f.preferences.saveConfiguration(snapshot: saved, userValues: self.values(adult: true))
+        }
+        await expect(.staleConfiguration) { try await f.preferences.verifyCurrentExecution(token) }
+        XCTAssertEqual(try db.query("SELECT revision FROM installed_extension_preferences").first?.int("revision"), 1)
+        XCTAssertEqual(try SourceContentBindingPersistence.read(db)?.revision, 2)
+    }
+
+    func testAllAcceptedByteDistinctWebsiteSpellingsRemainDifferentWithSavedManga() async throws {
+        for pair in [
+            ("https://Example.invalid/reader", "https://example.invalid/reader"),
+            ("https://example.invalid/%61", "https://example.invalid/a"),
+            ("https://example.invalid/caf\u{00e9}", "https://example.invalid/cafe\u{0301}"),
+        ] {
+            let f = try await fixture()
+            defer { try? FileManager.default.removeItem(at: f.directory) }
+            let draft = try await f.preferences.configuration(packageName: Self.package)
+            _ = try draft.schema.validateUserValues(values(url: pair.0))
+            _ = try draft.schema.validateUserValues(values(url: pair.1))
+            XCTAssertNotEqual(Data(pair.0.utf8), Data(pair.1.utf8))
+            let saved = try await f.preferences.saveConfiguration(snapshot: draft, userValues: values(url: pair.0))
+            _ = try await f.store.upsert(Manga(sourceId: Self.sourceID, url: "/keep"))
+            XCTAssertFalse(saved.matches(userValues: values(url: pair.1)))
+            await expect(.deploymentInUse) {
+                _ = try await f.preferences.saveConfiguration(snapshot: saved, userValues: self.values(url: pair.1))
+            }
+            let after = try await f.preferences.configuration(packageName: Self.package)
+            XCTAssertEqual(after, saved)
+            XCTAssertEqual(after.contentBinding?.deploymentURL.map { Data($0.utf8) }, Data(pair.0.utf8))
+        }
+    }
+
+    func testPreferenceDecodingRejectsUnboundedScalarsNULUnicodeAndDuplicateKeysWhileKeepingBinding() async throws {
+        for sql in [
+            "UPDATE installed_extension_preferences SET schema_revision=zeroblob(20000)",
+            "UPDATE installed_extension_preferences SET revision=CAST(zeroblob(20000) AS TEXT)",
+            "UPDATE installed_extension_preferences SET user_values=user_values || char(0)",
+            "UPDATE installed_extension_preferences SET user_values=CAST(X'C328' AS TEXT)",
+            #"UPDATE installed_extension_preferences SET user_values='{"strings":{"overrideBaseUrl":"https://foolslide.example","overrideBaseUrl":"https://wrong.invalid"},"booleans":{"adult":false}}'"#,
+        ] {
+            let f = try await fixture()
+            defer { try? FileManager.default.removeItem(at: f.directory) }
+            let saved = try await save(f)
+            _ = try await f.store.upsert(Manga(sourceId: Self.sourceID, url: "/keep"))
+            let db = try SQLiteDatabase(path: f.path)
+            try db.execute(sql)
+            await expect(.invalidStoredConfiguration) {
+                _ = try await f.preferences.configuration(packageName: Self.package)
+            }
+            XCTAssertEqual(try SourceContentBindingPersistence.read(db), saved.contentBinding)
+            let doc = try await f.store.exportBackupSnapshot(exportedAt: 0)
+            XCTAssertEqual(doc.sources.first?.contentBinding.deploymentURL, Self.baseURL)
+        }
+    }
+
+    func testFailedPreferenceCommitRollsBackNewAndReplacementBindingsOnSameStore() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let draft = try await f.preferences.configuration(packageName: Self.package)
+        let db = try SQLiteDatabase(path: f.path)
+        try db.execute("CREATE TRIGGER fail_binding_pref BEFORE INSERT ON installed_extension_preferences BEGIN SELECT RAISE(ABORT,'fixture'); END;")
+        await expect(.storageUnavailable) { _ = try await f.preferences.saveConfiguration(snapshot: draft, userValues: self.values()) }
+        XCTAssertNil(try SourceContentBindingPersistence.read(db))
+        XCTAssertTrue(try db.query("SELECT * FROM installed_extension_preferences").isEmpty)
+        try db.execute("DROP TRIGGER fail_binding_pref")
+        let saved = try await f.preferences.saveConfiguration(snapshot: draft, userValues: values())
+        try db.execute("CREATE TRIGGER fail_binding_pref BEFORE UPDATE ON installed_extension_preferences BEGIN SELECT RAISE(ABORT,'fixture'); END;")
+        await expect(.storageUnavailable) {
+            _ = try await f.preferences.saveConfiguration(snapshot: saved, userValues: self.values(url: "https://other.invalid"))
+        }
+        XCTAssertEqual(try SourceContentBindingPersistence.read(db), saved.contentBinding)
+        let stillSaved = try await f.preferences.configuration(packageName: Self.package)
+        XCTAssertEqual(stillSaved, saved)
+        try db.execute("DROP TRIGGER fail_binding_pref")
+        let changed = try await f.preferences.saveConfiguration(snapshot: saved, userValues: values(url: "https://other.invalid"))
+        XCTAssertEqual(changed.contentBinding?.revision, 2)
+    }
+
+    func testBindingRevisionExhaustionRejectsWebsiteChangeWithoutChangingPreferences() async throws {
+        let f = try await fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        _ = try await save(f)
+        let db = try SQLiteDatabase(path: f.path)
+        try db.run("UPDATE source_content_binding SET revision=?", [.int(Int64.max)])
+        let saved = try await f.preferences.configuration(packageName: Self.package)
+        await expect(.invalidContentBinding) {
+            _ = try await f.preferences.saveConfiguration(snapshot: saved, userValues: self.values(url: "https://other.invalid"))
+        }
+        let after = try await f.preferences.configuration(packageName: Self.package)
+        XCTAssertEqual(after, saved)
+    }
+
+    func testRetainedMangaRowsRequireExactURLBytesForDetailAndUpdateResults() async throws {
+        let f = try await fixture(enabled: true)
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        _ = try await save(f)
+        let token = try await execution(f)
+        let original = try await f.store.persistSourceUpdate(
+            manga: Manga(sourceId: Self.sourceID, url: "/caf\u{00e9}", title: "Keep", inLibrary: true),
+            chapters: [.init(url: "/kept", name: "Keep")], expectedConfiguration: token)
+        var rebound = original.manga
+        rebound.url = "/cafe\u{0301}"
+        rebound.title = "Wrong"
+        XCTAssertEqual(rebound.url, original.manga.url) // Swift canonical equivalence.
+        XCTAssertNotEqual(Data(rebound.url.utf8), Data(original.manga.url.utf8))
+        do {
+            _ = try await f.store.persistSourceUpdate(manga: rebound, chapters: [], expectedConfiguration: token)
+            XCTFail("detail accepted a different URL spelling for a retained physical row")
+        } catch {
+            XCTAssertEqual(error as? SourceUpdatePersistenceError, .sourceIdentityMismatch)
+        }
+        let scan = try await f.store.beginLibraryUpdateScan()
+        do {
+            _ = try await f.store.recordLibraryUpdateSuccess(
+                scanID: scan.record.scanID, manga: rebound, chapters: [], expectedConfiguration: token)
+            XCTFail("update accepted a different URL spelling for a retained physical row")
+        } catch {
+            XCTAssertEqual(error as? LibraryUpdatePersistenceError, .sourceIdentityMismatch)
+        }
+        let kept = try await f.store.manga(id: try XCTUnwrap(original.manga.id))
+        let chapters = try await f.store.chapters(mangaId: try XCTUnwrap(original.manga.id))
+        XCTAssertEqual(kept?.title, "Keep")
+        XCTAssertEqual(kept?.url.utf8.map { $0 }, original.manga.url.utf8.map { $0 })
+        XCTAssertEqual(chapters.map(\.url), ["/kept"])
+        _ = try await f.store.finishLibraryUpdateScan(scanID: scan.record.scanID, status: .cancelled)
+    }
+
+    private actor BindingRequestCounter {
+        var calls = 0
+        func record() { calls += 1 }
+        func count() -> Int { calls }
+    }
+
+    private struct BindingProbeSource: KamiSource {
+        let id = ExtensionPreferencesServiceTests.sourceID
+        let name = "Offline namespace probe"
+        let language = "en"
+        let baseURL = "https://fixture.invalid"
+        let counter: BindingRequestCounter
+        func getPopularManga(page: Int) async throws -> MangasPageCompat {
+            await counter.record(); return .init(mangas: [], hasNextPage: false)
+        }
+        func getSearchManga(page: Int, query: String, filters: [SourceFilter]) async throws -> MangasPageCompat {
+            try await getPopularManga(page: page)
+        }
+        func getMangaDetails(manga: SMangaCompat) async throws -> SMangaCompat { await counter.record(); return manga }
+        func getChapterList(manga: SMangaCompat) async throws -> [SChapterCompat] { await counter.record(); return [] }
+        func getPageList(chapter: SChapterCompat) async throws -> [PageCompat] { await counter.record(); return [] }
+    }
+
+    func testMismatchedAndUnresolvedNamespacesRejectExecutionAndSourceRequests() async throws {
+        for unresolved in [false, true] {
+            let f = try await fixture(enabled: true)
+            defer { try? FileManager.default.removeItem(at: f.directory) }
+            _ = try await save(f)
+            let old = try await execution(f)
+            let db = try SQLiteDatabase(path: f.path)
+            // An empty namespace may change; intentionally leave old settings
+            // behind to exercise a mismatched current document, not just CAS.
+            try db.run("UPDATE source_content_binding SET kind=?,deployment_url=?,revision=2",
+                       [.text(unresolved ? "unresolved" : "deployment"),
+                        unresolved ? .null : .text("https://other.invalid")])
+            let mangaID = try await f.store.upsert(Manga(sourceId: Self.sourceID, url: "/namespace", title: "Keep", inLibrary: true))
+            try await f.store.replaceChapters(mangaId: mangaID, with: [.init(mangaId: mangaID, url: "/chapter", name: "Keep")])
+            let expected: ExtensionPreferencesError = unresolved ? .unresolvedContent : .contentBindingMismatch
+            await expect(expected) { _ = try await self.execution(f) }
+            let current = try await f.preferences.configuration(packageName: Self.package)
+            let token = ExtensionExecutionConfiguration(installed: old.installed,
+                runtimePreferences: old.runtimePreferences, snapshot: current)
+            let counter = BindingRequestCounter()
+            await expect(expected) {
+                _ = try await LibraryService(store: f.store).refresh(
+                    mangaId: mangaID, source: BindingProbeSource(counter: counter), expectedConfiguration: token)
+            }
+            await expect(expected) {
+                try await f.store.validateSourceExecution(sourceID: Self.sourceID, expectedConfiguration: token)
+            }
+            await expect(expected) {
+                try await f.store.verifyLibraryUpdateSourceConfiguration(sourceID: Self.sourceID, expectedConfiguration: token)
+            }
+            let chapters = try await f.store.chapters(mangaId: mangaID)
+            await expect(expected) {
+                _ = try await f.store.enqueueDownload(chapterID: try XCTUnwrap(chapters.first?.id), expectedConfiguration: token)
+            }
+            let requests = await counter.count()
+            XCTAssertEqual(requests, 0)
+            XCTAssertTrue(try db.query("SELECT * FROM download_job").isEmpty)
+            // Reading state is content, and remains available without a
+            // matching executable configuration or a source request.
+            let target = try await readingTargetForTest(store: f.store, mangaID: mangaID, chapterID: try XCTUnwrap(chapters.first?.id))
+            let progress = try await f.store.commitReadingProgress(target: target, page: 2, reachedEnd: false, lastRead: 123)
+            XCTAssertEqual(progress.chapter.lastPageRead, 2)
+        }
     }
 }
 

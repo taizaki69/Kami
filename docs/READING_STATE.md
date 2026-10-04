@@ -94,8 +94,9 @@ These are in-memory intents; the queue does not promise survival across process
 termination or background execution.
 
 These are Core and App prerequisites for later restore work. Restore remains
-unavailable. The next steps must add durable Foo content binding, shared scene
-invalidation and synchronous operation-intent barriers, epoch checks for source
+unavailable. [Durable Foo content binding](SOURCE_CONTENT_BINDING.md) now preserves
+the saved website independently of executable settings. The next steps must
+add shared scene invalidation and synchronous operation-intent barriers, epoch checks for source
 results/category/membership and other queued writes, immutable preview state
 validation and an atomic conservative merge. Epoch rotation must be part of
 that successful restore transaction; this increment exposes no standalone

@@ -46,31 +46,17 @@ public actor LibraryStore {
         }
     }
 
-    /// Saved settings describe the content's namespace even when an APK is
-    /// disabled or unavailable. This does not authenticate/enable an APK or turn
-    /// a namespace into executable preferences. Invalid provenance stays explicit.
+    /// The content namespace survives installation/settings loss. Export never
+    /// infers it anew or converts it into executable preferences.
     private func backupFoolSlideContentBinding() throws -> LibraryBackupDocument.ContentBinding {
-        let unresolved = LibraryBackupDocument.ContentBinding(kind: .unresolved)
-        guard try LibraryBackupSnapshotReader.hasBoundedFoolSlideConfiguration(db),
-              let installed = try installedExtensionTrust(packageName: LibraryBackupSnapshotReader.foolSlidePackage),
-              let schema = InterpretedExtensionProfileCatalog.preferenceSchema(
-                packageName: installed.packageName, versionName: installed.versionName, versionCode: installed.versionCode
-              ) else { return unresolved }
-        let identity = schema.identity
-        guard installed.apkSHA256 == identity.apkSHA256,
-              installed.currentSigners == [identity.signerFingerprint],
-              installed.signerHistory.contains(identity.signerFingerprint),
-              installed.sourceIDs == identity.sourceIDs,
-              identity.sourceIDs == [LibraryBackupSnapshotReader.foolSlideSourceID] else { return unresolved }
         do {
-            let snapshot = try readExtensionConfiguration(installed: installed, schema: schema)
-            guard snapshot.revision > 0 else { return unresolved }
-            let resolved = try schema.validateUserValues(snapshot.userValues)
-            return .init(kind: .deployment, deploymentURL: resolved.baseURL)
-        } catch is SQLiteDatabase.SQLiteError {
-            throw LibraryBackupSnapshotError.storageUnavailable
-        } catch {
-            return unresolved
+            guard let binding = try SourceContentBindingPersistence.read(db) else {
+                throw LibraryBackupSnapshotError.invalidStoredData
+            }
+            return .init(kind: binding.kind == .deployment ? .deployment : .unresolved,
+                         deploymentURL: binding.deploymentURL)
+        } catch is ExtensionPreferencesError {
+            throw LibraryBackupSnapshotError.invalidStoredData
         }
     }
 
@@ -375,10 +361,10 @@ public actor LibraryStore {
     ) throws -> SourceMangaUpdate {
         try Task.checkCancellation()
         return try withLibraryTransaction {
-            try verifySourceUpdateConfiguration(manga: manga, expectedConfiguration: expectedConfiguration)
+            try verifySourceUpdateConfiguration(sourceID: manga.sourceId, expectedConfiguration: expectedConfiguration)
             if let id = manga.id {
                 guard let stored = try self.manga(id: id),
-                      stored.sourceId == manga.sourceId, stored.url == manga.url else {
+                      stored.sourceId == manga.sourceId, Data(stored.url.utf8) == Data(manga.url.utf8) else {
                     throw SourceUpdatePersistenceError.sourceIdentityMismatch
                 }
             }
@@ -393,18 +379,30 @@ public actor LibraryStore {
         }
     }
 
+    /// Check captured configuration before requesting source content. The
+    /// transactional result check remains necessary after asynchronous work.
+    public func validateSourceExecution(
+        sourceID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?
+    ) throws {
+        try Task.checkCancellation()
+        try withLibraryTransaction(readOnly: true) {
+            try verifySourceUpdateConfiguration(sourceID: sourceID, expectedConfiguration: expectedConfiguration)
+            try Task.checkCancellation()
+        }
+    }
+
     private func verifySourceUpdateConfiguration(
-        manga: Manga,
+        sourceID: Int64,
         expectedConfiguration: ExtensionExecutionConfiguration?
     ) throws {
         if let expectedConfiguration {
             try verifyExtensionExecutionConfigurationInTransaction(expectedConfiguration)
-            guard expectedConfiguration.installed.sourceIDs.contains(manga.sourceId) else {
+            guard expectedConfiguration.installed.sourceIDs.contains(sourceID) else {
                 throw SourceUpdatePersistenceError.sourceIdentityMismatch
             }
         } else {
             // Downloaded profiles cannot use nil to bypass their CAS token.
-            guard manga.sourceId == MangaDexSource().id else {
+            guard sourceID == MangaDexSource().id else {
                 throw SourceUpdatePersistenceError.configurationRequired
             }
         }
@@ -532,10 +530,10 @@ public actor LibraryStore {
                                                  outcome: .skippedNotInLibrary)
             }
             guard let stored = try self.manga(id: mangaID),
-                  stored.sourceId == manga.sourceId, stored.url == manga.url else {
+                  stored.sourceId == manga.sourceId, Data(stored.url.utf8) == Data(manga.url.utf8) else {
                 throw LibraryUpdatePersistenceError.sourceIdentityMismatch
             }
-            try verifySourceUpdateConfiguration(manga: manga, expectedConfiguration: expectedConfiguration)
+            try verifySourceUpdateConfiguration(sourceID: manga.sourceId, expectedConfiguration: expectedConfiguration)
             var seen: Set<String> = []
             let unique = chapters.filter { seen.insert($0.url).inserted }
             let discovery = try recordChapterDiscoveries(mangaId: mangaID, urls: unique.map(\.url), announce: true)
@@ -1105,39 +1103,9 @@ public actor LibraryStore {
         installed: InstalledExtensionTrust,
         schema: InterpretedExtensionPreferenceSchema
     ) throws -> ExtensionConfigurationSnapshot {
-        let fingerprint = try ExtensionPreferenceBinding.fingerprint(installed)
-        // Select oversized/untyped payloads as NULL so the SQLite wrapper
-        // never materializes an unbounded string from a corrupt database.
-        let row = try db.query("""
-            SELECT
-                CASE WHEN typeof(identity_fingerprint)='text'
-                    AND length(CAST(identity_fingerprint AS BLOB))=64
-                    THEN identity_fingerprint ELSE NULL END AS identity_fingerprint,
-                schema_revision, revision,
-                CASE WHEN typeof(user_values)='text'
-                    AND length(CAST(user_values AS BLOB))<=?
-                    THEN user_values ELSE NULL END AS bounded_values
-            FROM installed_extension_preferences WHERE package_name=? LIMIT 1
-            """, [.int(StoredExtensionPreferenceValues.maximumBytes), .text(installed.packageName)]).first
-        let userValues: [InterpretedExtensionPreferenceSchema.FieldID: InterpretedExtensionPreferenceSchema.Value]
-        let revision: Int64
-        if let row {
-            guard row.string("identity_fingerprint") == fingerprint,
-                  row.int("schema_revision") == schema.revision,
-                  let storedRevision = row.int64("revision"), storedRevision > 0,
-                  let payload = row.string("bounded_values") else {
-                throw ExtensionPreferencesError.invalidStoredConfiguration
-            }
-            userValues = try StoredExtensionPreferenceValues.decode(payload, schema: schema).userValues
-            revision = storedRevision
-        } else {
-            userValues = schema.defaultUserValues
-            revision = 0
-        }
-        return ExtensionConfigurationSnapshot(
-            installed: installed, schema: schema, userValues: userValues,
-            identityFingerprint: fingerprint, revision: revision
-        )
+        let binding = SourceContentBindingPersistence.supports(schema)
+            ? try SourceContentBindingPersistence.read(db) : nil
+        return try ExtensionConfigurationReader.read(db, installed: installed, schema: schema, contentBinding: binding)
     }
 
     func saveExtensionConfiguration(
@@ -1156,25 +1124,17 @@ public actor LibraryStore {
                 throw ExtensionPreferencesError.staleInstallation
             }
             guard previous.revision == snapshot.revision,
-                  previous.userValues == snapshot.userValues else {
+                  previous.matches(userValues: snapshot.userValues) else {
                 throw ExtensionPreferencesError.staleConfiguration
             }
-            let previousURL: String?
-            if case let .string(value)? = previous.userValues[.baseURL] {
-                previousURL = value
-            } else {
-                previousURL = nil
-            }
-            if previousURL != resolved.baseURL {
-                for sourceID in snapshot.schema.identity.sourceIDs {
-                    guard try db.query("SELECT 1 AS present FROM manga WHERE source_id=? LIMIT 1", [.int(sourceID)]).isEmpty else {
-                        throw ExtensionPreferencesError.deploymentInUse
-                    }
-                }
+            guard SourceContentBindingPersistence.supports(snapshot.schema) else {
+                throw ExtensionPreferencesError.unsupportedProfile
             }
             guard snapshot.revision < Int64.max else {
                 throw ExtensionPreferencesError.invalidStoredConfiguration
             }
+            let binding = try SourceContentBindingPersistence.save(
+                db, expected: snapshot.contentBinding, url: resolved.baseURL)
             _ = try invalidateDownloadSourceIDsInTransaction(snapshot.schema.identity.sourceIDs)
             let revision = snapshot.revision + 1
             try db.run("""
@@ -1191,7 +1151,7 @@ public actor LibraryStore {
             return ExtensionConfigurationSnapshot(
                 installed: snapshot.installed, schema: snapshot.schema,
                 userValues: resolved.userValues, identityFingerprint: snapshot.identityFingerprint,
-                revision: revision
+                revision: revision, contentBinding: binding
             )
         }
     }
@@ -1204,9 +1164,13 @@ public actor LibraryStore {
 
     private func verifyExtensionExecutionConfigurationInTransaction(_ configuration: ExtensionExecutionConfiguration) throws {
         try verifyInstalledExtension(configuration.installed, requireEnabled: true)
+        if configuration.installed.sourceIDs.contains(SourceContentBindingPersistence.sourceID), configuration.snapshot == nil {
+            throw ExtensionPreferencesError.configurationRequired
+        }
         if let expected = configuration.snapshot {
             let current = try readExtensionConfiguration(installed: configuration.installed, schema: expected.schema)
             guard current == expected else { throw ExtensionPreferencesError.staleConfiguration }
+            try SourceContentBindingPersistence.requireExecution(current)
         }
     }
 
@@ -1227,7 +1191,7 @@ public actor LibraryStore {
         return (try? JSONDecoder().decode([Int64].self, from: data)) ?? []
     }
 
-    private static func installedExtensionTrust(
+    static func installedExtensionTrust(
         from row: SQLiteDatabase.Row
     ) -> InstalledExtensionTrust? {
         guard let packageName = row.string("package_name"),
@@ -1762,7 +1726,7 @@ extension LibraryStore {
         let target = try downloadTarget(chapterID: chapterID)
         guard target.manga.inLibrary else { throw DownloadPersistenceError.mangaNotInLibrary }
         guard target.isCurrentChapter else { throw DownloadPersistenceError.chapterNotCurrent }
-        try verifySourceUpdateConfiguration(manga: target.manga, expectedConfiguration: expectedConfiguration)
+        try verifySourceUpdateConfiguration(sourceID: target.manga.sourceId, expectedConfiguration: expectedConfiguration)
         return target
     }
 

@@ -74,6 +74,8 @@ final class LibraryBackupSnapshotTests: XCTestCase {
             VALUES (?,?,?,1,?)
             """, [.text(installed.packageName), .text(try ExtensionPreferenceBinding.fingerprint(installed)),
                   .int(schema.revision), .text(values)])
+        try f.db.run("INSERT INTO source_content_binding(source_id,kind,deployment_url,revision) VALUES (?,'deployment',?,1)",
+                     [.int(SourceContentBindingPersistence.sourceID), .text(baseURL)])
         return installed
     }
 
@@ -277,6 +279,8 @@ final class LibraryBackupSnapshotTests: XCTestCase {
     func testUnconfiguredFoolSlideIsExplicitlyUnresolvedWithoutCreatingSettings() async throws {
         let f = try fixture()
         defer { try? FileManager.default.removeItem(at: f.directory) }
+        try f.db.run("INSERT INTO source_content_binding(source_id,kind,revision) VALUES (?,'unresolved',1)",
+                     [.int(SourceContentBindingPersistence.sourceID)])
         _ = try manga(f, source: 6_351_052_922_295_965_587)
         let doc = try await f.store.exportBackupSnapshot(exportedAt: 0)
         XCTAssertEqual(doc.sources.first?.contentBinding.kind, .unresolved)
@@ -307,7 +311,7 @@ final class LibraryBackupSnapshotTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: installed.apkPath))
     }
 
-    func testCorruptFoolSlideProvenanceIsUnresolvedAndNeverRewritten() async throws {
+    func testDurableFoolSlideNamespaceSurvivesCorruptProvenanceWithoutRewritingIt() async throws {
         let corruptions = [
             "UPDATE installed_extension SET apk_sha256='wrong'",
             "UPDATE installed_extension SET current_signers='[]'",
@@ -326,8 +330,8 @@ final class LibraryBackupSnapshotTests: XCTestCase {
             try f.db.execute(sql)
             let before = try provenanceBytes(f)
             let doc = try await f.store.exportBackupSnapshot(exportedAt: 0)
-            XCTAssertEqual(doc.sources.first?.contentBinding.kind, .unresolved, sql)
-            XCTAssertNil(doc.sources.first?.contentBinding.deploymentURL, sql)
+            XCTAssertEqual(doc.sources.first?.contentBinding.kind, .deployment, sql)
+            XCTAssertEqual(doc.sources.first?.contentBinding.deploymentURL, "https://fixture.example/reader", sql)
             XCTAssertEqual(try provenanceBytes(f), before)
         }
     }
@@ -360,8 +364,8 @@ final class LibraryBackupSnapshotTests: XCTestCase {
                 try f.db.execute("UPDATE \(table) SET \(column)=\(expression)")
                 XCTAssertFalse(try LibraryBackupSnapshotReader.hasBoundedFoolSlideConfiguration(f.db))
                 let doc = try await f.store.exportBackupSnapshot(exportedAt: 0)
-                XCTAssertEqual(doc.sources.first?.contentBinding.kind, .unresolved)
-                XCTAssertNil(doc.sources.first?.contentBinding.deploymentURL)
+                XCTAssertEqual(doc.sources.first?.contentBinding.kind, .deployment)
+                XCTAssertEqual(doc.sources.first?.contentBinding.deploymentURL, "https://fixture.example/reader")
                 XCTAssertEqual(try f.db.query("SELECT length(CAST(\(column) AS BLOB)) AS n FROM \(table)").first?.int("n"), 20000)
             }
         }

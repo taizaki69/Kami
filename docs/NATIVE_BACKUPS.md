@@ -71,13 +71,17 @@ match the declared UTF-8 spelling.
   saved HTTPS deployment URL.
 - `unresolved`: a content namespace could not be established.
 
-The known Foo ID cannot use `sourceIdentity`. Export derives its descriptive
-deployment only from bounded, valid persisted installation identity and matching
-preference provenance. It works with a disabled installation or missing APK;
-it does not load or authenticate that APK. Invalid or absent provenance yields
-`unresolved` and is not rewritten. Other source IDs cannot claim this measured
-Foo deployment contract. A future restore must separately establish operational
-source availability and resolve conflicting or unresolved namespaces.
+The known Foo ID cannot use `sourceIdentity`. Export reads its
+[durable content binding](SOURCE_CONTENT_BINDING.md), independently of current
+installation settings. Migration 7 infers that binding once from bounded,
+valid legacy identity and preference provenance; unproven existing content
+receives an explicit `unresolved` binding. Subsequent preference corruption,
+disablement, re-admission or missing APK bytes cannot downgrade a known binding.
+A missing/malformed binding with Foo manga fails export rather than guessing.
+Source descriptions accompany archived manga; configuring an otherwise empty
+source does not add its settings to a library backup. Other source IDs cannot
+claim this measured Foo contract. Restore must separately establish operational
+source availability and handle conflicts.
 
 ## Bounds and consistent reads
 

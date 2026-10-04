@@ -65,7 +65,7 @@ final class ReadingStatePersistenceTests: XCTestCase {
         let initial = try await snapshot(f)
         let bytes = try XCTUnwrap(f.db.query("SELECT epoch FROM library_data_state").first?.bytes("epoch"))
         XCTAssertEqual(bytes.count, 16)
-        XCTAssertEqual(try f.db.query("PRAGMA user_version").first?.int("user_version"), 6)
+        XCTAssertEqual(try f.db.query("PRAGMA user_version").first?.int("user_version"), Migrations.latest)
         let reopened = try LibraryStore(path: f.path)
         let again = try await reopened.readingSnapshot(sourceID: f.sourceID, mangaURL: f.mangaURL)
         XCTAssertEqual(again?.epoch, initial.epoch)

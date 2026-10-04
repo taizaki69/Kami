@@ -5,9 +5,21 @@ import Foundation
 /// Versioned schema migrations. Every change ships as a new step; the
 /// `user_version` pragma tracks the applied version.
 enum Migrations {
-    static let latest: Int = 6
+    static let latest: Int = 7
 
     static let steps: [Int: String] = [
+        7: """
+        CREATE TABLE source_content_binding (
+            source_id INTEGER PRIMARY KEY CHECK(source_id=6351052922295965587),
+            kind TEXT NOT NULL CHECK(typeof(kind)='text' AND kind IN ('deployment','unresolved')),
+            deployment_url TEXT,
+            revision INTEGER NOT NULL CHECK(typeof(revision)='integer' AND revision>0),
+            CHECK((kind='unresolved' AND deployment_url IS NULL) OR
+                  (kind='deployment' AND typeof(deployment_url)='text'
+                   AND length(CAST(deployment_url AS BLOB)) BETWEEN 1 AND 4096
+                   AND instr(CAST(deployment_url AS BLOB),X'00')=0))
+        );
+        """,
         6: """
         CREATE TABLE library_data_state (
             singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -248,6 +260,7 @@ enum Migrations {
             try db.execute("BEGIN")
             do {
                 try db.execute(sql)
+                if version == 7 { try SourceContentBindingPersistence.migrate(db) }
                 try db.execute("PRAGMA user_version=\(version)")
                 try db.execute("COMMIT")
             } catch {
