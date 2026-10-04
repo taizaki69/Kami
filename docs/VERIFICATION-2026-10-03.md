@@ -179,9 +179,9 @@ habilitado. Esto impide que una suite portable sin ese módulo se confunda
 con pruebas reales de persistencia y admisión.
 
 Los workflows iOS Build e IPA Package permanecen como verificaciones Apple
-separadas. Ninguna ejecución de GitHub Actions del cambio actual se ha
-atribuido a las pruebas locales. El tarball se contrastó con el endpoint
-oficial existente; el job nuevo todavía requiere su propia ejecución.
+separadas. El tarball se contrastó con el endpoint oficial existente. El
+registro inicial local precedió a CI; los resultados publicados para `ecc97bc`
+se detallan al final de esta sección de continuidad.
 
 ## Registro de resultados
 
@@ -219,13 +219,79 @@ optimizadas por rol también produjeron salida idéntica, con SHA-256 de salida
 `e9337a6debb95b1e33683db4d48d490d1ec8766e44f9c8e5c0ae32f50744420d`.
 El binario Release tiene SHA-256
 `1ab66669c0b90957eda6a57fdccf99d89815af57bbd52a790ad17665e8c4ce44`.
-Las verificaciones Apple y el workflow Linux nuevo siguen pendientes de CI
-para el commit que integre este trabajo.
+Al capturar esos logs locales todavía faltaba CI Apple y la ejecución del
+workflow Linux nuevo; ese estado inicial fue reemplazado por la evidencia
+publicada a continuación.
 
 La primera compilación de simulador del commit `94e4b80` detectó una
 ambigüedad de `Category` al importar el SDK Apple. Las cinco anotaciones de
 tipo de la UI se cualificaron como `KamiCore.Category`; el parser Linux no
 había detectado ese conflicto de tipos. Las nuevas ejecuciones del
-[PR #10](https://github.com/taizaki69/Kami/pull/10) deben confirmar el commit
-corregido. El cuerpo del PR y el checkpoint local registran sus SHA y runs;
-el fallo anterior no se considera una verificación Apple aprobada.
+[PR #10](https://github.com/taizaki69/Kami/pull/10) confirmaron el commit
+corregido `ecc97bc20adbb57dd62c4d1618319306a3f02c08`:
+
+- [Swift CI 37164772232](https://github.com/taizaki69/Kami/actions/runs/37164772232):
+  Linux y macOS pasan 317 pruebas MihonCompatKit y 45 KamiCore con SQLite cada
+  uno; el CLI optimizado compila. Linux conserva ocho mediciones y 359 gaps.
+- [iOS Build 37164772212](https://github.com/taizaki69/Kami/actions/runs/37164772212):
+  simulador y dispositivo genérico sin firma compilan correctamente.
+- [IPA Package 37164772208](https://github.com/taizaki69/Kami/actions/runs/37164772208):
+  genera el artefacto unsigned `11289615627` (3,642,440 bytes; digest del
+  archivo del artefacto `sha256:e1c8b106897b9c02171a4d5cd97dbe65328d4788f0b78721cf927c059f385ac2`).
+
+Apple usa Xcode 16.4 / Swift 6.1.2; Linux usa Swift 6.3.3. El fallo anterior
+no se considera una verificación Apple aprobada. Estos resultados pertenecen
+a `ecc97bc`, no prueban los cambios de preferencias descritos a continuación.
+
+## Continuación de preferencias persistidas
+
+`assistant/source-preferences-20261003` parte de `ecc97bc`. El contrato de
+producto cubre únicamente FoolSlide Customizable 1.6.6: URL HTTPS y booleano
+`adult`. Validar un borrador no construye DEX ni transportes, ni concede
+admisión. El documento persistido contiene valores completos y tipados,
+identidad exacta, versión de esquema y revisión; no incorpora las antiguas
+preferencias genéricas ni estado de confianza, cookies o políticas de red.
+
+Las pruebas SQLite reales comprueban reapertura, migración del esquema 2 a 3,
+configuración deshabilitada, conservación de confianza/progreso/historial,
+reautenticación del APK al guardar, compare-and-swap, límites UTF-8, tipos y
+campos desconocidos, documento corrupto y rollback de fallos inducidos mediante
+triggers. La readmisión de la misma identidad conserva ajustes; un cambio de
+identidad los invalida dentro de la misma transacción de instalación.
+
+La URL sólo puede cambiar si no hay ningún manga guardado bajo ese source ID.
+Se prueban ambos órdenes de la carrera: guardar primero la URL rechaza el
+resultado antiguo sin insertar manga/capítulos; guardar primero el resultado
+impide cambiar la URL. Un snapshot de configuración incompleto o antiguo no
+puede eludir esa comprobación. `LibraryService.refresh` y la pantalla de detalle
+usan la escritura transaccional con el token de configuración del runtime.
+
+Los fixtures reales verifican que los valores restaurados producen el GET o
+POST adulto correspondiente del APK. Baozi mantiene banner `0` cuando un
+conjunto parcial omite esa clave; no se añade un formulario para sus modos no
+medidos. La selección de perfiles, roles y los 27 APK no cambian en esta fase.
+
+La revisión de vida útil cubre referencias retenidas después de reemplazar o
+retirar una fuente, peticiones antiguas y respuestas tardías de transportes no
+cooperativos, rechazo de reasignar una imagen a otra instancia y recuperación
+del presupuesto de operaciones. La caché separa campos HTTP de IDs internos;
+dos pruebas evitan que cabeceras con nombres coincidentes suplanten esos IDs.
+Cancelar un waiter rechaza su resultado y conserva la descarga/caché para los
+demás. Un ejecutor de imagen ocupa un solo slot de vida útil. Estas propiedades
+no revocan bytes ya entregados ni añaden permisos de ejecución de APK.
+
+Los resultados de esta fase se conservan en
+`.git/checkpoints/20261003-source-preferences/`. `integrated-compat.log` registra
+332/332 pruebas de MihonCompatKit; `integrated-core-sqlite.log` registra 79/79
+pruebas Core con SQLite real y `integrated-core-portable.log` registra 37/37
+sin el módulo SQLite. El CLI Release compila en 49.67 segundos y su
+SHA-256 es `d0a174d778705f6a15442312b671f97b0f39a7e0727a2d8f75ec28652470a2fd`.
+La auditoría por rol produce exactamente la salida de la fase anterior
+(`e9337a6debb95b1e33683db4d48d490d1ec8766e44f9c8e5c0ae32f50744420d`): ocho
+mediciones, cuatro candidatos estructurales, cuatro bloqueos de wrappers, 359
+superficies pendientes y cero errores, invocaciones omitidas u opcodes no
+soportados. El parser Linux acepta los 13 archivos de la app, pero ese parse
+no es typecheck Apple ni una prueba de interacción.
+El cuerpo del PR de esta rama registra el SHA y los workflows que verifican
+la implementación publicada; la compilación o el IPA no prueban una sesión
+real de lectura, rendimiento físico, sitios vivos ni compatibilidad general.

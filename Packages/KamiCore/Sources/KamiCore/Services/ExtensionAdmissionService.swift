@@ -258,44 +258,10 @@ public actor ExtensionAdmissionService {
             throw ExtensionAdmissionError.extensionDisabled(packageName)
         }
 
-        let apkBytes = try Self.readPersistedAPK(path: installed.apkPath)
-        guard APKSignatureVerifier.apkSHA256(apkBytes) == installed.apkSHA256 else {
-            throw ExtensionAdmissionError.persistedAPKContentMismatch
-        }
-
-        let identity = try verifier.verify(apkBytes: apkBytes)
-        let currentSigners = identity.signers.map(\.currentFingerprint).sorted()
-        let signerHistory = Array(identity.allFingerprints).sorted()
-        guard identity.scheme == installed.signatureScheme,
-              currentSigners == installed.currentSigners.sorted(),
-              signerHistory == installed.signerHistory.sorted() else {
-            throw ExtensionAdmissionError.persistedSignerMismatch
-        }
-
-        if case let .user(fingerprint) = installed.trustSource,
-           !identity.contains(fingerprint: fingerprint) {
-            throw ExtensionAdmissionError.persistedSignerMismatch
-        }
-
-        let manifest = try ExtensionManifest(apkBytes: apkBytes)
-        guard manifest.packageName == installed.packageName else {
-            throw ExtensionAdmissionError.packageMismatch(
-                expected: installed.packageName,
-                actual: manifest.packageName
-            )
-        }
-        guard manifest.versionCode == installed.versionCode else {
-            throw ExtensionAdmissionError.versionCodeMismatch(
-                expected: installed.versionCode,
-                actual: manifest.versionCode
-            )
-        }
-        guard manifest.versionName == installed.versionName else {
-            throw ExtensionAdmissionError.versionNameMismatch(
-                expected: installed.versionName,
-                actual: manifest.versionName
-            )
-        }
+        let identity = try ExtensionAPKAuthentication.authenticate(installed: installed, verifier: verifier)
+        // Configuration authentication shares the byte checks, but can never
+        // reach this enabled-only issuance of an executable capability.
+        try await store.verifyInstalledExtension(installed, requireEnabled: true)
 
         return ExtensionAdmission(
             packageName: installed.packageName,
@@ -307,30 +273,6 @@ public actor ExtensionAdmissionService {
             trustSource: installed.trustSource,
             sourceIDs: installed.sourceIDs
         )
-    }
-
-    private static func readPersistedAPK(path: String) throws -> [UInt8] {
-        guard !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw ExtensionAdmissionError.emptyAPKPath
-        }
-        let url = URL(fileURLWithPath: path).standardizedFileURL
-        guard let values = try? url.resourceValues(
-            forKeys: [.fileSizeKey, .isRegularFileKey]
-        ),
-        values.isRegularFile == true,
-        let fileSize = values.fileSize else {
-            throw ExtensionAdmissionError.persistedAPKUnavailable
-        }
-        guard fileSize <= APKSignatureVerifier.maximumAPKSize else {
-            throw ExtensionAdmissionError.persistedAPKTooLarge(
-                limit: APKSignatureVerifier.maximumAPKSize
-            )
-        }
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
-              data.count == fileSize else {
-            throw ExtensionAdmissionError.persistedAPKUnavailable
-        }
-        return [UInt8](data)
     }
 
     static func updatePreservesIdentity(

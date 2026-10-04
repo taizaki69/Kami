@@ -4,18 +4,26 @@ Last updated: 2026-10-03 (America/Lima)
 
 ## Canonical continuation — 2026-10-03
 
-Continue the existing Kami manga repository on `assistant/foolslide-20260920`,
-starting from `a479806ba81c71845ba0a154a096bf47736b7393`. The initial inherited
+The active settings continuation is `assistant/source-preferences-20261003`,
+based on `ecc97bc20adbb57dd62c4d1618319306a3f02c08` from
+[PR #10](https://github.com/taizaki69/Kami/pull/10). PR #10 contains the earlier
+FoolSlide/category work over `a479806ba81c71845ba0a154a096bf47736b7393`.
+The initial inherited
 host/HTML/FoolSlide changes and local Linux preparation were preserved in a
 local Git checkpoint before modification. Do not replace the working tree with
 an old `main` snapshot. This repository is separate from the Discord assistant
 with the same name.
 
-The current work covers exact FoolSlide execution and host semantics, a
-configured-source factory boundary, native category management, manifest-role
-corpus selection and Linux CI. The default FoolSlide URL is a loopback
-placeholder: its downloaded factory requires explicit HTTPS configuration,
-and production preference UI/persistence remains future work. Read the current
+The earlier continuation covers exact FoolSlide execution, native categories,
+manifest-role corpus selection and Linux CI. Its corrected head `ecc97bc`
+passed Linux/macOS tests, simulator/device compilation and unsigned IPA CI.
+The new work adds authenticated persistent Foo settings (HTTPS URL and adult
+confirmation), explicit activation, revocable source/image lifetimes and a
+transaction that checks configuration freshness while saving source results.
+Any persisted Foo manga prevents changing the website. Disable keeps settings;
+an installation identity change invalidates them without granting new trust.
+The app clears/recreates browse and reader sessions when a source is replaced.
+Read the current
 [README](README.md), [task tracker](TODO.md), and
 [dated verification record](docs/VERIFICATION-2026-10-03.md) for current scope.
 The broad objective remains active; downloads, update scanning, broader

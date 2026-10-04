@@ -318,7 +318,8 @@ private enum ReaderImageDecoder {
         _ data: Data,
         maximumPixelDimension: Int
     ) async throws -> DecodedReaderImage {
-        try await Task.detached(priority: .userInitiated) {
+        let decoding = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
             guard let source = CGImageSourceCreateWithData(data as CFData, nil),
                   let properties = CGImageSourceCopyPropertiesAtIndex(
                       source,
@@ -344,6 +345,7 @@ private enum ReaderImageDecoder {
                 kCGImageSourceThumbnailMaxPixelSize:
                     max(512, min(maximumPixelDimension, 8_192)),
             ]
+            try Task.checkCancellation()
             guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(
                 source,
                 0,
@@ -351,7 +353,13 @@ private enum ReaderImageDecoder {
             ) else {
                 throw ReaderImageDecodeError.invalidImage
             }
+            try Task.checkCancellation()
             return DecodedReaderImage(image: UIImage(cgImage: thumbnail))
-        }.value
+        }
+        return try await withTaskCancellationHandler {
+            try await decoding.value
+        } onCancel: {
+            decoding.cancel()
+        }
     }
 }

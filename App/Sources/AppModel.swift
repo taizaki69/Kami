@@ -14,6 +14,19 @@ struct ExtensionRepositoryState: Identifiable {
     }
 }
 
+enum ExtensionConfigurationSaveError: Error, LocalizedError {
+    case busy
+    case savedButInactive(snapshot: ExtensionConfigurationSnapshot, message: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .busy: return "This extension is busy. Please try again when it finishes."
+        case let .savedButInactive(_, message):
+            return "Your settings were saved, but the source could not be activated. \(message)"
+        }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     let store: LibraryStore
@@ -22,6 +35,7 @@ final class AppModel: ObservableObject {
     let admissionService: ExtensionAdmissionService
     let installationService: ExtensionInstallationService
     let sourceFactory: ExtensionSourceFactory
+    let preferencesService: ExtensionPreferencesService
 
     @Published private(set) var librarySnapshot = LibrarySnapshot()
     @Published private(set) var libraryError: String?
@@ -32,7 +46,18 @@ final class AppModel: ObservableObject {
     @Published var extensionMessage: String?
     @Published private(set) var sourceGeneration: UInt64 = 0
     @Published private(set) var extensionRepositories: [ExtensionRepositoryState] = []
+    @Published private(set) var extensionConfigurations: [String: ExtensionConfigurationSnapshot] = [:]
+    @Published private(set) var extensionErrors: [String: String] = [:]
     private var libraryReloadGeneration: UInt64 = 0
+    private var extensionsReloadGeneration: UInt64 = 0
+    private struct SourceExecutionState {
+        let packageName: String
+        let revision: UInt64
+        let configuration: ExtensionExecutionConfiguration
+    }
+    private var sourceExecutionStates: [Int64: SourceExecutionState] = [:]
+
+    static let configurableFooPackage = "eu.kanade.tachiyomi.extension.all.foolslidecustomizable"
 
     var library: [Manga] { librarySnapshot.manga }
     var categories: [KamiCore.Category] { librarySnapshot.categories }
@@ -57,6 +82,7 @@ final class AppModel: ObservableObject {
             client: storeClient
         )
         self.sourceFactory = ExtensionSourceFactory()
+        self.preferencesService = ExtensionPreferencesService(store: store)
         reloadLibrary()
         Task { [weak self] in
             await self?.restoreInstalledExtensions()
@@ -123,7 +149,28 @@ final class AppModel: ObservableObject {
     }
 
     func source(id: Int64) -> (any KamiSource)? {
-        registry.source(id: id)
+        _ = sourceGeneration
+        return registry.source(id: id)
+    }
+
+    func sourceRevision(for sourceID: Int64) -> UInt64 {
+        _ = sourceGeneration
+        return registry.revision(for: sourceID)
+    }
+
+    func isSourceCurrent(id: Int64, revision: UInt64) -> Bool {
+        sourceRevision(for: id) == revision && source(id: id) != nil
+    }
+
+    func sourceExecutionConfiguration(id: Int64, revision: UInt64) throws -> ExtensionExecutionConfiguration? {
+        guard isSourceCurrent(id: id, revision: revision) else { throw CancellationError() }
+        if case .downloadedExtension = registry.origin(of: id) {
+            guard let execution = sourceExecutionStates[id], execution.revision == revision else {
+                throw ExtensionPreferencesError.staleInstallation
+            }
+            return execution.configuration
+        }
+        return nil
     }
 
     var sources: [any KamiSource] {
@@ -137,6 +184,82 @@ final class AppModel: ObservableObject {
 
     func installedExtension(packageName: String) -> InstalledExtensionTrust? {
         installedExtensions.first { $0.packageName == packageName }
+    }
+
+    func extensionIsActive(_ installed: InstalledExtensionTrust) -> Bool {
+        _ = sourceGeneration
+        return installed.enabled && installed.sourceIDs.contains {
+            registry.origin(of: $0) == .downloadedExtension(packageName: installed.packageName)
+                && registry.source(id: $0) != nil
+        }
+    }
+
+    func extensionNeedsConfiguration(packageName: String) -> Bool {
+        guard let snapshot = extensionConfigurations[packageName] else { return false }
+        guard case let .string(url)? = snapshot.userValues[.baseURL] else { return true }
+        return url.isEmpty
+    }
+
+    func extensionStatus(_ installed: InstalledExtensionTrust) -> String {
+        if extensionBusyPackages.contains(installed.packageName) { return "Working…" }
+        if extensionIsActive(installed) { return "Active" }
+        if extensionNeedsConfiguration(packageName: installed.packageName) {
+            return "Disabled · source URL required"
+        }
+        return installed.enabled ? "Inactive · activation needs attention" : "Disabled"
+    }
+
+    func extensionConfiguration(packageName: String) async throws -> ExtensionConfigurationSnapshot {
+        let snapshot = try await preferencesService.configuration(packageName: packageName)
+        try Task.checkCancellation()
+        extensionConfigurations[packageName] = snapshot
+        return snapshot
+    }
+
+    func refreshInstalledExtensions() async {
+        await reloadInstalledExtensions()
+    }
+
+    func configurationErrorMessage(for error: Error) -> String {
+        describeExtensionError(error)
+    }
+
+    func saveExtensionConfiguration(
+        snapshot: ExtensionConfigurationSnapshot,
+        userValues: [InterpretedExtensionPreferenceSchema.FieldID: InterpretedExtensionPreferenceSchema.Value],
+        enableAfterSaving: Bool = false
+    ) async throws -> ExtensionConfigurationSnapshot {
+        let packageName = snapshot.packageName
+        guard !extensionBusyPackages.contains(packageName) else {
+            throw ExtensionConfigurationSaveError.busy
+        }
+        extensionBusyPackages.insert(packageName)
+        defer { extensionBusyPackages.remove(packageName) }
+
+        // A failed validation or database save leaves the running source alone.
+        let saved = try await preferencesService.saveConfiguration(
+            snapshot: snapshot,
+            userValues: userValues
+        )
+        extensionConfigurations[packageName] = saved
+        extensionErrors.removeValue(forKey: packageName)
+        extensionMessage = nil
+        if saved.enabled || enableAfterSaving {
+            revokeExtension(packageName: packageName)
+            do {
+                if !saved.enabled {
+                    try await store.setExtensionEnabled(true, packageName: packageName)
+                }
+                try await activateExtension(packageName: packageName)
+            } catch {
+                let message = await failActivation(packageName: packageName, error: error)
+                await reloadInstalledExtensions()
+                let current = extensionConfigurations[packageName] ?? saved
+                throw ExtensionConfigurationSaveError.savedButInactive(snapshot: current, message: message)
+            }
+        }
+        await reloadInstalledExtensions()
+        return extensionConfigurations[packageName] ?? saved
     }
 
     func addExtensionRepository(url: String) async throws {
@@ -185,7 +308,10 @@ final class AppModel: ObservableObject {
                 pendingExtensionTrust = preparation
             }
         } catch {
-            extensionMessage = "Installation failed: \(describeExtensionError(error))"
+            let message = "Installation failed: \(describeExtensionError(error))"
+            extensionErrors[packageName] = message
+            extensionMessage = message
+            await reloadInstalledExtensions()
         }
     }
 
@@ -207,7 +333,10 @@ final class AppModel: ObservableObject {
             )
             try await finishInstall(admission)
         } catch {
-            extensionMessage = "Installation failed: \(describeExtensionError(error))"
+            let message = "Installation failed: \(describeExtensionError(error))"
+            extensionErrors[packageName] = message
+            extensionMessage = message
+            await reloadInstalledExtensions()
         }
     }
 
@@ -229,42 +358,40 @@ final class AppModel: ObservableObject {
                 do {
                     try await activateExtension(packageName: packageName)
                 } catch {
-                    try? await store.setExtensionEnabled(false, packageName: packageName)
-                    throw error
+                    _ = await failActivation(packageName: packageName, error: error)
+                    await reloadInstalledExtensions()
+                    return
                 }
             } else {
                 try await store.setExtensionEnabled(false, packageName: packageName)
-                registry.removeDownloaded(
-                    sourceIDs: installed.sourceIDs,
-                    packageName: installed.packageName
-                )
-                sourceGeneration &+= 1
+                revokeExtension(packageName: installed.packageName)
+                extensionErrors.removeValue(forKey: packageName)
             }
             await reloadInstalledExtensions()
         } catch {
-            extensionMessage = "Could not \(enabled ? "enable" : "disable") extension: \(describeExtensionError(error))"
+            let message = "Could not \(enabled ? "enable" : "disable") extension: \(describeExtensionError(error))"
+            extensionErrors[packageName] = message
+            extensionMessage = message
             await reloadInstalledExtensions()
         }
     }
 
     private func restoreInstalledExtensions() async {
         await reloadInstalledExtensions()
-        var failures: [String] = []
         for installed in installedExtensions where installed.enabled {
+            let packageName = installed.packageName
+            guard !extensionBusyPackages.contains(packageName) else { continue }
+            extensionBusyPackages.insert(packageName)
             do {
-                try await activateExtension(packageName: installed.packageName)
+                if try await store.installedExtensionTrust(packageName: packageName)?.enabled == true {
+                    try await activateExtension(packageName: packageName)
+                }
             } catch {
-                try? await store.setExtensionEnabled(
-                    false,
-                    packageName: installed.packageName
-                )
-                failures.append(installed.packageName)
+                _ = await failActivation(packageName: packageName, error: error)
             }
+            extensionBusyPackages.remove(packageName)
         }
         await reloadInstalledExtensions()
-        if !failures.isEmpty {
-            extensionMessage = "Disabled \(failures.count) extension(s) that could not be authenticated and restored."
-        }
     }
 
     private func finishInstall(_ admission: ExtensionAdmission) async throws {
@@ -275,16 +402,18 @@ final class AppModel: ObservableObject {
         }
         if installed.enabled {
             do {
+                // Installed bytes have already changed. The old runtime must
+                // not survive an update that cannot construct its replacement.
+                revokeExtension(packageName: admission.packageName)
                 try await activateExtension(packageName: admission.packageName)
             } catch {
-                try? await store.setExtensionEnabled(
-                    false,
-                    packageName: admission.packageName
-                )
+                let message = await failActivation(packageName: admission.packageName, error: error)
                 await reloadInstalledExtensions()
-                extensionMessage = "Installed securely but left disabled: \(describeExtensionError(error))"
+                extensionMessage = "Installed securely; source is inactive. \(message)"
                 return
             }
+        } else {
+            revokeExtension(packageName: admission.packageName)
         }
         await reloadInstalledExtensions()
         extensionMessage = "Installed \(admission.packageName) \(admission.versionName) securely."
@@ -292,18 +421,76 @@ final class AppModel: ObservableObject {
 
     private func activateExtension(packageName: String) async throws {
         let admission = try await admissionService.restore(packageName: packageName)
+        let configuration = try await preferencesService.loadForExecution(admission: admission)
         let factory = sourceFactory
-        let sources = try await Task.detached(priority: .userInitiated) {
-            try factory.makeSources(admission: admission)
-        }.value
-        for source in sources {
-            try registry.addDownloaded(source, admission: admission)
+        let construction = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try factory.makeSources(admission: admission, preferences: configuration.runtimePreferences)
         }
+        let sources = try await withTaskCancellationHandler {
+            try await construction.value
+        } onCancel: {
+            construction.cancel()
+        }
+        try Task.checkCancellation()
+        try await preferencesService.verifyCurrentExecution(configuration)
+        try Task.checkCancellation()
+        try registry.replaceDownloaded(sources: sources, admission: admission)
+        sourceExecutionStates = sourceExecutionStates.filter { $0.value.packageName != packageName }
+        for source in sources {
+            sourceExecutionStates[source.id] = SourceExecutionState(
+                packageName: packageName,
+                revision: registry.revision(for: source.id),
+                configuration: configuration
+            )
+        }
+        sourceGeneration &+= 1
+        extensionErrors.removeValue(forKey: packageName)
+    }
+
+    private func revokeExtension(packageName: String) {
+        registry.removeDownloaded(packageName: packageName)
+        sourceExecutionStates = sourceExecutionStates.filter { $0.value.packageName != packageName }
         sourceGeneration &+= 1
     }
 
+    private func failActivation(packageName: String, error: Error) async -> String {
+        revokeExtension(packageName: packageName)
+        var message = describeExtensionError(error)
+        do {
+            try await store.setExtensionEnabled(false, packageName: packageName)
+        } catch {
+            message += " The source is inactive, but its disabled setting could not be saved. Try disabling it again."
+        }
+        extensionErrors[packageName] = message
+        extensionMessage = "Source is inactive: \(message)"
+        return message
+    }
+
     private func reloadInstalledExtensions() async {
-        installedExtensions = (try? await store.installedExtensionTrusts()) ?? []
+        extensionsReloadGeneration &+= 1
+        let generation = extensionsReloadGeneration
+        do {
+            let installed = try await store.installedExtensionTrusts()
+            var configurations: [String: ExtensionConfigurationSnapshot] = [:]
+            for record in installed where record.packageName == Self.configurableFooPackage {
+                do {
+                    configurations[record.packageName] = try await preferencesService.configuration(
+                        packageName: record.packageName
+                    )
+                } catch {
+                    if generation == extensionsReloadGeneration {
+                        extensionErrors[record.packageName] = describeExtensionError(error)
+                    }
+                }
+            }
+            guard generation == extensionsReloadGeneration, !Task.isCancelled else { return }
+            installedExtensions = installed
+            extensionConfigurations = configurations
+        } catch {
+            guard generation == extensionsReloadGeneration, !Task.isCancelled else { return }
+            extensionMessage = "Installed extensions could not be loaded. Please try again."
+        }
     }
 
     private func reloadExtensionRepositories() async {
@@ -342,7 +529,7 @@ final class AppModel: ObservableObject {
            let description = localized.errorDescription {
             return description
         }
-        return String(describing: error)
+        return "The extension operation could not be completed. Please try again."
     }
 
     func toggleLibrary(_ manga: Manga) {

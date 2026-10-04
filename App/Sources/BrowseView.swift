@@ -2,6 +2,7 @@ import SwiftUI
 import MihonCompatKit
 import KamiCore
 
+@MainActor
 struct BrowseView: View {
     @EnvironmentObject var model: AppModel
 
@@ -51,8 +52,11 @@ struct BrowseView: View {
     }
 }
 
+@MainActor
 struct SourceBrowseView: View {
-    let source: any KamiSource
+    @EnvironmentObject private var model: AppModel
+    let sourceID: Int64
+    let sourceName: String
     @State private var defaultFilters: [SourceFilter]
 
     @State private var mode: Mode = .popular
@@ -69,9 +73,13 @@ struct SourceBrowseView: View {
     @State private var filterRefreshCompleted = false
     @State private var filterRefreshInProgress = false
     @State private var filterSchemaReady = false
+    @State private var sessionRevision: UInt64?
+    @State private var requestTask: Task<Void, Never>?
+    @State private var filterGeneration = 0
 
     init(source: any KamiSource) {
-        self.source = source
+        self.sourceID = source.id
+        self.sourceName = source.name
         let filters = source.getFilterList()
         _defaultFilters = State(initialValue: filters)
         _appliedFilters = State(initialValue: filters)
@@ -86,6 +94,17 @@ struct SourceBrowseView: View {
 
     var body: some View {
         List {
+            if !hasCurrentSource {
+                Section {
+                    if model.source(id: sourceID) == nil {
+                        Label("This source is disabled. Enable it in Extensions to browse again.",
+                              systemImage: "pause.circle")
+                            .font(.footnote)
+                    } else {
+                        ProgressView("Loading source…")
+                    }
+                }
+            }
             if let errorText {
                 Section {
                     Label(errorText, systemImage: "exclamationmark.triangle")
@@ -94,11 +113,12 @@ struct SourceBrowseView: View {
                 }
             }
             Section {
-                ForEach(items, id: \.url) { manga in
+                ForEach(hasCurrentSource ? items : [], id: \.url) { manga in
                     NavigationLink {
                         MangaDetailView(
-                            manga: Manga(sourceId: source.id, from: manga),
-                            prefetched: manga
+                            manga: Manga(sourceId: sourceID, from: manga),
+                            prefetched: manga,
+                            prefetchedSourceRevision: sessionRevision
                         )
                     } label: {
                         HStack(spacing: 12) {
@@ -115,9 +135,9 @@ struct SourceBrowseView: View {
                         }
                     }
                 }
-                if hasNext {
+                if hasCurrentSource && hasNext {
                     Button {
-                        Task { await load(page: page + 1) }
+                        startLoad(page: page + 1)
                     } label: {
                         HStack {
                             Spacer()
@@ -129,7 +149,7 @@ struct SourceBrowseView: View {
                     .disabled(loading)
                 }
             } header: {
-                if source.supportsLatest {
+                if model.source(id: sourceID)?.supportsLatest == true {
                     Picker("Mode", selection: $mode) {
                         ForEach(Mode.allCases) { m in
                             Text(m.rawValue).tag(m)
@@ -139,35 +159,57 @@ struct SourceBrowseView: View {
                 }
             }
         }
-        .navigationTitle(source.name)
-        .searchable(text: $query, prompt: "Search \(source.name)")
+        .navigationTitle(sourceName)
+        .searchable(text: $query, prompt: "Search \(sourceName)")
         .onSubmit(of: .search) {
-            Task { await load(page: 1, reset: true) }
+            startLoad(page: 1, reset: true)
         }
         .onChange(of: query) { _, value in
             if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Task { await load(page: 1, reset: true) }
+                startLoad(page: 1, reset: true)
             }
         }
-        .task {
+        .task(id: sourceRevision) {
+            let revision = sourceRevision
+            if sessionRevision != revision {
+                stopRequests()
+                items = []
+                hasNext = false
+                showingFilters = false
+                filterRefreshCompleted = false
+                guard let source = model.source(id: sourceID) else {
+                    sessionRevision = nil
+                    defaultFilters = []
+                    appliedFilters = []
+                    errorText = "Source not available. Enable it in Extensions to browse again."
+                    return
+                }
+                sessionRevision = revision
+                defaultFilters = source.getFilterList()
+                appliedFilters = defaultFilters
+                filterSearchEnabled = false
+                filterSchemaReady = !source.supportsFilterFetching
+            }
             if items.isEmpty { await load(page: 1, reset: true) }
-            if source.supportsFilterFetching {
+            if model.source(id: sourceID)?.supportsFilterFetching == true {
                 await refreshFiltersIfNeeded()
             }
         }
+        .onDisappear { stopRequests() }
         .onChange(of: mode) { _, _ in
             filterSearchEnabled = false
             appliedFilters = defaultFilters
-            Task { await load(page: 1, reset: true) }
+            startLoad(page: 1, reset: true)
         }
         .refreshable {
-            if source.supportsFilterFetching {
+            requestTask?.cancel()
+            if model.source(id: sourceID)?.supportsFilterFetching == true {
                 await refreshFiltersIfNeeded()
             }
             await load(page: 1, reset: true)
         }
         .toolbar {
-            if !defaultFilters.isEmpty {
+            if hasCurrentSource && !defaultFilters.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingFilters = true
@@ -185,19 +227,19 @@ struct SourceBrowseView: View {
         }
         .sheet(isPresented: $showingFilters) {
             SourceFilterSheet(
-                sourceName: source.name,
+                sourceName: sourceName,
                 filters: appliedFilters,
                 defaults: defaultFilters,
                 isFiltering: filterSearchEnabled,
                 onApply: { filters in
                     appliedFilters = filters
                     filterSearchEnabled = true
-                    Task { await load(page: 1, reset: true) }
+                    startLoad(page: 1, reset: true)
                 },
                 onClear: {
                     appliedFilters = defaultFilters
                     filterSearchEnabled = false
-                    Task { await load(page: 1, reset: true) }
+                    startLoad(page: 1, reset: true)
                 }
             )
         }
@@ -209,7 +251,31 @@ struct SourceBrowseView: View {
         }
     }
 
+    private var sourceRevision: UInt64 { model.sourceRevision(for: sourceID) }
+
+    private var hasCurrentSource: Bool {
+        sessionRevision == sourceRevision && model.source(id: sourceID) != nil
+    }
+
+    private func stopRequests() {
+        requestTask?.cancel()
+        requestTask = nil
+        loadGeneration &+= 1
+        filterGeneration &+= 1
+        loading = false
+        filterRefreshInProgress = false
+    }
+
+    private func startLoad(page: Int, reset: Bool = false) {
+        guard hasCurrentSource else { return }
+        requestTask?.cancel()
+        requestTask = Task { await load(page: page, reset: reset) }
+    }
+
     private func load(page requestedPage: Int, reset: Bool = false) async {
+        guard !Task.isCancelled, hasCurrentSource,
+              let source = model.source(id: sourceID),
+              let revision = sessionRevision else { return }
         if !reset && loading { return }
 
         if reset {
@@ -241,7 +307,8 @@ struct SourceBrowseView: View {
             )
             let result = try await request.execute(on: source)
 
-            guard generation == loadGeneration else { return }
+            guard !Task.isCancelled, generation == loadGeneration,
+                  model.isSourceCurrent(id: sourceID, revision: revision) else { return }
             if reset {
                 items = result.mangas
             } else {
@@ -250,7 +317,8 @@ struct SourceBrowseView: View {
             page = requestedPage
             hasNext = result.hasNextPage
         } catch {
-            guard generation == loadGeneration else { return }
+            guard generation == loadGeneration,
+                  model.isSourceCurrent(id: sourceID, revision: revision) else { return }
             guard !Task.isCancelled else { return }
             errorText = "The source request failed: \(error.localizedDescription)"
         }
@@ -258,15 +326,24 @@ struct SourceBrowseView: View {
 
     private func refreshFiltersIfNeeded() async {
         guard !Task.isCancelled,
+              hasCurrentSource,
+              let source = model.source(id: sourceID),
+              let revision = sessionRevision,
               !filterRefreshCompleted,
               !filterRefreshInProgress else { return }
+        let generation = filterGeneration
         filterRefreshInProgress = true
         defer {
-            filterRefreshInProgress = false
-            filterSchemaReady = true
+            if generation == filterGeneration,
+               model.isSourceCurrent(id: sourceID, revision: revision) {
+                filterRefreshInProgress = false
+                filterSchemaReady = true
+            }
         }
         do {
             let refreshed = try await source.refreshFilterList()
+            guard !Task.isCancelled, generation == filterGeneration,
+                  model.isSourceCurrent(id: sourceID, revision: revision) else { return }
             // The source owns its retry ceiling. A nonthrowing placeholder is
             // therefore a completed refresh for this source instance.
             filterRefreshCompleted = true

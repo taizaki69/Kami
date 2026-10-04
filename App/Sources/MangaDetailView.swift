@@ -8,6 +8,7 @@ struct MangaDetailView: View {
 
     let manga: Manga
     var prefetched: SMangaCompat?
+    var prefetchedSourceRevision: UInt64?
 
     @State private var detail: SMangaCompat?
     @State private var chapters: [Chapter] = []
@@ -18,9 +19,17 @@ struct MangaDetailView: View {
     @State private var libraryBusy = false
     @State private var libraryError: String?
     @State private var categoryAssignment: CategoryAssignmentRequest?
+    @State private var loadGeneration = 0
+    @State private var loadedSourceRevision: UInt64?
 
     var body: some View {
         List {
+            if let errorText {
+                Section {
+                    Label(errorText, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+            }
             if let detail {
                 Section {
                     HStack(alignment: .top, spacing: 12) {
@@ -78,8 +87,6 @@ struct MangaDetailView: View {
                 }
             } else if loading {
                 Section { HStack { Spacer(); ProgressView(); Spacer() } }
-            } else if let errorText {
-                Section { Label(errorText, systemImage: "exclamationmark.triangle") }
             }
 
             Section("Chapters") {
@@ -88,7 +95,7 @@ struct MangaDetailView: View {
                         ReaderView(mangaTitle: detail?.title ?? manga.title,
                                    chapter: chapter,
                                    chapters: chapters,
-                                   source: model.source(id: manga.sourceId))
+                                   sourceID: manga.sourceId)
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -104,6 +111,7 @@ struct MangaDetailView: View {
                             }
                         }
                     }
+                    .disabled(!hasCurrentSource)
                     .swipeActions {
                         Button(chapter.read ? "Unread" : "Read") {
                             markRead(chapter)
@@ -115,7 +123,8 @@ struct MangaDetailView: View {
         }
         .navigationTitle(manga.title)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
+        .task(id: model.sourceRevision(for: manga.sourceId)) { await load() }
+        .onDisappear { loadGeneration &+= 1 }
         .sheet(item: $categoryAssignment) { request in
             CategoryAssignmentSheet(mangaIDs: request.mangaIDs, title: request.title)
         }
@@ -127,6 +136,11 @@ struct MangaDetailView: View {
         } message: {
             Text(libraryError ?? "")
         }
+    }
+
+    private var hasCurrentSource: Bool {
+        loadedSourceRevision == model.sourceRevision(for: manga.sourceId)
+            && model.source(id: manga.sourceId) != nil
     }
 
     private var statusText: String {
@@ -142,45 +156,63 @@ struct MangaDetailView: View {
     }
 
     private func load() async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        let revision = model.sourceRevision(for: manga.sourceId)
         loading = true
         errorText = nil
-        defer { loading = false }
+        loadedSourceRevision = nil
+        chapters = []
+        defer { if generation == loadGeneration { loading = false } }
         guard let source = model.source(id: manga.sourceId) else {
             errorText = "Source not available for this manga."
             return
         }
         do {
-            _ = try await model.store.upsert(manga)
-            guard let existing = try await model.store.manga(sourceId: manga.sourceId, url: manga.url),
-                  let mangaRowId = existing.id else {
-                errorText = "Could not persist this manga."
-                return
-            }
-            storedId = mangaRowId
-            inLibrary = existing.inLibrary
+            let execution = try model.sourceExecutionConfiguration(id: manga.sourceId, revision: revision)
+            let existing = try await model.store.manga(sourceId: manga.sourceId, url: manga.url)
+            guard canPublish(revision: revision, generation: generation) else { return }
 
-            var compat = prefetched ?? SMangaCompat(url: manga.url, title: manga.title)
+            var compat = prefetchedSourceRevision == revision
+                ? prefetched ?? SMangaCompat(url: manga.url, title: manga.title)
+                : SMangaCompat(url: manga.url, title: manga.title)
             if !compat.initialized {
                 compat = try await source.getMangaDetails(manga: compat)
             }
-            detail = compat
-
-            var persisted = Manga(sourceId: manga.sourceId, from: compat)
-            persisted.id = mangaRowId
-            persisted.inLibrary = existing.inLibrary
-            persisted.dateAdded = existing.dateAdded
-            persisted.dateUpdated = Int64(Date().timeIntervalSince1970)
-            _ = try await model.store.upsert(persisted)
-
+            guard canPublish(revision: revision, generation: generation) else { return }
             let chapterList = try await source.getChapterList(manga: compat)
-            let domain = chapterList.enumerated().map { order, c in
-                Chapter(mangaId: mangaRowId, sourceOrder: order, from: c)
-            }
-            try await model.store.replaceChapters(mangaId: mangaRowId, with: domain)
-            chapters = try await model.store.chapters(mangaId: mangaRowId)
+            guard canPublish(revision: revision, generation: generation) else { return }
+
+            // Core checks the captured execution/configuration token inside
+            // the same transaction that writes manga and chapters. UI checks
+            // alone cannot close a race with a concurrent source-URL save.
+            var persisted = Manga(sourceId: manga.sourceId, from: compat)
+            persisted.id = existing?.id
+            persisted.inLibrary = existing?.inLibrary ?? manga.inLibrary
+            persisted.dateAdded = existing?.dateAdded ?? manga.dateAdded
+            persisted.dateUpdated = Int64(Date().timeIntervalSince1970)
+            let saved = try await model.store.persistSourceUpdate(
+                manga: persisted,
+                chapters: chapterList,
+                expectedConfiguration: execution
+            )
+            guard canPublish(revision: revision, generation: generation) else { return }
+            storedId = saved.manga.id
+            inLibrary = saved.manga.inLibrary
+            detail = compat
+            chapters = saved.chapters
+            loadedSourceRevision = revision
+        } catch is CancellationError {
+            return
         } catch {
+            guard canPublish(revision: revision, generation: generation) else { return }
             errorText = "Could not load this manga: \(error.localizedDescription)"
         }
+    }
+
+    private func canPublish(revision: UInt64, generation: Int) -> Bool {
+        !Task.isCancelled && generation == loadGeneration
+            && model.isSourceCurrent(id: manga.sourceId, revision: revision)
     }
 
     private func toggleLibrary() {

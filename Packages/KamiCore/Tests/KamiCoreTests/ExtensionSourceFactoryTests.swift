@@ -323,6 +323,35 @@ final class ExtensionSourceFactoryTests: XCTestCase {
         XCTAssertNotNil(imageRequest?.sourceExecutionID)
     }
 
+    func testPartialBaoziPreferencesRetainTheSafeBannerDefaultAndRejectUnknownKeys() async throws {
+        let bytes = try corpus("baozimanhua")
+        let temporary = try temporaryAPK(bytes)
+        defer { try? FileManager.default.removeItem(at: temporary.directory) }
+        let admission = ExtensionAdmission(
+            packageName: "eu.kanade.tachiyomi.extension.zh.baozimanhua",
+            versionName: "1.6.29", versionCode: 29,
+            apkPath: temporary.apk.path, apkSHA256: APKSignatureVerifier.apkSHA256(bytes),
+            signingIdentity: try APKSignatureVerifier().verify(apkBytes: bytes),
+            trustSource: .user(fingerprint: Self.keiyoushiFingerprint), sourceIDs: [Self.baoziManhuaSourceID]
+        )
+        let partial: [InterpretedExtensionPreferences] = [
+            .init(), try .init(booleans: ["QUICK_PAGES": false]),
+            try .init(strings: ["CHAPTER_ORDER": "0"], booleans: ["REMOVE_DUPLICATE_IMAGES": true]),
+        ]
+        for preferences in partial {
+            let source = try XCTUnwrap(ExtensionSourceFactory().makeSources(
+                admission: admission, transport: NoNetworkTransport(), preferences: preferences
+            ).first)
+            let image = await source.getImageRequest(page: .init(index: 0, imageURL: "https://static.baozicdn.com/chapter/default.jpg"))
+            XCTAssertNotNil(image?.sourceExecutionID, "an unrelated partial preference must retain banner=0 and its measured client")
+        }
+        XCTAssertThrowsError(try ExtensionSourceFactory().makeSources(
+            admission: admission, transport: NoNetworkTransport(), preferences: .init(booleans: ["UNSUPPORTED": true])
+        )) { error in
+            XCTAssertEqual(error as? PinnedInterpretedSourceError, .invalidPreferences(profile: "baozi-manhua-1.6.29"))
+        }
+    }
+
     func testFactoryRejectsFileReplacementBeforeSignatureOrDEXConstruction() throws {
         let bytes = try corpus("batcave")
         let temporary = try temporaryAPK(bytes)

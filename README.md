@@ -44,13 +44,16 @@ with newer APK versions. See the
 scope and the [runtime design](docs/EXTENSION_RUNTIME.md) for the host boundary.
 
 FoolSlide's raw default URL is a loopback placeholder. The downloaded-source
-factory requires an explicit `overrideBaseUrl`; it leaves an unconfigured
-installation disabled. The exact runtime preserves a supplied override while
-initializing the APK's version-specific preference bookkeeping. Production
-preference editing and persistence are still pending, so this profile is
-currently usable through the explicitly configured factory/runtime seam.
+factory requires a configured HTTPS URL; an unconfigured installation stays
+inactive. Its settings form saves the URL and adult-content confirmation for
+the authenticated 1.6.6 APK. Saving a disabled extension keeps it disabled;
+enabling it is a separate choice. Settings survive restarts and disabling.
+Changing the website is blocked once any manga from this source has been
+stored, including manga outside the library. Replacing or disabling a source
+revokes its old requests and refreshes open browse/reader sessions.
 Baozi's unsupported Android bitmap banner transform remains disabled by the
-factory default.
+factory default, including when a partial raw preference set omits that mode.
+Other profiles do not yet expose product settings.
 
 The compatibility layer includes bounded ZIP/DEFLATE, Android manifest and DEX
 parsers, APK signature verification, a verified interpreter subset, isolated
@@ -66,7 +69,7 @@ conformance fixtures. Historical paths under `measurement/` are retained; the
 manifest's `role` field determines measurement membership. Source acquisition
 provenance, fixture hashes and separate third-party notices are preserved.
 
-Downloads, update scanning, migration and backup UI, preference UI, Cloudflare
+Downloads, update scanning, migration and backup UI, further source settings, Cloudflare
 cookie bridging, iPad spreads and physical-device performance verification
 remain on the [task tracker](TODO.md). The broader daily-reader and extension
 compatibility objective is still in progress.

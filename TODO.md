@@ -6,21 +6,25 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-03
 
 The full native-reader and compatibility objective remains active. The current
-implementation continues the preserved FoolSlide work, adds strict source and
-host regressions, category management, manifest-role measurement and Linux CI.
+implementation adds persistent FoolSlide settings and revocable source
+registrations on top of the verified FoolSlide/category/manifest-role work.
 See [verification](docs/VERIFICATION-2026-10-03.md) for actual test/build evidence.
 Completed items below retain some historical checkpoint counts; those counts
 must not be used as evidence for the current commit.
 
-- [~] Finish and verify exact FoolSlide Customizable 1.6.6 promotion, including
+- [x] Finish and verify exact FoolSlide Customizable 1.6.6 promotion, including
       configured factory admission, fail-before-transport boundaries, bounded
       mutable HTML and the reached date-builder semantics.
-- [~] Verify category creation/order/assignment/filtering end to end, including
-      SQLite persistence and Apple compilation of the new UI.
+- [x] Verify category persistence and Apple compilation at `ecc97bc` (PR #10).
+      Physical-device interaction remains a separate verification task.
 - [x] Reconcile execution/measurement roles for EternalMangas, DocTruyen3Q and
       FoolSlide without changing their APK hashes or granting new trust.
-- [ ] Provide production preference UI/persistence; FoolSlide requires an
-      explicit HTTPS override and unconfigured app installation stays disabled.
+- [~] Integrate persistent production settings for FoolSlide 1.6.6: authenticated
+      schema, typed SQLite document, stale-save rejection, explicit enablement,
+      source/image revocation and transactional source-result persistence.
+      Local evidence and exact-commit Apple CI are recorded separately.
+- [ ] Extend editable settings only after proving each additional profile's
+      value domains and execution effects; Baozi keeps its safe banner default.
 - [ ] Continue downloads and library update scanning, then migration/backup UI,
       without treating a passing compatibility suite as completion of the app.
 
@@ -261,9 +265,9 @@ must not be used as evidence for the current commit.
       matcher (or an explicit match-step budget). Current `NSRegularExpression`
       use is bounded by pattern/input/output sizes but not by worst-case match
       time.
-- [ ] Wire production preference UI and persistence for the bounded
-      `InterpretedExtensionPreferences` model; current app construction uses
-      profile defaults.
+- [~] Production preference UI and persistence: FoolSlide has a closed, measured
+      URL/adult schema and an authenticated SQLite configuration service in the
+      current continuation. Other profiles retain their measured defaults.
 - [~] Privacy-safe compatibility telemetry — typed runtime class/method/field/
       opcode failures are stage-deduplicated without arbitrary error strings;
       the first typed gap is retained below caught host-bridge fallbacks,

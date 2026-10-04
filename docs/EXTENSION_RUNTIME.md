@@ -12,8 +12,39 @@ historical. No profile bypasses hash, signer, manifest or source-ID admission.
 FoolSlide requires an explicit HTTPS base URL at the downloaded-source factory.
 The runtime validates preference values and handles the exact APK's default-URL
 bookkeeping so an injected override is preserved. Its unconfigured raw default
-is a loopback placeholder, not an app-ready source. Preference UI/persistence
-and live-site behavior remain unproven.
+is a loopback placeholder, not an app-ready source. The current app exposes
+only its measured URL and adult-confirmation settings. Local persistence and
+real-APK fixtures are recorded separately from Apple CI and live-site behavior.
+
+The settings service authenticates the exact installed APK even when disabled,
+then uses a compiled schema bound to package/version/hash/signer/source IDs.
+It stores only bounded typed user values (16 KiB maximum), a schema revision,
+an identity fingerprint and a monotonic document revision. Runtime bookkeeping,
+trust, cookies and transport policy are not user settings. Saving reauthenticates
+and compares the installation and document inside one SQLite transaction;
+corrupt, unsupported or stale documents fail closed. Disable preserves settings,
+while an identity-changing admission invalidates the document atomically.
+
+FoolSlide source IDs do not encode the deployment host. Any stored manga under
+its ID therefore blocks a URL change, including the first configuration when
+legacy manga has no host binding. Source metadata and chapter writes check the
+captured execution configuration in their own write transaction, closing both
+orders of a race between URL save and an old network result.
+
+Downloaded registrations publish revocable facades. Replacement validates the
+whole admitted source set before mutation; disable/replacement revokes retained
+source references and image capabilities, cooperatively cancels in-flight work,
+and rejects late results. A source lifetime tracks at most 256 operations.
+Images cannot be rebound to another lifetime. Reader cache keys keep headers,
+opaque executor IDs and lifetime IDs in separate fields, and caller cancellation
+does not cancel another waiter's shared download. This is lifetime management,
+not an additional APK admission authority. Already delivered bytes are not
+retracted; open reader sessions clear their caches on replacement.
+
+Baozi exposes no new settings form. A partial raw preference set still receives
+`BAOZI_BANNER=0` when that key is absent; explicitly supplied raw modes retain
+their existing measured fallback behavior. The historical notes below predate
+this narrow production-settings implementation.
 
 
 **Last updated:** 2026-09-18
