@@ -12,6 +12,9 @@ struct MangaDetailView: View {
 
     @State private var detail: SMangaCompat?
     @State private var chapters: [Chapter] = []
+    @State private var readingSnapshot: MangaReadingSnapshot?
+    @State private var readBusyChapters = Set<Int64>()
+    @State private var readingError: String?
     @State private var inLibrary = false
     @State private var loading = true
     @State private var errorText: String?
@@ -95,11 +98,10 @@ struct MangaDetailView: View {
                 ForEach(chapters) { chapter in
                     VStack(alignment: .leading, spacing: 8) {
                         NavigationLink {
-                            ReaderView(mangaTitle: detail?.title ?? manga.title,
-                                       chapter: chapter,
-                                       chapters: chapters,
-                                       sourceID: manga.sourceId,
-                                       openingPolicy: isDownloaded(chapter) ? .offlineOnly : .automatic)
+                            if let readingSnapshot {
+                                ReaderView(snapshot: readingSnapshot, chapter: chapter,
+                                           openingPolicy: isDownloaded(chapter) ? .offlineOnly : .automatic)
+                            }
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -118,7 +120,8 @@ struct MangaDetailView: View {
                                 }
                             }
                         }
-                        .disabled(!hasCurrentSource && !isDownloaded(chapter))
+                        .disabled(readingSnapshot?.target(for: chapter) == nil
+                                  || (!hasCurrentSource && !isDownloaded(chapter)))
                         ChapterDownloadControls(manga: manga, chapter: chapter, inLibrary: inLibrary)
                     }
                     .swipeActions {
@@ -126,6 +129,7 @@ struct MangaDetailView: View {
                             markRead(chapter)
                         }
                         .tint(.blue)
+                        .disabled(chapter.id.map(readBusyChapters.contains) ?? true)
                     }
                 }
             }
@@ -151,6 +155,14 @@ struct MangaDetailView: View {
             Button("OK", role: .cancel) { libraryError = nil }
         } message: {
             Text(libraryError ?? "")
+        }
+        .alert("Could not save reading state", isPresented: Binding(
+            get: { readingError != nil },
+            set: { if !$0 { readingError = nil } }
+        )) {
+            Button("OK", role: .cancel) { readingError = nil }
+        } message: {
+            Text(readingError ?? "")
         }
     }
 
@@ -184,17 +196,19 @@ struct MangaDetailView: View {
         loadedSourceRevision = nil
         defer { if generation == loadGeneration { loading = false } }
         do {
-            let existing = try await model.store.manga(sourceId: manga.sourceId, url: manga.url)
+            await model.waitForReadingSaves()
             guard !Task.isCancelled, generation == loadGeneration else { return }
-            if let existing, let id = existing.id {
-                let current = try await model.store.chapters(mangaId: id)
-                let downloaded = try await model.store.downloadedChapters(mangaID: id)
+            let initial = try await model.store.readingSnapshot(sourceID: manga.sourceId, mangaURL: manga.url)
+            let existing = initial?.manga
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            if let initial, let existing, let id = existing.id {
                 await model.refreshDownloadAvailability(mangaID: id)
                 guard !Task.isCancelled, generation == loadGeneration else { return }
                 detail = savedDetail(existing)
                 storedId = id
                 inLibrary = existing.inLibrary
-                chapters = mergeChapters(current, downloaded)
+                readingSnapshot = initial
+                chapters = initial.readerChapters
                 loadedSourceRevision = model.isSourceCurrent(id: manga.sourceId, revision: revision) ? revision : nil
             }
             guard let source = model.source(id: manga.sourceId) else {
@@ -231,10 +245,13 @@ struct MangaDetailView: View {
             inLibrary = saved.manga.inLibrary
             detail = compat
             guard let savedID = saved.manga.id else { throw DownloadPersistenceError.chapterNotFound }
-            let downloaded = try await model.store.downloadedChapters(mangaID: savedID)
+            guard let savedReading = try await model.store.readingSnapshot(
+                sourceID: manga.sourceId, mangaURL: manga.url
+            ) else { throw ReadingStateError.mangaNotFound }
             await model.refreshDownloadAvailability(mangaID: savedID)
             guard canPublish(revision: revision, generation: generation) else { return }
-            chapters = mergeChapters(saved.chapters, downloaded)
+            readingSnapshot = savedReading
+            chapters = savedReading.readerChapters
             loadedSourceRevision = revision
         } catch is CancellationError {
             return
@@ -249,16 +266,6 @@ struct MangaDetailView: View {
             thumbnailURL: manga.thumbnailURL, artist: manga.artist, author: manga.author,
             status: manga.status, description: manga.descriptionText, genres: manga.genres,
             updateStrategy: manga.updateStrategy, initialized: true)
-    }
-
-    private func mergeChapters(_ current: [Chapter], _ downloaded: [Chapter]) -> [Chapter] {
-        var seen = Set(current.compactMap(\.id))
-        return (current + downloaded.filter { chapter in
-            guard let id = chapter.id else { return false }
-            return seen.insert(id).inserted
-        }).sorted {
-            $0.sourceOrder == $1.sourceOrder ? ($0.id ?? 0) < ($1.id ?? 0) : $0.sourceOrder < $1.sourceOrder
-        }
     }
 
     private func canPublish(revision: UInt64, generation: Int) -> Bool {
@@ -292,11 +299,25 @@ struct MangaDetailView: View {
     }
 
     private func markRead(_ chapter: Chapter) {
-        guard let id = chapter.id else { return }
+        guard let id = chapter.id, !readBusyChapters.contains(id),
+              let target = readingSnapshot?.target(for: chapter) else { return }
+        let read = !chapter.read
+        let generation = loadGeneration
+        readBusyChapters.insert(id)
+        let receipt = model.readingStateWriter.enqueueRead(read, target: target)
         Task {
-            try? await model.store.markRead(!chapter.read, chapterId: id)
-            if let idx = chapters.firstIndex(where: { $0.id == id }) {
-                chapters[idx].read.toggle()
+            defer { readBusyChapters.remove(id) }
+            do {
+                let saved = try await receipt.value()
+                guard !Task.isCancelled, generation == loadGeneration,
+                      readingSnapshot?.target(for: id) == target,
+                      let index = chapters.firstIndex(where: { $0.id == id }) else { return }
+                chapters[index] = saved
+            } catch is CancellationError {
+                return
+            } catch {
+                guard generation == loadGeneration else { return }
+                readingError = ReadingPresentation.message(error)
             }
         }
     }

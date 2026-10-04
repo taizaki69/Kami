@@ -31,6 +31,7 @@ struct RootTabView: View {
             ExtensionsView()
                 .tabItem { Label("Extensions", systemImage: "puzzlepiece") }
         }
+        .safeAreaInset(edge: .top) { ReadingSaveFailureBanner() }
         .onAppear { model.downloadsSceneChanged(sceneID: sceneID, active: scenePhase == .active) }
         .onChange(of: scenePhase) { _, phase in model.downloadsSceneChanged(sceneID: sceneID, active: phase == .active) }
         .onDisappear { model.downloadsSceneChanged(sceneID: sceneID, active: false) }

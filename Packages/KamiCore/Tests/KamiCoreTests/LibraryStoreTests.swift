@@ -54,8 +54,8 @@ final class LibraryStoreTests: XCTestCase {
 
         // Read state, row identity, and history survive a chapter-list refresh.
         let firstChapterId = try XCTUnwrap(stored[0].id)
-        try await store.markRead(true, chapterId: firstChapterId)
-        try await store.recordHistory(mangaId: id, chapterId: firstChapterId)
+        let target = try await readingTargetForTest(store: store, mangaID: id, chapterID: firstChapterId)
+        try await store.commitReadingProgress(target: target, page: 0, reachedEnd: true, lastRead: 1_790_000_000)
         try await store.replaceChapters(mangaId: id, with: chapters)
         stored = try await store.chapters(mangaId: id)
         XCTAssertEqual(stored[0].read, true)

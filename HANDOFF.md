@@ -4,7 +4,23 @@ Last updated: 2026-10-04 (America/Lima)
 
 ## Canonical continuation — 2026-10-04
 
-The active continuation is `assistant/native-library-backups-20261004`, based on
+The active continuation is `assistant/atomic-reader-state-20261004`, based on
+`7bcbe7cb94c80527dd371a746fe591308f91aa49` from
+[PR #15](https://github.com/taizaki69/Kami/pull/15). The native export checkpoint
+is ready for review and unmerged. Its exact head passed Linux 371 Compat +
+223 Core/SQLite, macOS 371 Compat + 226 Core, simulator/device compilation and
+unsigned IPA packaging. Publication evidence is retained under
+`.git/checkpoints/20261004-native-library-backups/`.
+The reader-state continuation replaces separate page/history/read writes with
+one guarded transaction and binds reading targets to a durable data epoch and
+their issuing store. See the
+[reader-state verification](docs/VERIFICATION-2026-10-04-READING-STATE.md) for
+implementation and test status; this prerequisite does not enable restoration.
+The final local reader-state checks pass 371 Compat, 270 Core/SQLite and
+95 portable Core tests. Its 47 new persistence/queue cases cover atomic
+rollback, retained targets, final-save ownership and bounded retry ordering.
+SwiftUI syntax parses locally; exact-head Apple verification belongs to its PR.
+The native backup branch was based on
 `8b7d98046dd04cd1ba99d2e27ee856629876f64e` from
 [PR #14](https://github.com/taizaki69/Kami/pull/14). That Mihon decoder checkpoint
 passed all three workflows on its exact head: Linux 371 Compat + 181 Core/SQLite,
@@ -69,7 +85,7 @@ under `Tests/backups/`; none is a user export from a running Android app.
 See [backup compatibility](docs/BACKUP_COMPATIBILITY.md) for defaults, limits,
 schema coverage and API changes. Logs and publication state are under
 `.git/checkpoints/20261004-backup-decoding/`.
-The current work implements [native library export](docs/NATIVE_BACKUPS.md):
+The native backup checkpoint implements [library export](docs/NATIVE_BACKUPS.md):
 immutable JSON v1 DTOs, lower-only bounds, strict UTF-8/duplicate-key/schema
 validation, canonical Int64 strings and exact byte identities. A single SQLite
 read transaction includes all stored manga, hidden chapters, every history row
@@ -86,10 +102,13 @@ from the system exporter. The screen states that restore is unavailable.
 Logs/reviews/publication state are in
 `.git/checkpoints/20261004-native-library-backups/`.
 
-Immutable preview and atomic restore are the next product work. They must reject
+Reader-state work and verification are checkpointed under
+`.git/checkpoints/20261004-atomic-reader-state/`.
+Immutable preview and atomic restore remain required product work. They must reject
 stale input/store state and use exact source/URL identities. Foo needs durable
-content binding/conflict handling, and existing reader/source work needs a
-restore epoch/barrier. MangaDex mapping evidence now pins the English ID
+content binding/conflict handling. Reader writes now validate a durable epoch;
+source results and other queued producers still need a shared restore barrier
+and scene invalidation. MangaDex mapping evidence now pins the English ID
 2499283573021220255 and strict /manga/UUID and /chapter/UUID forms through the
 actual Gradle/KSP source-ID chain; see the local
 `20261004-backup-decoding/next-mangadex-mapping.md` checkpoint. That research

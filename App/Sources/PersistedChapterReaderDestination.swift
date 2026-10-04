@@ -8,12 +8,15 @@ struct PersistedChapterReaderDestination: View {
     @EnvironmentObject private var model: AppModel
     let manga: Manga
     let chapterID: Int64
+    let chapterURL: String
     var openingPolicy: ReaderOpeningPolicy = .automatic
 
     @State private var chapter: Chapter?
-    @State private var neighbours: [Chapter] = []
+    @State private var readingSnapshot: MangaReadingSnapshot?
+    @State private var retainedTarget: ChapterWriteTarget?
     @State private var loading = true
     @State private var errorText: String?
+    @State private var requiresReopening = false
     @State private var retry = 0
     @State private var loadGeneration: UInt64 = 0
     @State private var resolvedPolicy: ReaderOpeningPolicy = .automatic
@@ -22,16 +25,15 @@ struct PersistedChapterReaderDestination: View {
         ZStack {
             if loading {
                 ProgressView("Opening chapter…")
-            } else if let chapter {
-                ReaderView(mangaTitle: manga.title, chapter: chapter,
-                           chapters: neighbours, sourceID: manga.sourceId, openingPolicy: resolvedPolicy)
+            } else if let chapter, let readingSnapshot {
+                ReaderView(snapshot: readingSnapshot, chapter: chapter, openingPolicy: resolvedPolicy)
             } else {
                 ContentUnavailableView {
                     Label("Chapter unavailable", systemImage: "book.closed")
                 } description: {
                     Text(errorText ?? "This chapter is no longer in the source's current chapter list. Your reading history is still saved.")
                 } actions: {
-                    Button("Retry") { retry &+= 1 }
+                    if !requiresReopening { Button("Retry") { retry &+= 1 } }
                 }
             }
         }
@@ -47,35 +49,44 @@ struct PersistedChapterReaderDestination: View {
         loading = true
         errorText = nil
         chapter = nil
-        neighbours = []
+        readingSnapshot = nil
         defer { if generation == loadGeneration { loading = false } }
         guard let mangaID = manga.id else { return }
         do {
-            let target = try await model.store.downloadTarget(chapterID: chapterID)
-            guard target.manga.id == mangaID, target.manga.sourceId == manga.sourceId,
-                  target.manga.url == manga.url else {
-                errorText = "This chapter no longer matches this manga. Your reading history is still saved."
-                return
+            await model.waitForReadingSaves()
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            let snapshot: MangaReadingSnapshot
+            if let retainedTarget {
+                snapshot = try await model.store.refreshReadingSnapshot(validating: retainedTarget)
+            } else {
+                guard let initial = try await model.store.readingSnapshot(
+                    sourceID: manga.sourceId, mangaURL: manga.url, requestedChapterID: chapterID
+                ) else { throw ReadingStateError.mangaNotFound }
+                snapshot = initial
             }
-            let current = try await model.store.chapters(mangaId: mangaID)
-            let downloaded = try await model.store.downloadedChapters(mangaID: mangaID)
+            guard snapshot.manga.id == mangaID,
+                  let target = snapshot.target(for: chapterID),
+                  Data(target.chapterURL.utf8) == Data(chapterURL.utf8),
+                  Data(target.mangaURL.utf8) == Data(manga.url.utf8) else {
+                throw ReadingStateError.identityChanged
+            }
+            guard !Task.isCancelled, generation == loadGeneration else { return }
+            // A retry retains this target even when later download/provider work fails.
+            retainedTarget = target
             let states = try await model.store.downloadChapterStates(chapterIDs: [chapterID])
             await model.refreshDownloadAvailability(chapterIDs: [chapterID])
+            let current = try await model.store.validateReadingTarget(target)
             guard !Task.isCancelled, generation == loadGeneration else { return }
-            var seen = Set(current.compactMap(\.id))
-            neighbours = (current + downloaded.filter { item in
-                guard let id = item.id else { return false }
-                return seen.insert(id).inserted
-            }).sorted {
-                $0.sourceOrder == $1.sourceOrder ? ($0.id ?? 0) < ($1.id ?? 0) : $0.sourceOrder < $1.sourceOrder
-            }
-            chapter = target.chapter
+            readingSnapshot = snapshot
+            chapter = current
             resolvedPolicy = openingPolicy == .automatic
                 ? (states[chapterID]?.state == .finished ? .offlineOnly : .onlineOnly)
                 : openingPolicy
         } catch {
             guard !Task.isCancelled, generation == loadGeneration else { return }
-            errorText = "This chapter could not be opened. Please try again."
+            requiresReopening = ReadingPresentation.requiresReopening(error)
+            errorText = error is ReadingStateError ? ReadingPresentation.message(error)
+                : "This chapter could not be opened. Please try again."
         }
     }
 }

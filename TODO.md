@@ -6,11 +6,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-04
 
 The full native-reader and compatibility objective remains active. The current
-implementation adds bounded native library export to Files after Mihon gzip/raw
-backup decoding, on top of
+continuation adds atomic reader state and database-issued reading targets after
+bounded native library export to Files and Mihon gzip/raw backup decoding, on top of
 verified downloads/offline reading, updates, History resume, persistent FoolSlide
 settings and revocable source registrations. Restoration remains pending.
 See [native backup verification](docs/VERIFICATION-2026-10-04-NATIVE-BACKUPS.md),
+[reading-state design](docs/READING_STATE.md),
 [Mihon decoder verification](docs/VERIFICATION-2026-10-04.md) and
 [earlier verification](docs/VERIFICATION-2026-10-03.md) for actual evidence.
 Completed items below retain some historical checkpoint counts; those counts
@@ -47,6 +48,11 @@ must not be used as evidence for the current commit.
 - [x] Add versioned native library export: strict bounded JSON, a complete
       transactional snapshot and cancellable Files export with scope/counts.
       Includes hidden chapters, full history/duration and discovery state.
+- [~] Commit reader progress/history/read state atomically, reject stale or
+      rebound reading targets and show persistence errors; integrate offline
+      leases and manual read actions with captured targets and verify them.
+- [ ] Add durable Foo content binding and the shared operation/scene barriers
+      required before enabling restoration.
 - [ ] Add immutable restore preview and atomic
       merge with stale-plan rejection, exact identities and source conflict reports.
 

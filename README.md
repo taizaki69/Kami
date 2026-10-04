@@ -13,6 +13,11 @@ can be created, renamed, reordered and deleted, assigned individually or in
 bulk, and combined with library search. Deleting a category preserves manga,
 chapter progress and history; bulk changes preserve untouched memberships.
 
+The [reading-state store](docs/READING_STATE.md) commits page position, history
+and end-of-chapter read status together. Reader and manual read actions use
+database-issued targets tied to the exact manga/chapter identities, data epoch
+and issuing store. Failed saves are visible and do not set a false read flag.
+
 Updates can check the saved library on demand, report progress and per-manga
 failures or skipped sources, and cancel while keeping completed results.
 The first successful chapter list establishes a baseline; later discoveries

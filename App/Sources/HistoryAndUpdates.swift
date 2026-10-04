@@ -35,6 +35,7 @@ struct LibraryUpdateChapterGroup: Identifiable {
 private struct ChapterReadingRoute: Hashable {
     let manga: Manga
     let chapterID: Int64
+    let chapterURL: String
 }
 
 @MainActor
@@ -97,7 +98,8 @@ struct UpdatesView: View {
             .navigationTitle("Updates")
             .refreshable { await model.checkLibraryForUpdates() }
             .navigationDestination(for: ChapterReadingRoute.self) { route in
-                PersistedChapterReaderDestination(manga: route.manga, chapterID: route.chapterID)
+                PersistedChapterReaderDestination(manga: route.manga, chapterID: route.chapterID,
+                                                 chapterURL: route.chapterURL)
             }
             .onAppear {
                 refreshTask?.cancel()
@@ -329,7 +331,8 @@ struct HistoryView: View {
             .navigationTitle("History")
             .refreshable { await reload() }
             .navigationDestination(for: ChapterReadingRoute.self) { route in
-                PersistedChapterReaderDestination(manga: route.manga, chapterID: route.chapterID)
+                PersistedChapterReaderDestination(manga: route.manga, chapterID: route.chapterID,
+                                                 chapterURL: route.chapterURL)
             }
             .onAppear {
                 refreshTask?.cancel()
@@ -374,7 +377,8 @@ private struct ChapterReadingLink: View {
 
     var body: some View {
         if let chapterID = chapter.id {
-            NavigationLink(value: ChapterReadingRoute(manga: manga, chapterID: chapterID)) {
+            NavigationLink(value: ChapterReadingRoute(manga: manga, chapterID: chapterID,
+                                                     chapterURL: chapter.url)) {
                 HStack(spacing: 12) {
                     if showManga {
                         CoverImage(url: manga.thumbnailURL, cornerRadius: 4).frame(width: 36, height: 52)
