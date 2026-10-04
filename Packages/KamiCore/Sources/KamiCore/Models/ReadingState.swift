@@ -40,6 +40,7 @@ public struct ChapterWriteTarget: Equatable, Sendable {
 public struct MangaReadingSnapshot: Equatable, Sendable {
     public let manga: Manga
     public let epoch: LibraryDataEpoch
+    public let mutationContext: LibraryMutationContext
     public let currentChapters: [Chapter]
     public let downloadedChapters: [Chapter]
     public let requestedChapter: Chapter?
@@ -49,7 +50,8 @@ public struct MangaReadingSnapshot: Equatable, Sendable {
 
     public static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.manga == rhs.manga && Data(lhs.manga.url.utf8) == Data(rhs.manga.url.utf8)
-            && lhs.epoch == rhs.epoch && lhs.currentChapters == rhs.currentChapters
+            && lhs.epoch == rhs.epoch && lhs.mutationContext == rhs.mutationContext
+            && lhs.currentChapters == rhs.currentChapters
             && lhs.downloadedChapters == rhs.downloadedChapters
             && lhs.requestedChapter == rhs.requestedChapter && lhs.targets == rhs.targets
     }

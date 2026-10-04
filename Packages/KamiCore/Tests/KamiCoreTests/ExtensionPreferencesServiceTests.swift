@@ -561,7 +561,9 @@ final class ExtensionPreferencesServiceTests: XCTestCase {
                 chapters: [.init(url: "/chapter", name: "Chapter")], expectedConfiguration: configuration
             )
             XCTFail("fixture chapter write must fail")
-        } catch is SQLiteDatabase.SQLiteError {}
+        } catch let error as LibraryMutationError {
+            XCTAssertEqual(error, .storageUnavailable)
+        }
         let absent = try await f.store.manga(sourceId: Self.sourceID, url: "/atomic")
         XCTAssertNil(absent)
         XCTAssertTrue(try db.query("SELECT * FROM chapter").isEmpty)

@@ -4,14 +4,35 @@ Last updated: 2026-10-04 (America/Lima)
 
 ## Canonical continuation — 2026-10-04
 
-The active continuation is `assistant/exact-chapter-url-identity-20261004`,
+The active continuation is `assistant/library-mutation-contexts-20261004`,
+based on `1c6b43e2a199171766358e51ab9d8e2c5c93a22f` from
+[PR #18](https://github.com/taizaki69/Kami/pull/18). That checkpoint is ready
+and unmerged: Linux 371 Compat + 296 Core/SQLite, macOS 371 Compat + 299 Core,
+simulator/device and unsigned IPA all passed. Its CI merge tree matches the
+published head. Evidence is in
+`.git/checkpoints/20261004-exact-chapter-url-identity/published-ci-evidence.json`.
+The current increment pairs opaque store/epoch contexts with stored snapshots
+and requires them for category, membership and source-result writes. UI actions
+capture the displayed context before scheduling; source callbacks retain it
+through suspension. Bare upsert/replace helpers are no longer public.
+Local checks pass 310 Core/SQLite, 97 portable Core and 371 Compat tests,
+including 14 new context/rollback/cancellation cases. See
+[library mutations](docs/LIBRARY_MUTATIONS.md) and the
+[verification record](docs/VERIFICATION-2026-10-04-LIBRARY-MUTATIONS.md).
+Shared exclusive intent/scene barriers, immutable preview and atomic merge
+remain pending. Restore is still disabled. Publication/checks are automatic;
+the implementation PR records exact-head Apple verification when completed.
+Evidence and the next boundary are checkpointed under
+`.git/checkpoints/20261004-library-mutation-contexts/`.
+
+The chapter identity continuation was `assistant/exact-chapter-url-identity-20261004`,
 based on `b15344da383a33b6a2d56d83fe2ed0f46d4a0877` from
 [PR #17](https://github.com/taizaki69/Kami/pull/17). That checkpoint is ready
 and unmerged: Linux 371 Compat + 291 Core/SQLite, macOS 371 Compat + 294 Core,
 simulator/device and unsigned IPA all passed. Its CI merge tree matches the
 published head. Evidence is in
 `.git/checkpoints/20261004-foolslide-content-binding/published-ci-evidence.json`.
-The current fix preserves exact chapter URL bytes during replacement and
+That fix preserves exact chapter URL bytes during replacement and
 discovery reconciliation, including Updates IDs/cursors. Five regressions
 reproduce the previous failures and now pass; full local Core/SQLite passes
 296 tests and portable Core passes 96. See the
@@ -138,8 +159,9 @@ Immutable preview and atomic restore remain required product work. They must rej
 stale input/store state and use exact source/URL identities. Foo's durable
 content binding supplies identity prerequisites; restore conflict handling
 remains outstanding. Reader writes now validate a durable epoch;
-source results and other queued producers still need a shared restore barrier
-and scene invalidation. MangaDex mapping evidence now pins the English ID
+category, membership and source-result writes now carry the same generation
+context. A shared restore barrier and scene invalidation are still required
+for all queued producers. MangaDex mapping evidence now pins the English ID
 2499283573021220255 and strict /manga/UUID and /chapter/UUID forms through the
 actual Gradle/KSP source-ID chain; see the local
 `20261004-backup-decoding/next-mangadex-mapping.md` checkpoint. That research

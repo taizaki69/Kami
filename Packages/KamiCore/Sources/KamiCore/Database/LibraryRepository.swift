@@ -80,7 +80,7 @@ public actor LibraryStore {
     /// Metadata refresh preserves membership changed during a source request.
     /// Pass inLibrary explicitly or use setLibrary for a membership mutation.
     @discardableResult
-    public func upsert(_ manga: Manga, inLibrary: Bool? = nil) throws -> Int64 {
+    func upsert(_ manga: Manga, inLibrary: Bool? = nil) throws -> Int64 {
         let alt = (try? String(data: JSONEncoder().encode(manga.altTitles), encoding: .utf8)) ?? "[]"
         let genres = (try? String(data: JSONEncoder().encode(manga.genres), encoding: .utf8)) ?? "[]"
         if let id = manga.id {
@@ -116,8 +116,8 @@ public actor LibraryStore {
                   .int(Int64(Date().timeIntervalSince1970)), .text(manga.updateStrategy.rawValue)])
     }
 
-    public func setLibrary(_ inLibrary: Bool, mangaId: Int64) throws {
-        try withLibraryTransaction {
+    public func setLibrary(_ inLibrary: Bool, mangaId: Int64, context: LibraryMutationContext) throws {
+        try withLibraryMutation(context) {
             try db.run("UPDATE manga SET in_library=? WHERE id=?", [.bool(inLibrary), .int(mangaId)])
             if !inLibrary {
                 _ = try invalidateDownloadsInTransaction(where: "manga_id=?", values: [.int(mangaId)],
@@ -152,14 +152,14 @@ public actor LibraryStore {
                 membership[mangaID, default: []].insert(categoryID)
             }
             return LibrarySnapshot(manga: manga, categories: categories,
-                                   categoryIDsByManga: membership)
+                                   categoryIDsByManga: membership, mutationContext: try currentMutationContext())
         }
     }
 
     @discardableResult
-    public func createCategory(name: String) throws -> Category {
+    public func createCategory(name: String, context: LibraryMutationContext) throws -> Category {
         let name = try Category.validatedName(name)
-        return try withLibraryTransaction {
+        return try withLibraryMutation(context) {
             let existing = try categories()
             guard !existing.contains(where: { Category.namesMatch($0.name, name) }) else {
                 throw LibraryCategoryError.duplicateName
@@ -173,9 +173,9 @@ public actor LibraryStore {
         }
     }
 
-    public func renameCategory(id: Int64, name: String) throws {
+    public func renameCategory(id: Int64, name: String, context: LibraryMutationContext) throws {
         let name = try Category.validatedName(name)
-        try withLibraryTransaction {
+        try withLibraryMutation(context) {
             let existing = try categories()
             guard existing.contains(where: { $0.id == id }) else {
                 throw LibraryCategoryError.categoryNotFound(id)
@@ -187,8 +187,8 @@ public actor LibraryStore {
         }
     }
 
-    public func reorderCategories(ids: [Int64]) throws {
-        try withLibraryTransaction {
+    public func reorderCategories(ids: [Int64], context: LibraryMutationContext) throws {
+        try withLibraryMutation(context) {
             try Category.validateOrder(ids, existingIDs: Set(try categories().compactMap(\.id)))
             try persistCategoryOrder(ids)
         }
@@ -196,9 +196,9 @@ public actor LibraryStore {
 
     /// Foreign-key cascading removes only the category's associations.
     /// Manga rows, chapter state, and history are never deleted here.
-    public func deleteCategories(ids: Set<Int64>) throws {
-        guard !ids.isEmpty else { return }
-        try withLibraryTransaction {
+    public func deleteCategories(ids: Set<Int64>, context: LibraryMutationContext) throws {
+        try withLibraryMutation(context) {
+            guard !ids.isEmpty else { return }
             let existing = try categories()
             try validateCategoryIDs(ids, categories: existing)
             for id in ids.sorted() {
@@ -208,14 +208,14 @@ public actor LibraryStore {
         }
     }
 
-    public func setCategories(_ categoryIDs: Set<Int64>, mangaId: Int64) throws {
-        try setCategories(categoryIDs, mangaIDs: [mangaId])
+    public func setCategories(_ categoryIDs: Set<Int64>, mangaId: Int64, context: LibraryMutationContext) throws {
+        try setCategories(categoryIDs, mangaIDs: [mangaId], context: context)
     }
 
     /// Replaces membership atomically after validating every manga and category.
-    public func setCategories(_ categoryIDs: Set<Int64>, mangaIDs: Set<Int64>) throws {
-        guard !mangaIDs.isEmpty else { return }
-        try withLibraryTransaction {
+    public func setCategories(_ categoryIDs: Set<Int64>, mangaIDs: Set<Int64>, context: LibraryMutationContext) throws {
+        try withLibraryMutation(context) {
+            guard !mangaIDs.isEmpty else { return }
             try validateCategoryIDs(categoryIDs, categories: categories())
             try validateLibraryMangaIDs(mangaIDs)
             for mangaID in mangaIDs.sorted() {
@@ -232,13 +232,14 @@ public actor LibraryStore {
     public func updateCategories(
         adding: Set<Int64>,
         removing: Set<Int64>,
-        mangaIDs: Set<Int64>
+        mangaIDs: Set<Int64>,
+        context: LibraryMutationContext
     ) throws {
         guard adding.isDisjoint(with: removing) else {
             throw LibraryCategoryError.conflictingCategoryChanges
         }
-        guard !mangaIDs.isEmpty else { return }
-        try withLibraryTransaction {
+        try withLibraryMutation(context) {
+            guard !mangaIDs.isEmpty else { return }
             try validateCategoryIDs(adding.union(removing), categories: categories())
             try validateLibraryMangaIDs(mangaIDs)
             for mangaID in mangaIDs.sorted() {
@@ -290,6 +291,68 @@ public actor LibraryStore {
         }
     }
 
+    private func currentMutationContext() throws -> LibraryMutationContext {
+        do {
+            return .init(ownerID: readingOwnerID, epoch: try ReadingStateReader.epoch(db))
+        } catch is CancellationError { throw CancellationError() }
+        catch is SQLiteDatabase.SQLiteError { throw LibraryMutationError.storageUnavailable }
+        catch { throw LibraryMutationError.invalidStoredState }
+    }
+
+    private func validateMutationContext(_ context: LibraryMutationContext) throws {
+        try Task.checkCancellation()
+        guard context.ownerID == readingOwnerID else { throw LibraryMutationError.foreignContext }
+        guard try currentMutationContext().epoch == context.epoch else { throw LibraryMutationError.staleEpoch }
+    }
+
+    private func withLibraryMutation<T>(
+        _ context: LibraryMutationContext, _ operation: () throws -> T
+    ) throws -> T {
+        try Task.checkCancellation()
+        do {
+            return try withLibraryTransaction {
+                try validateMutationContext(context)
+                let result = try operation()
+                try Task.checkCancellation()
+                return result
+            }
+        } catch is SQLiteDatabase.SQLiteError { throw LibraryMutationError.storageUnavailable }
+    }
+
+    /// Initial source opening captures stored values and the data generation
+    /// together. After suspension, pass the original context to reject rebasing.
+    public func sourceMangaSnapshot(
+        sourceID: Int64, mangaURL: String, validating context: LibraryMutationContext? = nil
+    ) throws -> SourceMangaSnapshot {
+        try Task.checkCancellation()
+        return try withLibraryTransaction(readOnly: true) {
+            if let context { try validateMutationContext(context) }
+            try ReadingStateReader.validateInputURL(mangaURL)
+            let captured = try currentMutationContext()
+            let id = try ReadingStateReader.mangaID(db, sourceID: sourceID, url: mangaURL)
+            let reading = try id.map {
+                try ReadingStateReader.snapshot(db, ownerID: readingOwnerID, epoch: captured.epoch,
+                                                mangaID: $0, requestedChapterID: nil)
+            }
+            try Task.checkCancellation()
+            return SourceMangaSnapshot(reading: reading, mutationContext: captured)
+        }
+    }
+
+    public func sourceMangaSnapshot(
+        mangaID: Int64, validating context: LibraryMutationContext
+    ) throws -> SourceMangaSnapshot {
+        try Task.checkCancellation()
+        return try withLibraryTransaction(readOnly: true) {
+            try validateMutationContext(context)
+            let exists = try !db.query("SELECT 1 FROM manga WHERE id=? LIMIT 1", [.int(mangaID)]).isEmpty
+            let reading = exists ? try ReadingStateReader.snapshot(
+                db, ownerID: readingOwnerID, epoch: context.epoch, mangaID: mangaID, requestedChapterID: nil) : nil
+            try Task.checkCancellation()
+            return SourceMangaSnapshot(reading: reading, mutationContext: context)
+        }
+    }
+
     // MARK: - Chapters
 
     public func chapters(mangaId: Int64) throws -> [Chapter] {
@@ -297,7 +360,7 @@ public actor LibraryStore {
             .compactMap(Self.chapter(from:))
     }
 
-    public func replaceChapters(mangaId: Int64, with chapters: [Chapter]) throws {
+    func replaceChapters(mangaId: Int64, with chapters: [Chapter]) throws {
         try withLibraryTransaction {
             try replaceChaptersInTransaction(mangaId: mangaId, with: chapters)
             try establishInitialChapterBaseline(mangaId: mangaId)
@@ -359,10 +422,11 @@ public actor LibraryStore {
     public func persistSourceUpdate(
         manga: Manga,
         chapters: [SChapterCompat],
-        expectedConfiguration: ExtensionExecutionConfiguration?
+        expectedConfiguration: ExtensionExecutionConfiguration?,
+        context: LibraryMutationContext
     ) throws -> SourceMangaUpdate {
         try Task.checkCancellation()
-        return try withLibraryTransaction {
+        return try withLibraryMutation(context) {
             try verifySourceUpdateConfiguration(sourceID: manga.sourceId, expectedConfiguration: expectedConfiguration)
             if let id = manga.id {
                 guard let stored = try self.manga(id: id),
@@ -384,10 +448,12 @@ public actor LibraryStore {
     /// Check captured configuration before requesting source content. The
     /// transactional result check remains necessary after asynchronous work.
     public func validateSourceExecution(
-        sourceID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?
+        sourceID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?,
+        context: LibraryMutationContext
     ) throws {
         try Task.checkCancellation()
         try withLibraryTransaction(readOnly: true) {
+            try validateMutationContext(context)
             try verifySourceUpdateConfiguration(sourceID: sourceID, expectedConfiguration: expectedConfiguration)
             try Task.checkCancellation()
         }
@@ -494,7 +560,8 @@ public actor LibraryStore {
                 items.append(LibraryUpdateItem(manga: manga, hasSuccessfulBaseline: try hasChapterBaseline(mangaId: id)))
             }
             try Task.checkCancellation()
-            return LibraryUpdateScanSnapshot(record: try readLibraryUpdateSummary(scanID), items: items)
+            return LibraryUpdateScanSnapshot(record: try readLibraryUpdateSummary(scanID), items: items,
+                                             mutationContext: try currentMutationContext())
         }
     }
 
@@ -502,10 +569,11 @@ public actor LibraryStore {
         scanID: UUID,
         manga: Manga,
         chapters: [SChapterCompat],
-        expectedConfiguration: ExtensionExecutionConfiguration?
+        expectedConfiguration: ExtensionExecutionConfiguration?,
+        context: LibraryMutationContext
     ) throws -> LibraryUpdateCommitResult {
         try Task.checkCancellation()
-        return try withLibraryTransaction {
+        return try withLibraryMutation(context) {
             let target = try activeLibraryUpdateTarget(scanID: scanID, mangaID: manga.id)
             guard let mangaID = target.int64("manga_id") else {
                 throw LibraryUpdatePersistenceError.invalidStoredScan

@@ -335,7 +335,9 @@ final class LibraryUpdatePersistenceTests: XCTestCase {
                 scanID: start.record.scanID, manga: updated, chapters: chapters("/new"), expectedConfiguration: nil
             )
             XCTFail("Expected injected SQLite failure")
-        } catch is SQLiteDatabase.SQLiteError {}
+        } catch let error as LibraryMutationError {
+            XCTAssertEqual(error, .storageUnavailable)
+        }
         let after = try await store.libraryUpdatesSnapshot()
         XCTAssertEqual(after.latestScan?.checked, 0)
         XCTAssertEqual(after.latestScan?.newChapters, 0)
@@ -427,7 +429,8 @@ final class LibraryUpdatePersistenceTests: XCTestCase {
             await gate.wait()
             return try await store.recordLibraryUpdateSuccess(
                 scanID: start.record.scanID, manga: manga,
-                chapters: [SChapterCompat(url: "/cancelled", name: "Cancelled")], expectedConfiguration: nil
+                chapters: [SChapterCompat(url: "/cancelled", name: "Cancelled")], expectedConfiguration: nil,
+                context: start.mutationContext
             )
         }
         task.cancel()

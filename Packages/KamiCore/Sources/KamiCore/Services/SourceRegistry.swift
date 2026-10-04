@@ -207,13 +207,16 @@ public struct LibraryService {
     public func refresh(
         mangaId: Int64,
         source: any KamiSource,
+        context: LibraryMutationContext,
         expectedConfiguration: ExtensionExecutionConfiguration? = nil
     ) async throws -> Manga? {
-        guard var stored = try await store.manga(id: mangaId) else { return nil }
+        let snapshot = try await store.sourceMangaSnapshot(mangaID: mangaId, validating: context)
+        guard var stored = snapshot.reading?.manga else { return nil }
         guard stored.sourceId == source.id else {
             throw SourceUpdatePersistenceError.sourceIdentityMismatch
         }
-        try await store.validateSourceExecution(sourceID: stored.sourceId, expectedConfiguration: expectedConfiguration)
+        try await store.validateSourceExecution(sourceID: stored.sourceId, expectedConfiguration: expectedConfiguration,
+                                                context: snapshot.mutationContext)
         try Task.checkCancellation()
         var compat = SMangaCompat(
             url: stored.url,
@@ -244,7 +247,7 @@ public struct LibraryService {
         stored.dateUpdated = Int64(Date().timeIntervalSince1970)
         try Task.checkCancellation()
         return try await store.persistSourceUpdate(manga: stored, chapters: chapters,
-            expectedConfiguration: expectedConfiguration).manga
+            expectedConfiguration: expectedConfiguration, context: snapshot.mutationContext).manga
     }
 }
 #endif

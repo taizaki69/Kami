@@ -30,6 +30,7 @@ public struct LibraryUpdateItem: Equatable, Sendable {
 public struct LibraryUpdateScanSnapshot: Equatable, Sendable {
     public let record: LibraryUpdateSummary
     public let items: [LibraryUpdateItem]
+    public let mutationContext: LibraryMutationContext
 }
 
 public enum LibraryUpdateCommitOutcome: Equatable, Sendable {

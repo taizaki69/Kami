@@ -5,11 +5,13 @@ struct CategoryAssignmentRequest: Identifiable {
     let id = UUID()
     let mangaIDs: Set<Int64>
     let title: String
+    let context: LibraryMutationContext?
 }
 
 private struct CategoryNameRequest: Identifiable {
     let id = UUID()
     var category: KamiCore.Category?
+    let context: LibraryMutationContext?
 }
 
 @MainActor
@@ -18,11 +20,13 @@ struct CategoriesView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var nameRequest: CategoryNameRequest?
     @State private var deletionIDs = Set<Int64>()
+    @State private var deletionContext: LibraryMutationContext?
     @State private var confirmDeletion = false
     @State private var busy = false
     @State private var errorText: String?
 
     var body: some View {
+        let snapshot = model.librarySnapshot
         NavigationStack {
             List {
                 if let message = model.libraryError {
@@ -40,9 +44,9 @@ struct CategoriesView: View {
                     .listRowBackground(Color.clear)
                 } else {
                     Section {
-                        ForEach(model.categories) { category in
+                        ForEach(snapshot.categories) { category in
                             Button {
-                                nameRequest = CategoryNameRequest(category: category)
+                                nameRequest = CategoryNameRequest(category: category, context: snapshot.mutationContext)
                             } label: {
                                 HStack {
                                     Text(category.name).foregroundStyle(.primary)
@@ -55,12 +59,15 @@ struct CategoriesView: View {
                             }
                             .accessibilityHint("Rename category")
                         }
-                        .onMove(perform: move)
+                        .onMove { offsets, destination in
+                            move(from: offsets, to: destination, snapshot: snapshot)
+                        }
                         .onDelete { offsets in
                             deletionIDs = Set(offsets.compactMap { index in
-                                guard model.categories.indices.contains(index) else { return nil }
-                                return model.categories[index].id
+                                guard snapshot.categories.indices.contains(index) else { return nil }
+                                return snapshot.categories[index].id
                             })
+                            deletionContext = snapshot.mutationContext
                             confirmDeletion = !deletionIDs.isEmpty
                         }
                     } footer: {
@@ -78,7 +85,7 @@ struct CategoriesView: View {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     EditButton().disabled(busy || model.categories.isEmpty)
                     Button {
-                        nameRequest = CategoryNameRequest()
+                        nameRequest = CategoryNameRequest(context: snapshot.mutationContext)
                     } label: {
                         Label("New category", systemImage: "plus")
                     }
@@ -89,10 +96,11 @@ struct CategoriesView: View {
             .task { await model.refreshLibrary() }
             .sheet(item: $nameRequest) { request in
                 CategoryNameSheet(category: request.category) { name in
+                    guard let context = request.context else { throw LibraryMutationError.snapshotUnavailable }
                     if let id = request.category?.id {
-                        try await model.renameCategory(id: id, name: name)
+                        try await model.renameCategory(id: id, name: name, context: context)
                     } else {
-                        try await model.createCategory(name: name)
+                        try await model.createCategory(name: name, context: context)
                     }
                 }
             }
@@ -103,7 +111,11 @@ struct CategoriesView: View {
             ) {
                 Button("Delete", role: .destructive) {
                     let ids = deletionIDs
-                    perform { try await model.deleteCategories(ids: ids) }
+                    let context = deletionContext
+                    perform {
+                        guard let context else { throw LibraryMutationError.snapshotUnavailable }
+                        try await model.deleteCategories(ids: ids, context: context)
+                    }
                 }
             } message: {
                 Text("The manga stay in your library. Their reading progress and history are kept.")
@@ -121,10 +133,13 @@ struct CategoriesView: View {
         Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })
     }
 
-    private func move(from offsets: IndexSet, to destination: Int) {
-        var ids = model.categories.compactMap(\.id)
+    private func move(from offsets: IndexSet, to destination: Int, snapshot: LibrarySnapshot) {
+        var ids = snapshot.categories.compactMap(\.id)
         ids.move(fromOffsets: offsets, toOffset: destination)
-        perform { try await model.reorderCategories(ids: ids) }
+        perform {
+            guard let context = snapshot.mutationContext else { throw LibraryMutationError.snapshotUnavailable }
+            try await model.reorderCategories(ids: ids, context: context)
+        }
     }
 
     private func perform(_ operation: @escaping @MainActor () async throws -> Void) {
@@ -191,12 +206,13 @@ private struct CategoryNameSheet: View {
 
     private func save() {
         guard !saving else { return }
+        let savedName = name
         saving = true
         errorText = nil
         Task {
             defer { saving = false }
             do {
-                try await onSave(name)
+                try await onSave(savedName)
                 dismiss()
             } catch {
                 errorText = model.libraryErrorMessage(for: error)
@@ -209,6 +225,7 @@ private struct CategoryNameSheet: View {
 struct CategoryAssignmentSheet: View {
     let mangaIDs: Set<Int64>
     let title: String
+    let context: LibraryMutationContext?
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var draft = CategoryAssignmentDraft(mangaIDs: [], categoryIDsByManga: [:])
@@ -218,7 +235,8 @@ struct CategoryAssignmentSheet: View {
     @State private var errorText: String?
 
     private var selectionAvailable: Bool {
-        !mangaIDs.isEmpty && mangaIDs.isSubset(of: Set(model.library.compactMap(\.id)))
+        context != nil && context == model.librarySnapshot.mutationContext
+            && !mangaIDs.isEmpty && mangaIDs.isSubset(of: Set(model.library.compactMap(\.id)))
     }
 
     var body: some View {
@@ -227,6 +245,9 @@ struct CategoryAssignmentSheet: View {
                 Section {
                     if !ready {
                         ProgressView()
+                    } else if context == nil || context != model.librarySnapshot.mutationContext {
+                        Label("The library changed. Reopen this screen to edit categories.",
+                              systemImage: "exclamationmark.triangle")
                     } else if !selectionAvailable {
                         Label("One of these manga is no longer in your library.",
                               systemImage: "exclamationmark.triangle")
@@ -316,17 +337,22 @@ struct CategoryAssignmentSheet: View {
     }
 
     private func resetDraft() {
+        guard context != nil, context == model.librarySnapshot.mutationContext else {
+            errorText = LibraryMutationError.staleEpoch.errorDescription
+            return
+        }
         draft = CategoryAssignmentDraft(mangaIDs: mangaIDs,
                                         categoryIDsByManga: model.librarySnapshot.categoryIDsByManga)
     }
 
     private func save() {
-        guard ready, selectionAvailable, draft.hasChanges, !saving else { return }
+        guard ready, selectionAvailable, draft.hasChanges, let context, !saving else { return }
+        let savedDraft = draft
         saving = true
         Task {
             defer { saving = false }
             do {
-                try await model.updateCategories(draft)
+                try await model.updateCategories(savedDraft, context: context)
                 dismiss()
             } catch {
                 errorText = model.libraryErrorMessage(for: error)

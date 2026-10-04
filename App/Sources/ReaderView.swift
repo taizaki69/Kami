@@ -704,7 +704,8 @@ private struct ReaderSessionView: View {
                 return
             }
             let execution = try model.sourceExecutionConfiguration(id: sourceID, revision: sourceRevision)
-            try await model.store.validateSourceExecution(sourceID: sourceID, expectedConfiguration: execution)
+            try await model.store.validateSourceExecution(sourceID: sourceID, expectedConfiguration: execution,
+                                                           context: readingSnapshot.mutationContext)
             guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent,
                   readingSnapshot.target(for: chapter) == target else { return }
             let compat = SChapterCompat(
@@ -716,7 +717,8 @@ private struct ReaderSessionView: View {
             )
             let loadedPages = try await source.getPageList(chapter: compat)
             guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else { return }
-            try await model.store.validateSourceExecution(sourceID: sourceID, expectedConfiguration: execution)
+            try await model.store.validateSourceExecution(sourceID: sourceID, expectedConfiguration: execution,
+                                                           context: readingSnapshot.mutationContext)
             guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else { return }
             var loadedImageRequests: [ImageRequest?] = []
             loadedImageRequests.reserveCapacity(loadedPages.count)
