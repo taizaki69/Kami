@@ -27,6 +27,8 @@ The filesystem and SQLite use an explicit publication sequence:
 
 1. Reserve capacity, obtain the exact source image request, validate its bytes
    with ImageIO, write and flush a generated page file, then commit its receipt.
+   PNGs additionally require complete ordered chunks, their CRCs and a terminal
+   IEND: ImageIO alone can salvage truncated PNGs and report them as complete.
 2. Verify all ordered pages and write a canonical manifest. Prepare the exact
    manifest digest and receipts in SQLite while the attempt is still current.
 3. Rename the staged directory and flush the parent directories. Mark the job

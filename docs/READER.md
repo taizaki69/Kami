@@ -55,6 +55,9 @@
   Compressed bytes use a 64 MiB LRU cache, and prefetch is capped at eight
   requests. Reset/cancellation cannot let an old request clear or populate a
   newer load generation.
+- PNG chunk bounds, ordering, CRCs and the terminal IEND are checked before
+  ImageIO, which may otherwise salvage a truncated PNG. Other image formats
+  continue through ImageIO's format and decoding checks.
 - Image metadata is checked before decode. Inputs with dimensions above 100,000
   pixels on either axis or 250 million source pixels are rejected. ImageIO
   downsamples off the main actor to at most 6,144 pixels in paged mode and

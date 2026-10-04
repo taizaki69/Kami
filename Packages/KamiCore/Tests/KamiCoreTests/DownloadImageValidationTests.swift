@@ -34,10 +34,15 @@ final class DownloadImageValidationTests: XCTestCase, @unchecked Sendable {
 
     func testHTMLAndTruncatedPayloadCannotBecomeDownloadedImages() async throws {
         let complete = try png()
-        for invalid in [Data(), Data("<html>challenge</html>".utf8), Data(complete.prefix(32)), Data(complete.prefix(complete.count / 2))] {
+        var corruptCRC = complete
+        corruptCRC[corruptCRC.count - 1] ^= 1
+        let invalidPayloads = [Data(), Data("<html>challenge</html>".utf8),
+                               Data(complete.prefix(32)), Data(complete.prefix(complete.count / 2)),
+                               Data(complete.dropLast(12)), corruptCRC]
+        for (index, invalid) in invalidPayloads.enumerated() {
             do {
                 try await PlatformDownloadImageValidator().validate(invalid)
-                XCTFail("An incomplete or non-image payload was accepted")
+                XCTFail("Incomplete or non-image payload \(index) was accepted (\(invalid.count) bytes)")
             } catch let error as DownloadImageValidationError {
                 XCTAssertEqual(error, .invalidImage)
             }

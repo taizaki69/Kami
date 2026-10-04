@@ -418,3 +418,24 @@ Logs y checkpoints: `.git/checkpoints/20261003-offline-downloads/`. El PR de
 implementación registra el commit y sus resultados Apple exactos. Compilación
 de simulador/dispositivo e IPA no prueban interacción, rendimiento físico,
 transferencias de fondo ni disponibilidad de sitios reales.
+
+### Corrección detectada en Apple — 4 de octubre
+
+El primer commit de descargas, `b0fc130`, compiló para simulador y dispositivo
+y generó su IPA sin firma. Linux pasó 333 pruebas de compatibilidad y 175 Core.
+En macOS, las 333 de compatibilidad pasaron, pero una de las 178 Core falló:
+ImageIO aceptaba un PNG truncado de la regresión y lo declaraba completo.
+Ese resultado no se considera una verificación satisfactoria del PR.
+
+La corrección comprueba primero la estructura PNG: límites y orden de chunks,
+CRCs, cabecera única y bloque IEND vacío al final. El decoder de ImageIO sigue
+siendo necesario para interpretar píxeles; otros formatos conservan sus
+comprobaciones ImageIO. Seis regresiones portables prueban truncamiento en
+cada posición después de la firma, CRCs y longitudes corruptos, orden, chunks
+desconocidos y cancelación. La prueba Apple original se conserva y añade PNG
+sin IEND y CRC corrupto.
+
+Tras la corrección, Linux pasa 181/181 Core con SQLite y 66/66 Core portable.
+Los logs `core-sqlite-png-final.log`, `core-portable-png-final.log` y la evidencia
+del fallo inicial quedan en el mismo checkpoint. El PR registra los workflows
+del commit corregido; los builds anteriores no se atribuyen a ese nuevo hash.

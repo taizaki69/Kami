@@ -50,6 +50,7 @@ public enum NativeImageValidation {
         try Task.checkCancellation()
         let decoding = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
+            try PNGImageIntegrity.validateIfPNG(data)
             let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
             guard !data.isEmpty,
                   let source = CGImageSourceCreateWithData(data as CFData, sourceOptions),
