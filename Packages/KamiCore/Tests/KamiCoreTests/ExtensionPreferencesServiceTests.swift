@@ -297,7 +297,8 @@ final class ExtensionPreferencesServiceTests: XCTestCase {
         try await f.store.replaceChapters(mangaId: id, with: [.init(mangaId: id, url: "/chapter", name: "Read", read: true, bookmark: true, lastPageRead: 7)])
         let chapters = try await f.store.chapters(mangaId: id)
         let chapterID = try XCTUnwrap(chapters.first?.id)
-        try await f.store.recordHistory(mangaId: id, chapterId: chapterID)
+        let target = try await readingTargetForTest(store: f.store, mangaID: id, chapterID: chapterID)
+        try await f.store.commitReadingProgress(target: target, page: 7, reachedEnd: false, lastRead: 1_790_000_000)
         await expect(.deploymentInUse) {
             _ = try await f.preferences.saveConfiguration(snapshot: saved, userValues: self.values(url: "https://different.example"))
         }
@@ -497,9 +498,8 @@ final class ExtensionPreferencesServiceTests: XCTestCase {
         let id = try XCTUnwrap(result.manga.id)
         let chapterID = try XCTUnwrap(result.chapters.first?.id)
         try await f.store.setLibrary(true, mangaId: id)
-        try await f.store.markRead(true, chapterId: chapterID)
-        try await f.store.updateProgress(chapterId: chapterID, page: 7)
-        try await f.store.recordHistory(mangaId: id, chapterId: chapterID)
+        let target = try await readingTargetForTest(store: f.store, mangaID: id, chapterID: chapterID)
+        try await f.store.commitReadingProgress(target: target, page: 7, reachedEnd: true, lastRead: 1_790_000_000)
         var refreshed = result.manga
         refreshed.title = "Updated"
         refreshed.inLibrary = false

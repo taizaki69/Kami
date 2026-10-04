@@ -249,7 +249,8 @@ final class LibraryCategoryStoreTests: XCTestCase {
         ])
         let initialChapters = try await store.chapters(mangaId: mangaID)
         let chapterID = try XCTUnwrap(initialChapters.first?.id)
-        try await store.recordHistory(mangaId: mangaID, chapterId: chapterID)
+        let target = try await readingTargetForTest(store: store, mangaID: mangaID, chapterID: chapterID)
+        try await store.commitReadingProgress(target: target, page: 7, reachedEnd: false, lastRead: 1_790_000_000)
         await expectError(.categoryNotFound(999)) {
             try await store.deleteCategories(ids: [readingID, 999])
         }

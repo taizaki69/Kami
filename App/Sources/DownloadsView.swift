@@ -4,6 +4,7 @@ import KamiCore
 private struct DownloadReadingRoute: Hashable {
     let manga: Manga
     let chapterID: Int64
+    let chapterURL: String
 }
 
 @MainActor
@@ -92,9 +93,11 @@ struct DownloadsView: View {
                 }
             }
             .navigationTitle("Downloads")
+            .safeAreaInset(edge: .top) { ReadingSaveFailureBanner() }
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .navigationDestination(for: DownloadReadingRoute.self) { route in
                 PersistedChapterReaderDestination(manga: route.manga, chapterID: route.chapterID,
+                                                 chapterURL: route.chapterURL,
                                                  openingPolicy: .offlineOnly)
             }
             .refreshable { await model.refreshDownloads() }
@@ -119,7 +122,8 @@ struct DownloadsView: View {
         Section {
             downloadDescription(item)
             if item.state == .finished, let chapterID = item.chapter.id {
-                NavigationLink("Read offline", value: DownloadReadingRoute(manga: item.manga, chapterID: chapterID))
+                NavigationLink("Read offline", value: DownloadReadingRoute(manga: item.manga, chapterID: chapterID,
+                                                                          chapterURL: item.chapter.url))
                     .accessibilityHint("Read this downloaded chapter without using its source or a network connection.")
             }
             ChapterDownloadControls(manga: item.manga, chapter: item.chapter,

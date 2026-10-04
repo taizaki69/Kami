@@ -6,6 +6,7 @@ import MihonCompatKit
 /// Serialized database access. All library mutations flow through this actor.
 public actor LibraryStore {
     private let db: SQLiteDatabase
+    private let readingOwnerID = UUID()
     public nonisolated let downloadPolicy: DownloadPolicy
 
     public init(path: String, downloadPolicy: DownloadPolicy = .init()) throws {
@@ -762,19 +763,94 @@ public actor LibraryStore {
         )
     }
 
-    public func markRead(_ read: Bool, chapterId: Int64) throws {
-        try db.run("UPDATE chapter SET read=? WHERE id=?", [.bool(read), .int(chapterId)])
+    // MARK: - Guarded reading state
+
+    /// Explicit initial opening by exact source/UTF-8 manga identity. Retained
+    /// sessions must validate their captured target instead of calling this to
+    /// obtain the latest epoch after a provider suspension.
+    public func readingSnapshot(
+        sourceID: Int64, mangaURL: String, requestedChapterID: Int64? = nil
+    ) throws -> MangaReadingSnapshot? {
+        try readingOperation(readOnly: true) {
+            try ReadingStateReader.validateInputURL(mangaURL)
+            let epoch = try ReadingStateReader.epoch(db)
+            guard let id = try ReadingStateReader.mangaID(db, sourceID: sourceID, url: mangaURL) else { return nil }
+            return try ReadingStateReader.snapshot(db, ownerID: readingOwnerID, epoch: epoch,
+                                                   mangaID: id, requestedChapterID: requestedChapterID)
+        }
+    }
+
+    /// Refreshes metadata/lists only after validating the retained target. This
+    /// cannot rebase an old session onto a new epoch or a rebound physical row.
+    public func refreshReadingSnapshot(validating target: ChapterWriteTarget) throws -> MangaReadingSnapshot {
+        try readingOperation(readOnly: true) {
+            _ = try ReadingStateReader.validate(db, ownerID: readingOwnerID, target: target)
+            return try ReadingStateReader.snapshot(db, ownerID: readingOwnerID, epoch: target.epoch,
+                                                   mangaID: target.mangaID, requestedChapterID: target.chapterID)
+        }
+    }
+
+    /// Returns fresh stored chapter state without minting a replacement target.
+    public func validateReadingTarget(_ target: ChapterWriteTarget) throws -> Chapter {
+        try readingOperation(readOnly: true) {
+            try ReadingStateReader.validate(db, ownerID: readingOwnerID, target: target)
+        }
+    }
+
+    /// Atomically saves page/read/history. Backwards page navigation is valid;
+    /// reaching the end sets read, while other progress preserves its value.
+    /// The existing bookmark and history duration are never cleared.
+    @discardableResult
+    public func commitReadingProgress(
+        target: ChapterWriteTarget, page: Int64, reachedEnd: Bool, lastRead: Int64
+    ) throws -> ReadingProgressResult {
+        try Task.checkCancellation()
+        guard page >= 0, Int(exactly: page) != nil, lastRead >= 0 else { throw ReadingStateError.invalidInput }
+        return try readingOperation {
+            _ = try ReadingStateReader.validate(db, ownerID: readingOwnerID, target: target)
+            _ = try ReadingStateReader.history(db, target: target)
+            try db.run("UPDATE chapter SET last_page_read=?,read=CASE WHEN ? THEN 1 ELSE read END WHERE id=?",
+                       [.int(page), .bool(reachedEnd), .int(target.chapterID)])
+            try db.run("""
+                INSERT INTO history(manga_id,chapter_id,last_read,read_duration) VALUES (?,?,?,0)
+                ON CONFLICT(manga_id,chapter_id) DO UPDATE SET last_read=excluded.last_read
+                """, [.int(target.mangaID), .int(target.chapterID), .int(lastRead)])
+            let chapter = try ReadingStateReader.validate(db, ownerID: readingOwnerID, target: target)
+            guard let history = try ReadingStateReader.history(db, target: target) else {
+                throw ReadingStateError.invalidStoredData
+            }
+            return ReadingProgressResult(chapter: chapter, lastRead: history.lastRead,
+                                         readDuration: history.duration)
+        }
+    }
+
+    /// A manual read toggle changes only the captured row's read flag.
+    @discardableResult
+    public func setChapterRead(_ read: Bool, target: ChapterWriteTarget) throws -> Chapter {
+        try readingOperation {
+            _ = try ReadingStateReader.validate(db, ownerID: readingOwnerID, target: target)
+            try db.run("UPDATE chapter SET read=? WHERE id=?", [.bool(read), .int(target.chapterID)])
+            return try ReadingStateReader.validate(db, ownerID: readingOwnerID, target: target)
+        }
+    }
+
+    private func readingOperation<T>(readOnly: Bool = false, _ operation: () throws -> T) throws -> T {
+        do {
+            try Task.checkCancellation()
+            return try withLibraryTransaction(readOnly: readOnly) {
+                try Task.checkCancellation()
+                let result = try operation()
+                // A cancellation here rolls back. There is deliberately no
+                // cancellation check after COMMIT reports successful persistence.
+                try Task.checkCancellation()
+                return result
+            }
+        } catch is CancellationError { throw CancellationError() }
+        catch let error as ReadingStateError { throw error }
+        catch { throw ReadingStateError.storageUnavailable }
     }
 
     // MARK: - History
-
-    public func recordHistory(mangaId: Int64, chapterId: Int64) throws {
-        try db.run("""
-            INSERT INTO history (manga_id, chapter_id, last_read, read_duration)
-            VALUES (?,?,?,0)
-            ON CONFLICT(manga_id, chapter_id) DO UPDATE SET last_read=excluded.last_read
-            """, [.int(mangaId), .int(chapterId), .int(Int64(Date().timeIntervalSince1970))])
-    }
 
     public func history() throws -> [(Manga, Chapter, Int64)] {
         let rows = try db.query("""
@@ -794,10 +870,6 @@ public actor LibraryStore {
             return (m, Self.joinedChapter(from: row, id: chapterId, mangaID: m.id ?? 0,
                                           url: chapterUrl, name: chapterName), lastRead)
         }
-    }
-
-    public func updateProgress(chapterId: Int64, page: Int) throws {
-        try db.run("UPDATE chapter SET last_page_read=? WHERE id=?", [.int(page), .int(chapterId)])
     }
 
     // MARK: - Extension repositories

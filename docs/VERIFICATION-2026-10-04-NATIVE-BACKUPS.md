@@ -73,8 +73,19 @@ modifican MihonCompatKit, el corpus APK ni su admisión. Los resultados
 anteriores del CLI/corpus siguen perteneciendo al checkpoint padre.
 
 Los logs, revisiones, hashes y publicación se guardan en
-`.git/checkpoints/20261004-native-library-backups/`. El PR de esta entrega
-registra los workflows Apple y sus artefactos para el head exacto publicado.
+`.git/checkpoints/20261004-native-library-backups/`. El
+[PR #15](https://github.com/taizaki69/Kami/pull/15) está listo para revisión,
+sin fusionar, en `7bcbe7cb94c80527dd371a746fe591308f91aa49`. Pasaron:
+
+- [Swift CI](https://github.com/taizaki69/Kami/actions/runs/37229789716):
+  Linux 371 Compat + 223 Core/SQLite; macOS 371 Compat + 226 Core;
+  CLI release y corpus fijado.
+- [iOS Build](https://github.com/taizaki69/Kami/actions/runs/37229789699):
+  simulador y dispositivo con Xcode 16.4 / Apple Swift 6.1.2.
+- [IPA Package](https://github.com/taizaki69/Kami/actions/runs/37229789788):
+  artefacto `11313388702`, `Kami-unsigned-ipa`, 4.551.718 bytes,
+  SHA-256 `eb751b9e8cfbb312b0cf43642cb0c199d1596d79d556cec2576a823dfb0ccde4`.
+
 La compilación local y la revisión de código no prueban interacción con Files,
 cancelación del picker/proveedores, uso físico de iOS o consumo de memoria
 con bibliotecas grandes.

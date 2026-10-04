@@ -123,7 +123,7 @@ final class DownloadPersistenceTests: XCTestCase {
         XCTAssertNil(absent)
         let preserved = try await store.downloadTarget(chapterID: fresh.identity.chapterID)
         XCTAssertTrue(preserved.chapter.read)
-        XCTAssertEqual(try old.query("PRAGMA user_version").first?.int("user_version"), 5)
+        XCTAssertEqual(try old.query("PRAGMA user_version").first?.int("user_version"), Migrations.latest)
     }
 
     func testIdempotentQueuePaginationAndNextQueuedIgnoreFinishedUIPage() async throws {
@@ -384,7 +384,8 @@ final class DownloadPersistenceTests: XCTestCase {
         let token = try await attempt(f)
         let manifest = try await prepare(f, attempt: token)
         _ = try await f.store.completeDownload(attempt: token, manifestReceipt: manifest)
-        try await f.store.recordHistory(mangaId: f.mangaID, chapterId: token.identity.chapterID)
+        let target = try await readingTargetForTest(store: f.store, mangaID: f.mangaID, chapterID: token.identity.chapterID)
+        try await f.store.commitReadingProgress(target: target, page: 7, reachedEnd: false, lastRead: 1_790_000_000)
         let deletion = try await f.store.deleteDownload(jobID: token.jobID)
         XCTAssertEqual(deletion.item?.state, .deleting)
         XCTAssertEqual(deletion.cleanup, [token.identity])

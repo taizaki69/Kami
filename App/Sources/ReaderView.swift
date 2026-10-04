@@ -8,9 +8,7 @@ enum ReaderOpeningPolicy: Equatable {
 }
 
 struct OfflineReaderChapter {
-    let manga: Manga
     let chapter: Chapter
-    let neighbours: [Chapter]
     let lease: OfflineChapterLease
 }
 
@@ -22,27 +20,26 @@ struct OfflineReaderChapter {
 struct ReaderView: View {
     @EnvironmentObject private var model: AppModel
     let mangaTitle: String
-    let chapters: [Chapter]
     let sourceID: Int64
     let openingPolicy: ReaderOpeningPolicy
+    @State private var readingSnapshot: MangaReadingSnapshot
     @State private var chapter: Chapter
-    @State private var readerChapters: [Chapter]
     @State private var offlineLease: OfflineChapterLease?
     @State private var loadingProvider = true
     @State private var providerError: String?
+    @State private var providerRequiresReopening = false
     @State private var requireOffline = false
     @State private var requestedOnline = false
     @State private var retryID = 0
     @State private var providerGeneration: UInt64 = 0
 
-    init(mangaTitle: String, chapter: Chapter, chapters: [Chapter] = [], sourceID: Int64,
+    init(snapshot: MangaReadingSnapshot, chapter: Chapter,
          openingPolicy: ReaderOpeningPolicy = .automatic) {
-        self.mangaTitle = mangaTitle
-        self.chapters = chapters
-        self.sourceID = sourceID
+        self.mangaTitle = snapshot.manga.title
+        self.sourceID = snapshot.manga.sourceId
         self.openingPolicy = openingPolicy
+        _readingSnapshot = State(initialValue: snapshot)
         _chapter = State(initialValue: chapter)
-        _readerChapters = State(initialValue: chapters)
         _requireOffline = State(initialValue: openingPolicy == .offlineOnly)
         _requestedOnline = State(initialValue: openingPolicy == .onlineOnly)
     }
@@ -57,8 +54,8 @@ struct ReaderView: View {
                 } description: {
                     Text(providerError)
                 } actions: {
-                    Button("Retry") { retryID &+= 1 }
-                    if model.source(id: sourceID) != nil {
+                    if !providerRequiresReopening { Button("Retry") { retryID &+= 1 } }
+                    if !providerRequiresReopening, model.source(id: sourceID) != nil {
                         Button("Read online") { readOnline() }
                     }
                 }
@@ -67,7 +64,7 @@ struct ReaderView: View {
                 ReaderSessionView(
                     mangaTitle: mangaTitle,
                     chapter: $chapter,
-                    chapters: readerChapters,
+                    readingSnapshot: readingSnapshot,
                     sourceID: sourceID,
                     sourceRevision: revision,
                     source: offlineLease == nil ? model.source(id: sourceID) : nil,
@@ -90,6 +87,7 @@ struct ReaderView: View {
     }
 
     private func readOnline() {
+        providerGeneration &+= 1
         requestedOnline = true
         requireOffline = false
         loadingProvider = true
@@ -101,25 +99,34 @@ struct ReaderView: View {
         let generation = providerGeneration
         loadingProvider = true
         providerError = nil
+        providerRequiresReopening = false
+        let target = readingSnapshot.target(for: chapter)
         let previous = offlineLease
         offlineLease = nil
         await previous?.close()
         defer { if generation == providerGeneration { loadingProvider = false } }
-        guard let chapterID = chapter.id else {
+        guard let target else {
             providerError = "This chapter is no longer available."
+            providerRequiresReopening = true
             return
         }
         do {
+            await model.waitForReadingSaves()
+            guard !Task.isCancelled, generation == providerGeneration else { return }
+            let stored = try await model.store.validateReadingTarget(target)
+            guard !Task.isCancelled, generation == providerGeneration,
+                  readingSnapshot.target(for: chapter) == target else { return }
+            chapter = stored
             if !requestedOnline {
-                let local = try await model.openOfflineChapter(chapterID: chapterID, sourceID: sourceID)
-                guard !Task.isCancelled, generation == providerGeneration else {
+                let local = try await model.openOfflineChapter(target: target)
+                guard !Task.isCancelled, generation == providerGeneration,
+                      readingSnapshot.target(for: chapter) == target else {
                     await local?.lease.close()
                     return
                 }
                 if let local {
                     offlineLease = local.lease
                     chapter = local.chapter
-                    readerChapters = local.neighbours
                     requireOffline = true
                     return
                 }
@@ -134,7 +141,9 @@ struct ReaderView: View {
             }
         } catch {
             guard !Task.isCancelled, generation == providerGeneration else { return }
-            providerError = "Downloaded files are missing, damaged, or unavailable. Retry the local files or re-download this chapter from Downloads."
+            providerRequiresReopening = ReadingPresentation.requiresReopening(error)
+            providerError = error is ReadingStateError ? ReadingPresentation.message(error)
+                : "Downloaded files are missing, damaged, or unavailable. Retry the local files or re-download this chapter from Downloads."
         }
     }
 }
@@ -142,7 +151,8 @@ struct ReaderView: View {
 @MainActor
 private struct ReaderSessionView: View {
     let mangaTitle: String
-    let chapters: [Chapter]
+    let readingSnapshot: MangaReadingSnapshot
+    private let chapters: [Chapter]
     @Binding private var chapter: Chapter
     let sourceID: Int64
     let sourceRevision: UInt64
@@ -172,6 +182,11 @@ private struct ReaderSessionView: View {
     @State private var reloadID = 0
     @State private var pendingStartAtEnd = false
     @State private var progressTask: Task<Void, Never>?
+    @State private var progressGeneration: UInt64 = 0
+    @State private var lastEnqueuedProgressTarget: ChapterWriteTarget?
+    @State private var lastEnqueuedProgressPage: Int?
+    @State private var progressError: String?
+    @State private var readingStateExpired = false
     @State private var offlineLease: OfflineChapterLease?
     @State private var leaseChapterID: Int64?
     @State private var localSessionActive = true
@@ -179,7 +194,7 @@ private struct ReaderSessionView: View {
     init(
         mangaTitle: String,
         chapter: Binding<Chapter>,
-        chapters: [Chapter] = [],
+        readingSnapshot: MangaReadingSnapshot,
         sourceID: Int64,
         sourceRevision: UInt64,
         source: (any KamiSource)?,
@@ -187,7 +202,8 @@ private struct ReaderSessionView: View {
         onReadOnline: @escaping () -> Void
     ) {
         self.mangaTitle = mangaTitle
-        self.chapters = chapters
+        self.readingSnapshot = readingSnapshot
+        self.chapters = readingSnapshot.readerChapters
         self._chapter = chapter
         self.sourceID = sourceID
         self.sourceRevision = sourceRevision
@@ -242,7 +258,7 @@ private struct ReaderSessionView: View {
                     } label: {
                         Image(systemName: "chevron.left")
                     }
-                    .disabled(neighborChapter(-1) == nil)
+                    .disabled(!isSessionCurrent || neighborChapter(-1) == nil)
                     .accessibilityLabel("Previous chapter")
 
                     Button {
@@ -250,7 +266,7 @@ private struct ReaderSessionView: View {
                     } label: {
                         Image(systemName: "chevron.right")
                     }
-                    .disabled(neighborChapter(1) == nil)
+                    .disabled(!isSessionCurrent || neighborChapter(1) == nil)
                     .accessibilityLabel("Next chapter")
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -265,11 +281,25 @@ private struct ReaderSessionView: View {
                     }
                     .accessibilityLabel("Reader settings")
 
-                    Button("Done") { dismiss() }
+                    Button("Done") {
+                        capturePendingPageChange()
+                        dismiss()
+                    }
                 }
             }
             .toolbar(chromeVisible ? .visible : .hidden, for: .navigationBar)
             .statusBarHidden(!chromeVisible)
+        }
+        .safeAreaInset(edge: .bottom) {
+            if readingStateExpired, let progressError {
+                HStack(spacing: 12) {
+                    Label(progressError, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.regularMaterial)
+            }
         }
         .persistentSystemOverlays(.hidden)
         .sheet(isPresented: $showingSettings) {
@@ -291,10 +321,12 @@ private struct ReaderSessionView: View {
             applyIdleTimerSetting()
         }
         .onDisappear {
+            capturePendingPageChange()
             localSessionActive = false
             loadGeneration &+= 1
             progressTask?.cancel()
             progressTask = nil
+            progressGeneration &+= 1
             if let previousIdleTimerDisabled {
                 UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled
             }
@@ -330,7 +362,8 @@ private struct ReaderSessionView: View {
     }
 
     private var isSessionCurrent: Bool {
-        offlineOnly ? localSessionActive : model.isSourceCurrent(id: sourceID, revision: sourceRevision)
+        localSessionActive && !readingStateExpired
+            && (offlineOnly || model.isSourceCurrent(id: sourceID, revision: sourceRevision))
     }
 
     private var backgroundColor: Color {
@@ -461,11 +494,11 @@ private struct ReaderSessionView: View {
             Label(message, systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.orange)
                 .multilineTextAlignment(.center)
-            Button("Retry") {
-                reloadID &+= 1
+            if !readingStateExpired {
+                Button("Retry") { reloadID &+= 1 }
+                    .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderedProminent)
-            if offlineOnly, model.source(id: sourceID) != nil {
+            if !readingStateExpired, offlineOnly, model.source(id: sourceID) != nil {
                 Button("Read online", action: onReadOnline).buttonStyle(.bordered)
             }
         }
@@ -525,7 +558,7 @@ private struct ReaderSessionView: View {
 
     private func neighborChapter(_ offset: Int) -> Chapter? {
         guard let index = chapters.firstIndex(where: {
-            $0.id == chapter.id && $0.url == chapter.url
+            $0.id == chapter.id && Data($0.url.utf8) == Data(chapter.url.utf8)
         }) else { return nil }
         let neighbor = chapters.index(index, offsetBy: offset)
         guard chapters.indices.contains(neighbor) else { return nil }
@@ -538,6 +571,16 @@ private struct ReaderSessionView: View {
     }
 
     private func goToChapter(_ neighbor: Chapter, startAtEnd: Bool) {
+        guard isSessionCurrent, readingSnapshot.target(for: neighbor) != nil else { return }
+        capturePendingPageChange()
+        loadGeneration &+= 1
+        progressTask?.cancel()
+        progressTask = nil
+        progressGeneration &+= 1
+        progressError = nil
+        loading = true
+        pages = []
+        imageRequests = []
         pendingStartAtEnd = startAtEnd
         chapter = neighbor
         reloadID &+= 1
@@ -578,52 +621,94 @@ private struct ReaderSessionView: View {
         imageStore.prefetch(indexes.compactMap { imageRequest(at: $0) })
     }
 
+    private func capturePendingPageChange() {
+        guard let target = readingSnapshot.target(for: chapter),
+              lastEnqueuedProgressTarget != target || lastEnqueuedProgressPage != currentIndex else { return }
+        // SwiftUI may not yet have delivered onChange when navigation removes
+        // these pages. Capture that change before clearing the old chapter.
+        // An already queued end page must not become a second read action.
+        persistProgress(currentIndex)
+    }
+
     private func persistProgress(_ page: Int) {
-        guard isSessionCurrent, let chapterID = chapter.id else { return }
-        let mangaID = chapter.mangaId
+        guard isSessionCurrent, pages.indices.contains(page),
+              let target = readingSnapshot.target(for: chapter) else { return }
         let reachedEnd = !pages.isEmpty && page == pages.count - 1
-        chapter.lastPageRead = page
+        let lastRead = Int64(Date().timeIntervalSince1970)
+        let generation = loadGeneration
+        progressGeneration &+= 1
+        let progressID = progressGeneration
         progressTask?.cancel()
+        // The AppModel owns the write. Cancelling this view's result observer
+        // on navigation/disappearance cannot cancel the final captured save.
+        let receipt = model.readingStateWriter.enqueueProgress(
+            target: target, page: Int64(page), reachedEnd: reachedEnd, lastRead: lastRead)
+        lastEnqueuedProgressTarget = target
+        lastEnqueuedProgressPage = page
         progressTask = Task {
-            guard !Task.isCancelled, isSessionCurrent else { return }
-            try? await model.store.updateProgress(chapterId: chapterID, page: page)
-            guard !Task.isCancelled, isSessionCurrent else { return }
-            try? await model.store.recordHistory(
-                mangaId: mangaID,
-                chapterId: chapterID
-            )
-            if reachedEnd, !Task.isCancelled, isSessionCurrent {
-                try? await model.store.markRead(true, chapterId: chapterID)
+            do {
+                try Task.checkCancellation()
+                let saved = try await receipt.value()
+                guard !Task.isCancelled, generation == loadGeneration,
+                      progressID == progressGeneration, isSessionCurrent,
+                      readingSnapshot.target(for: chapter) == target else { return }
+                chapter = saved
+                progressError = nil
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled, generation == loadGeneration,
+                      progressID == progressGeneration, isSessionCurrent,
+                      readingSnapshot.target(for: chapter) == target else { return }
+                progressError = ReadingPresentation.message(error)
+                readingStateExpired = ReadingPresentation.requiresReopening(error)
             }
         }
     }
 
     private func load() async {
+        guard !readingStateExpired else { return }
         loadGeneration &+= 1
         let generation = loadGeneration
+        let target = readingSnapshot.target(for: chapter)
+        progressTask?.cancel()
+        progressTask = nil
+        progressGeneration &+= 1
         loading = true
         errorText = nil
         pages = []
         imageRequests = []
+        let frontier = model.readingStateWriter.captureFrontier()
         await imageStore.reset()
+        await frontier.wait()
 
-        guard !Task.isCancelled, isSessionCurrent else { return }
-        if offlineOnly {
-            await loadOffline(generation: generation)
-            return
-        }
-        guard let source else {
-            errorText = "Source not available."
+        guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else { return }
+        guard let target else {
+            errorText = "This chapter no longer matches the saved library. Close it and reopen it from your library."
+            readingStateExpired = true
             loading = false
             return
         }
         do {
+            let stored = try await model.store.validateReadingTarget(target)
+            guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent,
+                  readingSnapshot.target(for: chapter) == target else { return }
+            chapter = stored
+            if offlineOnly {
+                await loadOffline(generation: generation, target: target)
+                return
+            }
+            guard let source else {
+                errorText = "Source not available."
+                loading = false
+                return
+            }
             let compat = SChapterCompat(
-                url: chapter.url,
-                name: chapter.name,
-                number: chapter.number == -1
+                url: stored.url,
+                name: stored.name,
+                number: stored.number == -1
                     ? nil
-                    : String(format: "%g", chapter.number)
+                    : String(format: "%g", stored.number)
             )
             let loadedPages = try await source.getPageList(chapter: compat)
             guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else { return }
@@ -635,7 +720,10 @@ private struct ReaderSessionView: View {
                 loadedImageRequests.append(await source.getImageRequest(page: page))
             }
             try Task.checkCancellation()
-            guard generation == loadGeneration, isSessionCurrent else { return }
+            let current = try await model.store.validateReadingTarget(target)
+            guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent,
+                  readingSnapshot.target(for: chapter) == target else { return }
+            chapter = current
             pages = loadedPages
             imageRequests = loadedImageRequests
             if pendingStartAtEnd {
@@ -655,24 +743,24 @@ private struct ReaderSessionView: View {
             return
         } catch {
             guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else { return }
-            errorText = "Could not load pages: \(error.localizedDescription)"
+            readingStateExpired = ReadingPresentation.requiresReopening(error)
+            errorText = error is ReadingStateError ? ReadingPresentation.message(error)
+                : "Could not load pages: \(error.localizedDescription)"
             loading = false
         }
     }
 
-    private func loadOffline(generation: Int) async {
+    private func loadOffline(generation: Int, target: ChapterWriteTarget) async {
         do {
             if leaseChapterID != chapter.id || offlineLease == nil {
                 let previous = offlineLease
                 offlineLease = nil
                 await previous?.close()
-                guard let chapterID = chapter.id else {
-                    errorText = "This chapter is no longer available."
-                    loading = false
-                    return
-                }
-                let local = try await model.openOfflineChapter(chapterID: chapterID, sourceID: sourceID)
-                guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else {
+                guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent,
+                      readingSnapshot.target(for: chapter) == target else { return }
+                let local = try await model.openOfflineChapter(target: target)
+                guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent,
+                      readingSnapshot.target(for: chapter) == target else {
                     await local?.lease.close()
                     return
                 }
@@ -682,11 +770,14 @@ private struct ReaderSessionView: View {
                     return
                 }
                 offlineLease = local.lease
-                leaseChapterID = chapterID
+                leaseChapterID = target.chapterID
                 chapter = local.chapter
             }
+            let current = try await model.store.validateReadingTarget(target)
             guard let offlineLease, !Task.isCancelled,
-                  generation == loadGeneration, isSessionCurrent else { return }
+                  generation == loadGeneration, isSessionCurrent,
+                  readingSnapshot.target(for: chapter) == target else { return }
+            chapter = current
             pages = offlineLease.pages.map { PageCompat(index: $0.ordinal) }
             imageRequests = Array(repeating: nil, count: pages.count)
             if pendingStartAtEnd {
@@ -703,8 +794,15 @@ private struct ReaderSessionView: View {
             }
         } catch {
             guard !Task.isCancelled, generation == loadGeneration, isSessionCurrent else { return }
-            errorText = "Downloaded files are missing, damaged, or unavailable. Retry the local files or re-download this chapter from Downloads."
+            readingStateExpired = ReadingPresentation.requiresReopening(error)
+            errorText = error is ReadingStateError ? ReadingPresentation.message(error)
+                : "Downloaded files are missing, damaged, or unavailable. Retry the local files or re-download this chapter from Downloads."
             loading = false
+            if readingStateExpired {
+                let rejectedLease = offlineLease
+                offlineLease = nil
+                await rejectedLease?.close()
+            }
         }
     }
 

@@ -5,9 +5,16 @@ import Foundation
 /// Versioned schema migrations. Every change ships as a new step; the
 /// `user_version` pragma tracks the applied version.
 enum Migrations {
-    static let latest: Int = 5
+    static let latest: Int = 6
 
     static let steps: [Int: String] = [
+        6: """
+        CREATE TABLE library_data_state (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+            epoch BLOB NOT NULL CHECK(typeof(epoch)='blob' AND length(epoch)=16)
+        );
+        INSERT INTO library_data_state(singleton,epoch) VALUES (1,randomblob(16));
+        """,
         1: """
         CREATE TABLE IF NOT EXISTS manga (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

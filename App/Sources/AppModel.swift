@@ -43,12 +43,15 @@ final class AppModel: ObservableObject {
     let sourceFactory: ExtensionSourceFactory
     let preferencesService: ExtensionPreferencesService
     let libraryUpdateService: LibraryUpdateService
+    let readingStateWriter: ReadingStateWriter
     private let durableDatabaseAvailable: Bool
     private let downloadContentStore: DownloadContentStore?
     private var downloadService: LibraryDownloadService?
 
     @Published private(set) var librarySnapshot = LibrarySnapshot()
     @Published private(set) var libraryError: String?
+    @Published private(set) var readingWriteFailures: [ReadingStateWriteFailure] = []
+    @Published private(set) var discardedReadingWriteFailures = 0
     @Published var loading = false
     @Published private(set) var installedExtensions: [InstalledExtensionTrust] = []
     @Published private(set) var extensionBusyPackages = Set<String>()
@@ -134,6 +137,7 @@ final class AppModel: ObservableObject {
         self.sourceFactory = ExtensionSourceFactory()
         self.preferencesService = ExtensionPreferencesService(store: store)
         self.libraryUpdateService = LibraryUpdateService(store: store)
+        self.readingStateWriter = ReadingStateWriter(store: store)
         if persistentStore != nil {
             do {
                 self.downloadContentStore = try DownloadContentStore(root: url.appendingPathComponent("Downloads", isDirectory: true))
@@ -150,6 +154,11 @@ final class AppModel: ObservableObject {
                 await self?.downloadSourceContext(sourceID: sourceID) ?? .unavailable
             }
         }
+        readingStateWriter.onFailuresChanged = { [weak self] failures in
+            guard let self else { return }
+            self.readingWriteFailures = failures
+            self.discardedReadingWriteFailures = self.readingStateWriter.discardedFailureCount
+        }
         reloadLibrary()
         Task { [weak self] in
             await self?.restoreInstalledExtensions()
@@ -160,6 +169,11 @@ final class AppModel: ObservableObject {
 
     func reloadLibrary() {
         Task { await refreshLibrary() }
+    }
+
+    func waitForReadingSaves() async {
+        let frontier = readingStateWriter.captureFrontier()
+        await frontier.wait()
     }
 
     func prepareLibraryBackup() async throws -> PreparedLibraryBackup {
@@ -612,27 +626,26 @@ final class AppModel: ObservableObject {
         if !downloadsForegroundActive { Task { await pauseDownloads() } }
     }
 
-    func openOfflineChapter(chapterID: Int64, sourceID: Int64) async throws -> OfflineReaderChapter? {
+    func openOfflineChapter(target: ChapterWriteTarget) async throws -> OfflineReaderChapter? {
         guard let service = downloadService else { throw LibraryDownloadServiceError.storageUnavailable }
+        _ = try await store.validateReadingTarget(target)
         try await service.prepare()
-        guard let bundle = try await store.offlineChapter(chapterID: chapterID) else { return nil }
-        guard bundle.manga.sourceId == sourceID else { throw DownloadPersistenceError.sourceIdentityMismatch }
-        let lease = try await service.openOfflineChapter(chapterID: chapterID)
+        guard let bundle = try await store.offlineChapter(chapterID: target.chapterID) else {
+            _ = try await store.validateReadingTarget(target)
+            return nil
+        }
+        guard bundle.manga.id == target.mangaID, bundle.manga.sourceId == target.sourceID,
+              bundle.chapter.id == target.chapterID, bundle.chapter.mangaId == target.mangaID,
+              Data(bundle.manga.url.utf8) == Data(target.mangaURL.utf8),
+              Data(bundle.chapter.url.utf8) == Data(target.chapterURL.utf8) else {
+            throw ReadingStateError.identityChanged
+        }
+        let lease = try await service.openOfflineChapter(chapterID: target.chapterID)
         do {
             guard lease.identity == bundle.identity else { throw DownloadPersistenceError.staleAttempt }
-            let current = try await store.chapters(mangaId: bundle.chapter.mangaId)
-            let downloaded = try await store.downloadedChapters(mangaID: bundle.chapter.mangaId)
+            let current = try await store.validateReadingTarget(target)
             try Task.checkCancellation()
-            var seen = Set(current.compactMap(\.id))
-            var neighbours = current + downloaded.filter { chapter in
-                guard let id = chapter.id else { return false }
-                return seen.insert(id).inserted
-            }
-            if !neighbours.contains(where: { $0.id == chapterID }) { neighbours.append(bundle.chapter) }
-            neighbours.sort {
-                $0.sourceOrder == $1.sourceOrder ? ($0.id ?? 0) < ($1.id ?? 0) : $0.sourceOrder < $1.sourceOrder
-            }
-            return OfflineReaderChapter(manga: bundle.manga, chapter: bundle.chapter, neighbours: neighbours, lease: lease)
+            return OfflineReaderChapter(chapter: current, lease: lease)
         } catch {
             await lease.close()
             throw error

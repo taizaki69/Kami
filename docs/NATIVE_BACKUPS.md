@@ -111,7 +111,8 @@ model construction, JSON traversal, sorting and encoding.
 Malformed, ambiguous or oversized library data fails export as a whole.
 An export neither repairs corrupt rows nor cancels/changes ongoing update or
 download work. The database actor serializes the snapshot with normal writes;
-the codec runs away from the main actor. No database migration is needed.
+the codec runs away from the main actor. Native export itself adds no schema
+migration; the separate reader-state foundation introduces its own data epoch.
 
 ## Verification and remaining work
 
