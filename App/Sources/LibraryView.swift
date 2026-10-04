@@ -2,47 +2,190 @@ import SwiftUI
 import MihonCompatKit
 import KamiCore
 
+@MainActor
 struct LibraryView: View {
     @EnvironmentObject var model: AppModel
     @State private var search = ""
+    @State private var category: LibraryCategoryFilter = .all
+    @State private var showCategories = false
+    @State private var selecting = false
+    @State private var selectedIDs = Set<Int64>()
+    @State private var assignment: CategoryAssignmentRequest?
 
     private var filtered: [Manga] {
-        search.isEmpty ? model.library : model.library.filter {
-            $0.title.localizedCaseInsensitiveContains(search)
-        }
+        model.librarySnapshot.filteredManga(category: category, search: search)
     }
 
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 12)]
 
     var body: some View {
         NavigationStack {
-            Group {
-                if filtered.isEmpty {
-                    ContentUnavailableView(
-                        "Library is empty",
-                        systemImage: "books.vertical",
-                        description: Text("Browse a source and add manga to your library.")
-                    )
-                } else {
-                    ScrollView {
+            VStack(spacing: 0) {
+                categoryPicker
+                if let message = model.libraryError {
+                    HStack {
+                        Label(message, systemImage: "exclamationmark.triangle")
+                        Spacer()
+                        Button("Retry") { Task { await model.refreshLibrary() } }
+                    }
+                    .font(.footnote)
+                    .padding()
+                }
+                ScrollView {
+                    if model.loading && model.library.isEmpty {
+                        ProgressView().padding(.top, 40)
+                    } else if filtered.isEmpty {
+                        emptyState.padding(.top, 24)
+                    } else {
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(filtered) { manga in
-                                NavigationLink(value: manga) {
-                                    MangaCoverCell(manga: manga)
-                                }
-                                .buttonStyle(.plain)
+                                mangaCell(manga)
                             }
                         }
-                        .padding(.horizontal)
+                        .padding()
                     }
                 }
+                .refreshable { await model.refreshLibrary() }
             }
             .navigationTitle("Library")
             .searchable(text: $search, prompt: "Search library")
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        showCategories = true
+                    } label: {
+                        Label("Manage categories", systemImage: "folder.badge.gearshape")
+                    }
+                    Button(selecting ? "Done" : "Select") {
+                        selecting.toggle()
+                        selectedIDs.removeAll()
+                    }
+                    .disabled(model.library.isEmpty)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if selecting { selectionBar }
+            }
             .navigationDestination(for: Manga.self) { manga in
                 MangaDetailView(manga: manga)
             }
+            .task { await model.refreshLibrary() }
+            .sheet(isPresented: $showCategories) { CategoriesView() }
+            .sheet(item: $assignment) { request in
+                CategoryAssignmentSheet(mangaIDs: request.mangaIDs, title: request.title)
+            }
+            .onChange(of: model.categories) { _, _ in
+                category = model.librarySnapshot.availableFilter(category)
+            }
+            .onChange(of: filtered.compactMap(\.id)) { _, ids in
+                selectedIDs.formIntersection(Set(ids))
+            }
         }
+    }
+
+    private var categoryPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                categoryButton("All", filter: .all)
+                categoryButton("Uncategorized", filter: .uncategorized)
+                ForEach(model.categories) { category in
+                    if let id = category.id {
+                        categoryButton(category.name, filter: .category(id))
+                    }
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private func categoryButton(_ name: String, filter: LibraryCategoryFilter) -> some View {
+        Button {
+            category = filter
+        } label: {
+            HStack(spacing: 4) {
+                Text(name)
+                Text("\(model.librarySnapshot.mangaCount(in: filter))")
+                    .font(.caption.monospacedDigit())
+            }
+            .font(.subheadline)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(category == filter ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.08),
+                        in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(category == filter ? Color.accentColor : Color.primary)
+        .accessibilityAddTraits(category == filter ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func mangaCell(_ manga: Manga) -> some View {
+        if selecting, let id = manga.id {
+            Button {
+                if selectedIDs.contains(id) { selectedIDs.remove(id) }
+                else { selectedIDs.insert(id) }
+            } label: {
+                MangaCoverCell(manga: manga)
+                    .overlay(alignment: .topTrailing) {
+                        Image(systemName: selectedIDs.contains(id) ? "checkmark.circle.fill" : "circle")
+                            .font(.title2)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(Color.accentColor, Color.white)
+                            .padding(6)
+                    }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(manga.title)
+            .accessibilityValue(selectedIDs.contains(id) ? "Selected" : "Not selected")
+        } else {
+            NavigationLink(value: manga) { MangaCoverCell(manga: manga) }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    if let id = manga.id {
+                        Button {
+                            assignment = CategoryAssignmentRequest(mangaIDs: [id], title: manga.title)
+                        } label: {
+                            Label("Set categories", systemImage: "folder")
+                        }
+                    }
+                }
+        }
+    }
+
+    private var selectionBar: some View {
+        HStack {
+            Text("\(selectedIDs.count) selected").font(.subheadline)
+            Spacer()
+            Button("Select shown") { selectedIDs = Set(filtered.compactMap(\.id)) }
+                .disabled(filtered.isEmpty)
+            Button("Categories") {
+                assignment = CategoryAssignmentRequest(mangaIDs: selectedIDs,
+                                                       title: "\(selectedIDs.count) manga")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(selectedIDs.isEmpty)
+        }
+        .padding()
+        .background(.regularMaterial)
+    }
+
+    private var emptyState: some View {
+        let hasSearch = !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let title: String
+        let description: String
+        if model.library.isEmpty {
+            title = "Library is empty"
+            description = "Browse a source and add manga to your library."
+        } else if hasSearch {
+            title = "No matches"
+            description = "Try another search or category."
+        } else {
+            title = category == .uncategorized ? "No uncategorized manga" : "Category is empty"
+            description = "Use Select or a manga's Set categories action to organize your library."
+        }
+        return ContentUnavailableView(title, systemImage: hasSearch ? "magnifyingglass" : "books.vertical",
+                                      description: Text(description))
     }
 }
 

@@ -1,6 +1,6 @@
 {
   "aggregate" : {
-    "extensionCount" : 11,
+    "extensionCount" : 8,
     "omittedExternalInvocationCount" : 0,
     "planBlockers" : [
       {
@@ -8,54 +8,39 @@
         "summary" : "the source class chain is missing the required stable Mihon wrappers"
       }
     ],
-    "structuralCandidateCount" : 7,
+    "structuralCandidateCount" : 4,
     "topLimit" : 5,
     "topUnregisteredExternalInvocations" : [
       {
-        "extensionCount" : 11,
-        "invocationCount" : 176,
+        "extensionCount" : 8,
+        "invocationCount" : 128,
         "surface" : "direct Ljava/lang/UnsupportedOperationException;-><init>()V"
       },
       {
-        "extensionCount" : 11,
-        "invocationCount" : 113,
+        "extensionCount" : 8,
+        "invocationCount" : 92,
         "surface" : "virtual Leu/kanade/tachiyomi/source/online/HttpSource;->getBaseUrl()Ljava/lang/String;"
       },
       {
-        "extensionCount" : 11,
-        "invocationCount" : 17,
+        "extensionCount" : 8,
+        "invocationCount" : 12,
         "surface" : "virtual Leu/kanade/tachiyomi/source/online/HttpSource;->getId()J"
       },
       {
-        "extensionCount" : 11,
-        "invocationCount" : 11,
+        "extensionCount" : 8,
+        "invocationCount" : 8,
         "surface" : "super Leu/kanade/tachiyomi/source/online/HttpSource;->fetchChapterList(Leu/kanade/tachiyomi/source/model/SManga;)Lrx/Observable;"
       },
       {
-        "extensionCount" : 11,
-        "invocationCount" : 11,
+        "extensionCount" : 8,
+        "invocationCount" : 8,
         "surface" : "super Leu/kanade/tachiyomi/source/online/HttpSource;->fetchImageUrl(Leu/kanade/tachiyomi/source/model/Page;)Lrx/Observable;"
       }
     ],
-    "uniqueUnregisteredExternalMethodCount" : 387,
+    "uniqueUnregisteredExternalMethodCount" : 359,
     "unsupportedOpcodeCount" : 0
   },
   "artifacts" : [
-    {
-      "codeMethodCount" : 102,
-      "dexCount" : 1,
-      "identity" : "eu.kanade.tachiyomi.extension.all.foolslidecustomizable@1.6.6(6)",
-      "instructionCount" : 2470,
-      "omittedExternalInvocationCount" : 0,
-      "planBlockers" : [
-
-      ],
-      "structuralCandidate" : true,
-      "uniqueUnregisteredExternalMethodCount" : 65,
-      "unsupportedOpcodes" : [
-
-      ]
-    },
     {
       "codeMethodCount" : 287,
       "dexCount" : 1,
@@ -81,7 +66,7 @@
         "the source class chain is missing the required stable Mihon wrappers"
       ],
       "structuralCandidate" : false,
-      "uniqueUnregisteredExternalMethodCount" : 68,
+      "uniqueUnregisteredExternalMethodCount" : 67,
       "unsupportedOpcodes" : [
 
       ]
@@ -132,21 +117,6 @@
       ]
     },
     {
-      "codeMethodCount" : 245,
-      "dexCount" : 1,
-      "identity" : "eu.kanade.tachiyomi.extension.es.eternalmangas@1.6.28(28)",
-      "instructionCount" : 6291,
-      "omittedExternalInvocationCount" : 0,
-      "planBlockers" : [
-
-      ],
-      "structuralCandidate" : true,
-      "uniqueUnregisteredExternalMethodCount" : 41,
-      "unsupportedOpcodes" : [
-
-      ]
-    },
-    {
       "codeMethodCount" : 452,
       "dexCount" : 1,
       "identity" : "eu.kanade.tachiyomi.extension.ja.pixivcomic@1.6.4(4)",
@@ -171,7 +141,7 @@
 
       ],
       "structuralCandidate" : true,
-      "uniqueUnregisteredExternalMethodCount" : 94,
+      "uniqueUnregisteredExternalMethodCount" : 93,
       "unsupportedOpcodes" : [
 
       ]
@@ -186,22 +156,7 @@
 
       ],
       "structuralCandidate" : true,
-      "uniqueUnregisteredExternalMethodCount" : 91,
-      "unsupportedOpcodes" : [
-
-      ]
-    },
-    {
-      "codeMethodCount" : 127,
-      "dexCount" : 1,
-      "identity" : "eu.kanade.tachiyomi.extension.vi.doctruyen3q@1.6.38(38)",
-      "instructionCount" : 3389,
-      "omittedExternalInvocationCount" : 0,
-      "planBlockers" : [
-
-      ],
-      "structuralCandidate" : true,
-      "uniqueUnregisteredExternalMethodCount" : 57,
+      "uniqueUnregisteredExternalMethodCount" : 90,
       "unsupportedOpcodes" : [
 
       ]

@@ -14,6 +14,7 @@ import MihonCompatKit
 ///   compat-audit opcodes <apk-or-dir>      Exact all-DEX opcode inventory.
 ///   compat-audit plan <apk-or-dir>         Structural execution-plan blockers.
 ///   compat-audit gaps <apk-or-dir>         Redacted static gap/corpus report.
+///   compat-audit gaps <corpus> --role measurement  Select locked evidence role.
 ///   compat-audit promote-gap <report>      Swift assertion for a fixed gap.
 ///
 /// Works on any Swift host (Windows/Linux/macOS); pure Foundation.
@@ -33,6 +34,7 @@ struct CompatAudit {
               compat-audit opcodes <apk-or-directory>
               compat-audit plan <apk-or-directory>
               compat-audit gaps <apk-or-directory>
+              compat-audit gaps <corpus-directory> --role <measurement|execution|conformance>
               compat-audit promote-gap <runtime-report.txt>
             """)
             exit(64)
@@ -85,7 +87,15 @@ struct CompatAudit {
             executionPlanReport(at: args[2])
 
         case "gaps":
-            compatibilityGapReport(at: args[2])
+            if args.count == 3 {
+                compatibilityGapReport(at: args[2])
+            } else if args.count == 5, args[3] == "--role",
+                      let role = InterpretedCorpusSelection.Role(rawValue: args[4]) {
+                compatibilityGapReport(at: args[2], role: role)
+            } else {
+                print("error: gaps accepts an APK/directory or a corpus directory with --role")
+                exit(64)
+            }
 
         case "promote-gap":
             compatibilityRegressionSeed(at: args[2])
@@ -258,20 +268,33 @@ struct CompatAudit {
     /// Produces a redirectable privacy-safe report. Artifact ordinals replace
     /// filenames, and per-file failures are intentionally generic; only
     /// manifest package/version plus DEX API/opcode identities are exported.
-    static func compatibilityGapReport(at path: String) {
+    static func compatibilityGapReport(
+        at path: String,
+        role: InterpretedCorpusSelection.Role? = nil
+    ) {
         do {
-            let urls = try opcodeInputURLs(at: path)
+            let inputs: [() throws -> [UInt8]]
+            if let role {
+                inputs = try InterpretedCorpusSelection.inputs(
+                    at: URL(fileURLWithPath: path), role: role
+                ).map { input in { try input.loadAPKBytes() } }
+            } else {
+                inputs = try opcodeInputURLs(at: path).map { url in
+                    { try boundedAPKBytes(at: url) }
+                }
+            }
             let auditor = InterpretedCompatibilityAudit()
             var reports: [InterpretedCompatibilityStaticReport] = []
             var encounteredErrors = 0
 
             print("Kami static compatibility gaps v1")
-            print("artifacts: \(urls.count)")
-            for (index, url) in urls.enumerated() {
+            print("artifacts: \(inputs.count)")
+            if let role { print("locked role: \(role.rawValue) (static evidence only)") }
+            for (index, loadBytes) in inputs.enumerated() {
                 print("")
                 print("== artifact \(index + 1) ==")
                 do {
-                    let report = try auditor.analyze(apkBytes: boundedAPKBytes(at: url))
+                    let report = try auditor.analyze(apkBytes: loadBytes())
                     reports.append(report)
                     print("identity:            \(report.identity)")
                     print("structural plan:     \(report.planStatus.isStructuralCandidate ? "candidate (not admitted or execution-proven)" : "blocked")")

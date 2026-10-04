@@ -1,5 +1,21 @@
 # Extension Runtime — Measured Status and Staged Plan
 
+## Current continuation — 2026-10-03
+
+The current exact catalog additionally includes EternalMangas 1.6.28,
+DocTruyen3Q 1.6.38 and FoolSlide Customizable 1.6.6. Follow the
+[current matrix](EXTENSION_COMPATIBILITY_MATRIX.md) and
+[verification record](VERIFICATION-2026-10-03.md) for their measured scope and
+current corpus roles; milestone counts in the older design notes below remain
+historical. No profile bypasses hash, signer, manifest or source-ID admission.
+
+FoolSlide requires an explicit HTTPS base URL at the downloaded-source factory.
+The runtime validates preference values and handles the exact APK's default-URL
+bookkeeping so an injected override is preserved. Its unconfigured raw default
+is a loopback placeholder, not an app-ready source. Preference UI/persistence
+and live-site behavior remain unproven.
+
+
 **Last updated:** 2026-09-18
 
 ## Where we are

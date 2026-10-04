@@ -40,8 +40,8 @@ MihonCompatKit, never in the app.
 ## Key decisions
 
 - **`KamiSource` is the seam.** Native sources and the pinned BatCave, Kawii,
-  MangaMelon, Baozi Manhua, TuttoAnimeManga, and Mangas-Origines.fr DEX-backed
-  sources implement the same protocol; the registry hides which is which.
+  MangaMelon and the other exact catalog profiles implement the same protocol;
+  the registry hides which is which.
   Future profiles must preserve this boundary.
   The protocol mirrors tachiyomix semantics (popular/latest/search/details/
   chapters/pages + image requests with headers) so the bridge is 1:1.
@@ -133,7 +133,8 @@ MihonCompatKit, never in the app.
 The executable catalog is deliberately exact rather than heuristic. It
 currently contains BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1,
 Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10, Mangas-Origines.fr 1.6.58,
-Komikcast/VoraToon 1.6.83, and Yomu Comics/SSSCanlator 1.6.59.
+Komikcast/VoraToon 1.6.83, Yomu Comics/SSSCanlator 1.6.59, EternalMangas
+1.6.28, DocTruyen3Q 1.6.38, and FoolSlide Customizable 1.6.6.
 Baozi is admitted only when
 the APK's SHA-256
 (`7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec`), signer
@@ -165,21 +166,35 @@ Komikcast and Yomu add exact dynamic genre filter paths. Yomu also proves
 its `pt-BR` metadata, Next.js RSC extraction, URL-shaped search, decoy-list
 rejection, and 30-result pagination. Both preserve the same exact hash, signer,
 manifest, and source-ID gates; Yomu uses the ordinary page-URL image path.
-The remaining 11 current lib 1.6 measurement artifacts are measurement
-evidence, not automatic admission or a compatibility percentage. For the
-downloaded path, the exact source-ID set is checked before DEX construction
-and again after
-profile construction; `SourceRegistry` removal is package-owner scoped, so
-disabling one extension cannot remove another package's source ID.
+FoolSlide requires explicit configuration in the downloaded-source factory:
+its default loopback URL is not a usable source. A supplied HTTPS override
+is validated and the exact runtime initializes the APK's default-URL
+bookkeeping without discarding that override. Raw default construction remains
+a metadata/test seam; production preference UI and persistence remain open.
 
-The locked corpus currently contains 27 artifacts: 10 execution, 11 measurement,
-and 6 AOSP conformance fixtures; 19 are current lib 1.6 artifacts. The current
-measurement audit covers 11/11 artifacts and reports 7 structural candidates,
-4 stable-wrapper blockers, 432 unique unregistered external method surfaces,
-0 omitted invocations, and 0 unsupported opcodes. Static ranking guides the
-next probe without granting admission. Current Windows verification is
-262/262 MihonCompatKit tests and 19/19 portable KamiCore tests; exact-head
-macOS/iOS evidence is recorded in HANDOFF.md.
+The remaining eight current lib 1.6 measurement artifacts are measurement
+evidence, not automatic admission or a compatibility percentage. The downloaded
+factory checks exact source IDs before DEX construction and after construction;
+registry removal is package-owner scoped.
+
+The locked corpus contains 27 artifacts: thirteen execution fixtures (eleven
+current lib 1.6 profiles and two legacy constructor fixtures), eight measurement
+fixtures and six AOSP conformance fixtures. Paths are historical; manifest
+roles are authoritative. `compat-audit gaps Tests/corpus --role measurement`
+validates the selected files and hashes before static analysis. The dated
+[verification record](docs/VERIFICATION-2026-10-03.md) records current counts and
+platform scope; static ranking never grants admission.
+
+## Library categories
+
+`LibraryStore` owns category names, ordering and membership in the existing
+SQLite schema. Writes validate the entire requested set before committing a
+transaction. Deleting a category removes its associations and preserves manga,
+chapter progress and history. Bulk edits apply explicit additions/removals so
+untouched mixed memberships survive. A coherent `LibrarySnapshot` crosses the
+actor boundary; the app ignores superseded reloads and recovers a deleted
+category filter to All. Portable snapshot/draft tests and SQLite persistence
+regressions exercise different parts of this contract.
 
 ## Concurrency model
 - UI: SwiftUI + `@MainActor` observable models.

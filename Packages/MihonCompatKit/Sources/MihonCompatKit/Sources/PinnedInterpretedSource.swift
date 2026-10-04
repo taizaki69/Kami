@@ -400,6 +400,44 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         )
     }
 
+    /// Loads the exact FoolSlide Customizable 1.6.6 artifact. A configured
+    /// deployment URL is required by the downloaded-source factory; the raw
+    /// constructor also permits the APK's inert placeholder metadata.
+    public static func foolSlideCustomizable166(
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
+        preferences: InterpretedExtensionPreferences = .init()
+    ) throws -> Self {
+        let profile = PinnedInterpretedProfile.foolSlideCustomizable166
+        let transport = URLSessionCompatHTTPTransport(
+            sourceID: profile.networkIdentity,
+            policy: transportPolicy
+        )
+        return try Self(
+            profile: profile,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy,
+            preferences: preferences
+        )
+    }
+
+    /// Injection seam for deterministic FoolSlide Customizable tests.
+    public static func foolSlideCustomizable166(
+        apkBytes: [UInt8],
+        transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
+        preferences: InterpretedExtensionPreferences = .init()
+    ) throws -> Self {
+        try Self(
+            profile: .foolSlideCustomizable166,
+            apkBytes: apkBytes,
+            transport: transport,
+            transportPolicy: transportPolicy,
+            preferences: preferences
+        )
+    }
+
     /// Injection seam for deterministic Mangas-Origines.fr tests.
     public static func mangasOriginesFR1658(
         apkBytes: [UInt8],
@@ -421,6 +459,25 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false),
         preferences: InterpretedExtensionPreferences = .init()
     ) throws {
+        guard profile.preferenceSupport.validates(preferences) else {
+            throw PinnedInterpretedSourceError.invalidPreferences(profile: profile.identifier)
+        }
+        let runtimePreferences: InterpretedExtensionPreferences
+        if case .foolSlideCustomizable = profile.preferenceSupport,
+           preferences.strings["overrideBaseUrl"] != nil,
+           preferences.strings["defaultBaseUrl"] == nil {
+            // The APK migrates its custom URL when its default bookkeeping
+            // value changes. Supply the authenticated artifact's exact default
+            // so an injected override survives its constructor unchanged.
+            var strings = preferences.strings
+            strings["defaultBaseUrl"] = "https://127.0.0.1"
+            runtimePreferences = try InterpretedExtensionPreferences(
+                strings: strings,
+                booleans: preferences.booleans
+            )
+        } else {
+            runtimePreferences = preferences
+        }
         let compatibilityRecorder = InterpretedCompatibilityRecorder(
             packageName: profile.packageName,
             versionName: profile.versionName,
@@ -431,7 +488,7 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
             apkBytes: apkBytes,
             transport: transport,
             transportPolicy: transportPolicy,
-            preferences: preferences,
+            preferences: runtimePreferences,
             compatibilityRecorder: compatibilityRecorder
         )
         let metadata = runtime.metadata
@@ -612,6 +669,7 @@ public enum InterpretedExtensionProfileCatalog {
             .yomuComics1659,
             .eternalmangas1628,
             .docTruyen3Q1638,
+            .foolSlideCustomizable166,
         ]
         return profiles.first {
             $0.packageName == packageName &&
@@ -641,6 +699,7 @@ private struct PinnedInterpretedProfile: Sendable {
         case baoziManhua
         case eternalMangas
         case docTruyen3Q
+        case foolSlideCustomizable
 
         func validates(_ preferences: InterpretedExtensionPreferences) -> Bool {
             switch self {
@@ -674,7 +733,42 @@ private struct PinnedInterpretedProfile: Sendable {
                     && (overrideURL == nil
                         || (overrideURL!.hasPrefix("https://")
                             && overrideURL!.contains("doctruyen3q")))
+            case .foolSlideCustomizable:
+                let allowedBooleans: Set<String> = ["adult"]
+                let overrideURL = preferences.strings["overrideBaseUrl"]
+                let defaultURL = preferences.strings["defaultBaseUrl"]
+                let otherStrings = preferences.strings.filter {
+                    $0.key != "overrideBaseUrl" && $0.key != "defaultBaseUrl"
+                }
+                return otherStrings.isEmpty
+                    && Set(preferences.booleans.keys).isSubset(of: allowedBooleans)
+                    && (overrideURL == nil || Self.validFoolSlideDeploymentURL(overrideURL!))
+                    && (defaultURL == nil || defaultURL == "https://127.0.0.1")
             }
+        }
+
+        private static func validFoolSlideDeploymentURL(_ value: String) -> Bool {
+            guard !value.isEmpty,
+                  value.utf8.count <= 4_096,
+                  !value.hasSuffix("/"),
+                  !value.unicodeScalars.contains(where: {
+                      CharacterSet.controlCharacters.contains($0)
+                          || CharacterSet.whitespacesAndNewlines.contains($0)
+                          || $0 == "\\"
+                  }),
+                  let components = URLComponents(string: value),
+                  components.scheme?.lowercased() == "https",
+                  components.host?.isEmpty == false,
+                  components.user == nil,
+                  components.password == nil,
+                  components.query == nil,
+                  components.fragment == nil,
+                  !components.path.hasSuffix("/") else { return false }
+            // Reuse the transport's URL rules before constructing any DEX
+            // object; injected transports cannot bypass this admission check.
+            return (try? CompatHTTPTransportPolicy(allowsInsecureHTTP: false).validate(
+                request: CompatHTTPRequest(url: value)
+            )) != nil
         }
     }
 
@@ -836,6 +930,20 @@ private struct PinnedInterpretedProfile: Sendable {
         preferenceSupport: .docTruyen3Q,
         imageRequestSupport: .pageURL
     )
+
+    static let foolSlideCustomizable166 = PinnedInterpretedProfile(
+        identifier: "foolslide-1.6.6",
+        sha256: "d45b6d44760cb0465cc7be317d6d1b899c778bb9d7c02d03fb6c2c141dfa137e",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+        maximumAPKBytes: 64 * 1024 * 1024,
+        packageName: "eu.kanade.tachiyomi.extension.all.foolslidecustomizable",
+        versionName: "1.6.6",
+        versionCode: 6,
+        expectedSourceID: 6_351_052_922_295_965_587,
+        filterSupport: .staticList,
+        preferenceSupport: .foolSlideCustomizable,
+        imageRequestSupport: .pageURL
+    )
 }
 
 private actor PinnedInterpretedRuntime {
@@ -940,6 +1048,8 @@ private actor PinnedInterpretedRuntime {
         case .eternalMangas:
             extensionPackageName = profile.packageName
         case .docTruyen3Q:
+            extensionPackageName = profile.packageName
+        case .foolSlideCustomizable:
             extensionPackageName = profile.packageName
         }
         let bridge = HostBridge.minimal(
@@ -1270,6 +1380,9 @@ private actor PinnedInterpretedRuntime {
         // callers that consume getMangaDetails directly.
         if converted.manga.url.isEmpty {
             converted.manga.url = manga.url
+        }
+        if converted.manga.title.isEmpty {
+            converted.manga.title = manga.title
         }
         return converted
     }

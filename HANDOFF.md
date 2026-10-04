@@ -1,6 +1,36 @@
 # Kami Continuation Handoff
 
-Last updated: 2026-09-18 (America/Lima)
+Last updated: 2026-10-03 (America/Lima)
+
+## Canonical continuation — 2026-10-03
+
+Continue the existing Kami manga repository on `assistant/foolslide-20260920`,
+starting from `a479806ba81c71845ba0a154a096bf47736b7393`. The initial inherited
+host/HTML/FoolSlide changes and local Linux preparation were preserved in a
+local Git checkpoint before modification. Do not replace the working tree with
+an old `main` snapshot. This repository is separate from the Discord assistant
+with the same name.
+
+The current work covers exact FoolSlide execution and host semantics, a
+configured-source factory boundary, native category management, manifest-role
+corpus selection and Linux CI. The default FoolSlide URL is a loopback
+placeholder: its downloaded factory requires explicit HTTPS configuration,
+and production preference UI/persistence remains future work. Read the current
+[README](README.md), [task tracker](TODO.md), and
+[dated verification record](docs/VERIFICATION-2026-10-03.md) for current scope.
+The broad objective remains active; downloads, update scanning, broader
+extension APIs and other daily-reader capabilities are still required.
+
+Linux verifies the portable packages and can exercise SQLite through an
+explicit system module. SwiftUI, simulator/device compilation and IPA packaging
+require the Apple workflows for the exact implementation commit. Physical-device
+interaction and live extension sites are not established by those checks.
+
+## Historical handoff through 2026-09-18
+
+The following ledger preserves earlier evidence. Its clean-main instructions,
+profile counts, recommended next extension and "current" checkpoint labels are
+historical; the canonical continuation above and current code take precedence.
 
 This is the durable continuation point for moving Kami development to another
 computer. The previous GLM 5.3 session stopped because its usage quota was

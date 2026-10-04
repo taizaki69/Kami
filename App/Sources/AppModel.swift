@@ -23,7 +23,8 @@ final class AppModel: ObservableObject {
     let installationService: ExtensionInstallationService
     let sourceFactory: ExtensionSourceFactory
 
-    @Published var library: [Manga] = []
+    @Published private(set) var librarySnapshot = LibrarySnapshot()
+    @Published private(set) var libraryError: String?
     @Published var loading = false
     @Published private(set) var installedExtensions: [InstalledExtensionTrust] = []
     @Published private(set) var extensionBusyPackages = Set<String>()
@@ -31,6 +32,10 @@ final class AppModel: ObservableObject {
     @Published var extensionMessage: String?
     @Published private(set) var sourceGeneration: UInt64 = 0
     @Published private(set) var extensionRepositories: [ExtensionRepositoryState] = []
+    private var libraryReloadGeneration: UInt64 = 0
+
+    var library: [Manga] { librarySnapshot.manga }
+    var categories: [Category] { librarySnapshot.categories }
 
     init() {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -60,9 +65,61 @@ final class AppModel: ObservableObject {
     }
 
     func reloadLibrary() {
-        Task {
-            library = (try? await store.libraryManga()) ?? []
+        Task { await refreshLibrary() }
+    }
+
+    func refreshLibrary() async {
+        libraryReloadGeneration &+= 1
+        let generation = libraryReloadGeneration
+        loading = true
+        defer {
+            if generation == libraryReloadGeneration { loading = false }
         }
+        do {
+            let snapshot = try await store.librarySnapshot()
+            guard generation == libraryReloadGeneration, !Task.isCancelled else { return }
+            librarySnapshot = snapshot
+            libraryError = nil
+        } catch {
+            guard generation == libraryReloadGeneration, !Task.isCancelled else { return }
+            libraryError = "Could not load your library. Please try again."
+        }
+    }
+
+    func createCategory(name: String) async throws {
+        _ = try await store.createCategory(name: name)
+        await refreshLibrary()
+    }
+
+    func renameCategory(id: Int64, name: String) async throws {
+        try await store.renameCategory(id: id, name: name)
+        await refreshLibrary()
+    }
+
+    func reorderCategories(ids: [Int64]) async throws {
+        try await store.reorderCategories(ids: ids)
+        await refreshLibrary()
+    }
+
+    func deleteCategories(ids: Set<Int64>) async throws {
+        try await store.deleteCategories(ids: ids)
+        await refreshLibrary()
+    }
+
+    func updateCategories(_ draft: CategoryAssignmentDraft) async throws {
+        try await store.updateCategories(adding: draft.additions, removing: draft.removals,
+                                         mangaIDs: draft.mangaIDs)
+        await refreshLibrary()
+    }
+
+    func setLibrary(_ inLibrary: Bool, mangaId: Int64) async throws {
+        try await store.setLibrary(inLibrary, mangaId: mangaId)
+        await refreshLibrary()
+    }
+
+    func libraryErrorMessage(for error: Error) -> String {
+        (error as? LibraryCategoryError)?.errorDescription
+            ?? "Your changes could not be saved. Please try again."
     }
 
     func source(id: Int64) -> (any KamiSource)? {
@@ -291,8 +348,11 @@ final class AppModel: ObservableObject {
     func toggleLibrary(_ manga: Manga) {
         guard let id = manga.id else { return }
         Task {
-            try? await store.setLibrary(!manga.inLibrary, mangaId: id)
-            reloadLibrary()
+            do {
+                try await setLibrary(!manga.inLibrary, mangaId: id)
+            } catch {
+                libraryError = libraryErrorMessage(for: error)
+            }
         }
     }
 }

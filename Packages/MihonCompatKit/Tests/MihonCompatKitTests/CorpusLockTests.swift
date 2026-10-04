@@ -99,8 +99,8 @@ final class CorpusLockTests: XCTestCase {
         XCTAssertEqual(lock.upstream.catalogRevision.count, 40)
         XCTAssertEqual(lock.upstream.sourceRevision.count, 40)
         XCTAssertEqual(lock.artifacts.count, 27)
-        XCTAssertEqual(lock.selection.executionArtifactCount, 10)
-        XCTAssertEqual(lock.selection.measurementArtifactCount, 11)
+        XCTAssertEqual(lock.selection.executionArtifactCount, 13)
+        XCTAssertEqual(lock.selection.measurementArtifactCount, 8)
         XCTAssertEqual(lock.selection.conformanceArtifactCount, 6)
         XCTAssertEqual(
             lock.selection.currentLib16ArtifactCount,
@@ -116,18 +116,18 @@ final class CorpusLockTests: XCTestCase {
         )
 
         let byRole = Dictionary(grouping: lock.artifacts, by: \.role)
-        XCTAssertEqual(byRole["execution"]?.count, 10)
-        XCTAssertEqual(byRole["measurement"]?.count, 11)
+        XCTAssertEqual(byRole["execution"]?.count, 13)
+        XCTAssertEqual(byRole["measurement"]?.count, 8)
         XCTAssertEqual(byRole["conformance"]?.count, 6)
         XCTAssertEqual(Set(byRole.keys), ["execution", "measurement", "conformance"])
 
         XCTAssertEqual(Set(byRole["execution", default: []].map(\.name)), [
             "akuma", "mangadex", "batcave", "kawiimanga", "mangamelon",
             "baozimanhua", "tuttoanimemanga", "mangasoriginesfr", "komikcast",
-            "sssscanlator",
+            "sssscanlator", "eternalmangas", "doctruyen3q", "foolslidecustomizable",
         ])
         XCTAssertEqual(Set(byRole["measurement", default: []].map(\.name)), [
-            "doctruyen3q", "eternalmangas", "foolslidecustomizable", "hayalistic",
+            "hayalistic",
             "komga", "mangapandaonl", "mangaplus",
             "nhentaixxx", "pixivcomic", "readmanga", "xcomic",
         ])
@@ -173,7 +173,11 @@ final class CorpusLockTests: XCTestCase {
 
             switch artifact.role {
             case "execution":
-                XCTAssertFalse(artifact.path.contains("/"), artifact.name)
+                XCTAssertTrue(
+                    artifact.path == "\(artifact.name).apk"
+                        || artifact.path == "measurement/\(artifact.name).apk",
+                    artifact.name
+                )
                 XCTAssertEqual(sourceURL.host, "github.com", artifact.name)
                 XCTAssertTrue(
                     sourceURL.path.hasPrefix("/keiyoushi/extensions/releases/download/"),
@@ -191,6 +195,11 @@ final class CorpusLockTests: XCTestCase {
                 XCTAssertNotNil(artifact.behaviorFamily, artifact.name)
                 XCTAssertGreaterThan(artifact.sourceCount ?? 0, 0, artifact.name)
                 XCTAssertTrue(["safe", "mixed", "nsfw"].contains(artifact.contentWarning), artifact.name)
+                XCTAssertFalse(InterpretedExtensionProfileCatalog.supports(
+                    packageName: try XCTUnwrap(artifact.package, artifact.name),
+                    versionName: try XCTUnwrap(artifact.version, artifact.name),
+                    versionCode: try XCTUnwrap(artifact.versionCode, artifact.name)
+                ), "an executable exact profile must be removed from the measurement role")
             case "conformance":
                 XCTAssertNil(artifact.package, artifact.name)
                 XCTAssertEqual(artifact.path, "\(artifact.name).apk", artifact.name)
@@ -261,8 +270,22 @@ final class CorpusLockTests: XCTestCase {
             XCTAssertEqual(manifest.versionCode, artifact.versionCode, artifact.name)
             XCTAssertEqual(manifest.extensionLibVersion, artifact.extensionLib, artifact.name)
 
-            if artifact.role == "measurement" {
-                XCTAssertNoThrow(try verifier.verify(apkBytes: bytes), artifact.name)
+            let identity = try verifier.verify(apkBytes: bytes)
+            if artifact.extensionLib == "1.6" {
+                XCTAssertEqual(identity.signers.count, 1, artifact.name)
+                XCTAssertTrue(identity.contains(fingerprint:
+                    "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2"
+                ), artifact.name)
+                if artifact.role == "execution" {
+                    let versionCode = try XCTUnwrap(artifact.versionCode, artifact.name)
+                    let sourceIDs = InterpretedExtensionProfileCatalog.expectedSourceIDs(
+                        packageName: manifest.packageName,
+                        versionName: artifact.version ?? "",
+                        versionCode: versionCode
+                    )
+                    XCTAssertNotNil(sourceIDs, artifact.name)
+                    XCTAssertEqual(sourceIDs?.count, artifact.sourceCount, artifact.name)
+                }
             }
         }
     }
@@ -295,12 +318,10 @@ final class CorpusLockTests: XCTestCase {
         XCTAssertEqual(expected.formatVersion, 1)
 
         let auditor = InterpretedCompatibilityAudit()
-        let reports = try measurement.map { artifact in
-            let bytes = [UInt8](try Data(
-                contentsOf: corpusRoot.appendingPathComponent(artifact.path),
-                options: .mappedIfSafe
-            ))
-            return try auditor.analyze(apkBytes: bytes)
+        let selected = try InterpretedCorpusSelection.inputs(at: corpusRoot, role: .measurement)
+        XCTAssertEqual(selected.count, measurement.count)
+        let reports = try selected.map { input in
+            try auditor.analyze(apkBytes: input.loadAPKBytes())
         }
         let actualArtifacts = reports.map { report in
             BaselineArtifact(
@@ -349,6 +370,148 @@ final class CorpusLockTests: XCTestCase {
                 }
         )
         XCTAssertEqual(actualAggregate, expected.aggregate)
+    }
+
+    func testRoleSelectionUsesManifestAndRechecksBytesAtReadTime() throws {
+        let root = try temporaryCorpus()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("measurement"), withIntermediateDirectories: true
+        )
+        let execution = [UInt8]([1, 2, 3])
+        let measurement = [UInt8]([4, 5, 6])
+        try Data(execution).write(to: root.appendingPathComponent("measurement/promoted.apk"))
+        let measurementURL = root.appendingPathComponent("measurement/remaining.apk")
+        try Data(measurement).write(to: measurementURL)
+        try writeSelectionManifest(at: root, artifacts: [
+            selectionArtifact(path: "measurement/promoted.apk", role: "execution", bytes: execution),
+            selectionArtifact(path: "measurement/remaining.apk", role: "measurement", bytes: measurement),
+        ])
+
+        let selected = try InterpretedCorpusSelection.inputs(at: root, role: .measurement)
+        XCTAssertEqual(selected.count, 1)
+        XCTAssertEqual(try selected[0].loadAPKBytes(), measurement)
+        let promoted = try InterpretedCorpusSelection.inputs(at: root, role: .execution)
+        XCTAssertEqual(promoted.count, 1)
+        XCTAssertEqual(try promoted[0].loadAPKBytes(), execution)
+
+        try Data([UInt8](repeating: 0, count: measurement.count)).write(to: measurementURL)
+        XCTAssertThrowsError(try selected[0].loadAPKBytes()) { error in
+            XCTAssertEqual(error as? InterpretedCorpusSelection.Error, .apkDigestMismatch)
+        }
+    }
+
+    func testRoleSelectionRejectsEscapesDuplicatePathsAndMalformedLocks() throws {
+        let root = try temporaryCorpus()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bytes = [UInt8]([1])
+        for path in ["../outside.apk", "/outside.apk", "nested\\outside.apk", "nested//bad.apk"] {
+            try writeSelectionManifest(at: root, artifacts: [
+                selectionArtifact(path: path, role: "measurement", bytes: bytes),
+            ])
+            XCTAssertThrowsError(try InterpretedCorpusSelection.inputs(at: root, role: .measurement)) { error in
+                XCTAssertEqual(error as? InterpretedCorpusSelection.Error, .unsafePath)
+            }
+        }
+        try writeSelectionManifest(at: root, artifacts: [
+            selectionArtifact(path: "same.apk", role: "measurement", bytes: bytes),
+            selectionArtifact(path: "same.apk", role: "execution", bytes: bytes),
+        ])
+        XCTAssertThrowsError(try InterpretedCorpusSelection.inputs(at: root, role: .measurement)) { error in
+            XCTAssertEqual(error as? InterpretedCorpusSelection.Error, .duplicatePath)
+        }
+        try writeSelectionManifest(at: root, artifacts: [
+            selectionArtifact(path: "only.apk", role: "execution", bytes: bytes),
+        ])
+        XCTAssertThrowsError(try InterpretedCorpusSelection.inputs(at: root, role: .measurement)) { error in
+            XCTAssertEqual(error as? InterpretedCorpusSelection.Error, .emptySelection)
+        }
+        try writeSelectionManifest(at: root, artifacts: [
+            selectionArtifact(path: "unknown.apk", role: "unknown", bytes: bytes),
+        ])
+        XCTAssertThrowsError(try InterpretedCorpusSelection.inputs(at: root, role: .measurement)) { error in
+            XCTAssertEqual(error as? InterpretedCorpusSelection.Error, .invalidManifest)
+        }
+        try writeSelectionManifest(at: root, artifacts: [[
+            "path": "bad.apk", "role": "measurement", "sha256": String(repeating: "x", count: 64),
+        ]])
+        XCTAssertThrowsError(try InterpretedCorpusSelection.inputs(at: root, role: .measurement)) { error in
+            XCTAssertEqual(error as? InterpretedCorpusSelection.Error, .invalidArtifact)
+        }
+    }
+
+    func testRoleSelectionRejectsSymlinkEscapes() throws {
+        #if os(Windows)
+        throw XCTSkip("symlink-confinement regression runs on Linux and Apple hosts")
+        #else
+        let parent = try temporaryCorpus()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let root = parent.appendingPathComponent("corpus", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let bytes = [UInt8]([1])
+        let outside = parent.appendingPathComponent("outside.apk")
+        try Data(bytes).write(to: outside)
+        let escape = root.appendingPathComponent("escape.apk")
+        try FileManager.default.createSymbolicLink(at: escape, withDestinationURL: outside)
+        try writeSelectionManifest(at: root, artifacts: [
+            selectionArtifact(path: "escape.apk", role: "measurement", bytes: bytes),
+        ])
+        let escapedInput = try InterpretedCorpusSelection.inputs(at: root, role: .measurement)
+        XCTAssertThrowsError(try escapedInput[0].loadAPKBytes()) { error in
+            XCTAssertEqual(error as? InterpretedCorpusSelection.Error, .unsafePath)
+        }
+
+        let outsideManifest = parent.appendingPathComponent("outside-manifest.json")
+        try Data("{}".utf8).write(to: outsideManifest)
+        let manifest = root.appendingPathComponent("manifest.json")
+        try FileManager.default.removeItem(at: manifest)
+        try FileManager.default.createSymbolicLink(at: manifest, withDestinationURL: outsideManifest)
+        XCTAssertThrowsError(try InterpretedCorpusSelection.inputs(at: root, role: .measurement)) { error in
+            XCTAssertEqual(error as? InterpretedCorpusSelection.Error, .unsafePath)
+        }
+        #endif
+    }
+
+    func testRoleSelectionRejectsOversizedInputsBeforeReadingAPKs() throws {
+        let root = try temporaryCorpus()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bytes = [UInt8]([1])
+        let oversized = root.appendingPathComponent("oversized.apk")
+        XCTAssertTrue(FileManager.default.createFile(atPath: oversized.path, contents: Data()))
+        let handle = try FileHandle(forWritingTo: oversized)
+        try handle.truncate(atOffset: UInt64(APKSignatureVerifier.maximumAPKSize) + 1)
+        try handle.close()
+        try writeSelectionManifest(at: root, artifacts: [
+            selectionArtifact(path: "oversized.apk", role: "measurement", bytes: bytes),
+        ])
+        let oversizedInput = try InterpretedCorpusSelection.inputs(at: root, role: .measurement)
+        XCTAssertThrowsError(try oversizedInput[0].loadAPKBytes()) { error in
+            XCTAssertEqual(error as? InterpretedCorpusSelection.Error, .invalidAPKSize)
+        }
+        try Data(repeating: 0x20, count: 256 * 1024 + 1)
+            .write(to: root.appendingPathComponent("manifest.json"))
+        XCTAssertThrowsError(try InterpretedCorpusSelection.inputs(at: root, role: .measurement)) { error in
+            XCTAssertEqual(error as? InterpretedCorpusSelection.Error, .invalidManifest)
+        }
+    }
+
+    private func temporaryCorpus() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kami-corpus-selection-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    private func selectionArtifact(path: String, role: String, bytes: [UInt8]) -> [String: String] {
+        ["path": path, "role": role, "sha256": APKSignatureVerifier.apkSHA256(bytes)]
+    }
+
+    private func writeSelectionManifest(at root: URL, artifacts: [[String: String]]) throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "schemaVersion": 2,
+            "artifacts": artifacts,
+        ])
+        try data.write(to: root.appendingPathComponent("manifest.json"))
     }
 
     private func fetchTable(named marker: String, from script: String) throws -> [String] {

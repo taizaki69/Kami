@@ -866,6 +866,20 @@ public final class HostBridge {
         }
     }
 
+    private struct ChronoFieldBox {
+        let name: String
+    }
+
+    private struct DateTimeFormatterBuilderBox {
+        var pattern: String
+        var defaultYear: Int64?
+    }
+
+    private struct DateTimeFormatterBox {
+        let pattern: String
+        let defaultYear: Int64?
+    }
+
     private struct LocalDateBox {
         let year: Int
         let month: Int
@@ -6786,6 +6800,26 @@ public final class HostBridge {
 
     private static func registerJavaTimeSurface(_ bridge: HostBridge) {
         let dateFormatter = "Ljava/time/format/DateTimeFormatter;"
+        func formatterBox(_ value: RVal) -> DateTimeFormatterBox? {
+            guard case let .obj(object) = value,
+                  object.dexType == dateFormatter else { return nil }
+            if let box = object.payload as? DateTimeFormatterBox { return box }
+            if let pattern = object.payload as? String {
+                return DateTimeFormatterBox(pattern: pattern, defaultYear: nil)
+            }
+            return nil
+        }
+        func hasField(_ pattern: String, _ fields: String) -> Bool {
+            var quoted = false
+            for character in pattern {
+                if character == "'" {
+                    quoted.toggle()
+                } else if !quoted, fields.contains(character) {
+                    return true
+                }
+            }
+            return false
+        }
         let localDateTime = "Ljava/time/LocalDateTime;"
         bridge.register(
             class: localDateTime,
@@ -6830,13 +6864,11 @@ public final class HostBridge {
                     "local date-time parse input too long"
                 )
             }
-            guard case let .obj(formatter) = try argument(
-                args, 1, "LocalDateTime.parse"
-            ), formatter.dexType == "Ljava/time/format/DateTimeFormatter;",
-               let pattern = formatter.payload as? String,
-               pattern.utf8.count <= 256 else {
+            guard let box = formatterBox(try argument(args, 1, "LocalDateTime.parse")),
+                  box.pattern.utf8.count <= 256 else {
                 throw VMError.verify("LocalDateTime.parse formatter")
             }
+            let pattern = box.pattern
             // java.time's LocalDateTime.parse requires time-of-day fields;
             // date-only patterns fail and the extension's tryParse chain
             // falls through to tryParseDate.
@@ -6894,6 +6926,119 @@ public final class HostBridge {
                 "Ljava/time/DateTimeException;",
                 "unable to obtain ZonedDateTime from formatter without a zone"
             )
+        }
+
+        let formatterBuilder = "Ljava/time/format/DateTimeFormatterBuilder;"
+        bridge.staticFields["Ljava/time/temporal/ChronoField;->YEAR"] = .obj(ObjInstance(
+            dexType: "Ljava/time/temporal/ChronoField;",
+            payload: ChronoFieldBox(name: "YEAR"),
+            isHost: true
+        ))
+        bridge.register(
+            class: formatterBuilder,
+            "<init>",
+            prototype: "()V"
+        ) { _, args in
+            guard case let .obj(object) = try argument(
+                args, 0, "DateTimeFormatterBuilder.<init>"
+            ) else {
+                throw VMError.verify("DateTimeFormatterBuilder.<init> receiver")
+            }
+            object.payload = DateTimeFormatterBuilderBox(pattern: "", defaultYear: nil)
+            return .null
+        }
+        bridge.register(
+            class: formatterBuilder,
+            "appendPattern",
+            prototype: "(Ljava/lang/String;)Ljava/time/format/DateTimeFormatterBuilder;"
+        ) { _, args in
+            guard case let .obj(builder) = try argument(
+                args, 0, "DateTimeFormatterBuilder.appendPattern"
+            ), let box = builder.payload as? DateTimeFormatterBuilderBox,
+               case let .obj(patternObject) = try argument(
+                   args, 1, "DateTimeFormatterBuilder.appendPattern"
+               ), let pattern = patternObject.payload as? String else {
+                throw VMError.verify("DateTimeFormatterBuilder.appendPattern arguments")
+            }
+            let patternBytes = box.pattern.utf8.count.addingReportingOverflow(pattern.utf8.count)
+            guard !pattern.isEmpty,
+                  !patternBytes.overflow,
+                  patternBytes.partialValue <= 256,
+                  pattern.filter({ $0 == "'" }).count.isMultiple(of: 2) else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "invalid date pattern"
+                )
+            }
+            guard box.defaultYear == nil else {
+                throw hostThrowable(
+                    "Ljava/lang/UnsupportedOperationException;",
+                    "date patterns after parse defaults are outside the measured surface"
+                )
+            }
+            builder.payload = DateTimeFormatterBuilderBox(
+                pattern: box.pattern + pattern,
+                defaultYear: box.defaultYear
+            )
+            return .obj(builder)
+        }
+        bridge.register(
+            class: formatterBuilder,
+            "parseDefaulting",
+            prototype: "(Ljava/time/temporal/TemporalField;J)Ljava/time/format/DateTimeFormatterBuilder;"
+        ) { _, args in
+            guard case let .obj(builder) = try argument(
+                args, 0, "DateTimeFormatterBuilder.parseDefaulting"
+            ), let box = builder.payload as? DateTimeFormatterBuilderBox,
+               case let .obj(fieldObject) = try argument(
+                   args, 1, "DateTimeFormatterBuilder.parseDefaulting"
+               ), fieldObject.dexType == "Ljava/time/temporal/ChronoField;",
+               let fieldBox = fieldObject.payload as? ChronoFieldBox,
+               fieldBox.name == "YEAR",
+               case let .long(value) = try argument(
+                   args, 2, "DateTimeFormatterBuilder.parseDefaulting"
+            ) else {
+                throw VMError.verify("DateTimeFormatterBuilder.parseDefaulting arguments")
+            }
+            guard !box.pattern.isEmpty else {
+                throw hostThrowable(
+                    "Ljava/lang/UnsupportedOperationException;",
+                    "parse defaults before date patterns are outside the measured surface"
+                )
+            }
+            builder.payload = DateTimeFormatterBuilderBox(
+                pattern: box.pattern,
+                defaultYear: box.defaultYear ?? value
+            )
+            return .obj(builder)
+        }
+        bridge.register(
+            class: formatterBuilder,
+            "toFormatter",
+            prototype: "(Ljava/util/Locale;)Ljava/time/format/DateTimeFormatter;"
+        ) { _, args in
+            guard case let .obj(builder) = try argument(
+                args, 0, "DateTimeFormatterBuilder.toFormatter"
+            ), let box = builder.payload as? DateTimeFormatterBuilderBox,
+               case let .obj(localeObject) = try argument(
+                   args, 1, "DateTimeFormatterBuilder.toFormatter"
+               ), localeObject.dexType == "Ljava/util/Locale;",
+               let locale = localeObject.payload as? String,
+               locale == "ROOT" || locale == "ENGLISH" || locale == "US" else {
+                throw VMError.verify("DateTimeFormatterBuilder.toFormatter arguments")
+            }
+            let pattern = box.pattern
+            guard !pattern.isEmpty, pattern.utf8.count <= 256 else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "invalid date pattern"
+                )
+            }
+            return .obj(ObjInstance(
+                dexType: dateFormatter,
+                payload: DateTimeFormatterBox(pattern: pattern, defaultYear: box.defaultYear),
+                isHost: true
+            ))
         }
 
         bridge.staticFields["\(kotlinInstant)->Companion"] = .obj(ObjInstance(
@@ -7022,25 +7167,78 @@ public final class HostBridge {
         }
         bridge.register(
             class: localDate,
+            "now",
+            prototype: "()Ljava/time/LocalDate;",
+            isStatic: true
+        ) { _, _ in
+            let now = Calendar(identifier: .gregorian)
+            let base = now.dateComponents([.year, .month, .day], from: Date())
+            return .obj(ObjInstance(
+                dexType: localDate,
+                payload: LocalDateBox(
+                    year: base.year ?? 1970,
+                    month: base.month ?? 1,
+                    day: base.day ?? 1
+                ),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: localDate,
+            "getYear",
+            prototype: "()I"
+        ) { _, args in
+            guard case let .obj(object) = try argument(
+                args, 0, "LocalDate.getYear"
+            ), let box = object.payload as? LocalDateBox else {
+                throw VMError.verify("LocalDate.getYear receiver")
+            }
+            return .int(Int32(box.year))
+        }
+        bridge.register(
+            class: localDate,
             "parse",
             prototype: "(Ljava/lang/CharSequence;Ljava/time/format/DateTimeFormatter;)Ljava/time/LocalDate;",
             isStatic: true
         ) { _, args in
             let input = try requiredString(args, 0, "LocalDate.parse")
             guard input.utf8.count <= 256,
-                  case let .obj(formatObject) = try argument(args, 1, "LocalDate.parse"),
-                  let pattern = formatObject.payload as? String else {
+                  let box = formatterBox(try argument(args, 1, "LocalDate.parse")),
+                  box.pattern.utf8.count <= 256 else {
                 throw hostThrowable(
                     "Ljava/time/format/DateTimeParseException;",
                     "invalid local date"
                 )
             }
+            let pattern = box.pattern
+            let hasYear = hasField(pattern, "yu")
+            guard hasField(pattern, "M"), hasField(pattern, "d"),
+                  hasYear || box.defaultYear != nil else {
+                throw hostThrowable(
+                    "Ljava/time/format/DateTimeParseException;",
+                    "formatter lacks required local date fields"
+                )
+            }
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0)!
             let formatter = DateFormatter()
-            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.calendar = calendar
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.timeZone = TimeZone(secondsFromGMT: 0)
             formatter.dateFormat = pattern
             formatter.isLenient = false
+            if !hasYear, let defaultYear = box.defaultYear {
+                guard (1...9_999).contains(defaultYear),
+                      let defaultDate = calendar.date(from: DateComponents(
+                          year: Int(defaultYear), month: 1, day: 1, hour: 12
+                      )) else {
+                    throw hostThrowable(
+                        "Ljava/time/format/DateTimeParseException;",
+                        "invalid default local date year"
+                    )
+                }
+                formatter.defaultDate = defaultDate
+            }
             guard let parsed = formatter.date(from: input),
                   formatter.string(from: parsed) == input else {
                 throw hostThrowable(
@@ -7048,8 +7246,6 @@ public final class HostBridge {
                     "invalid local date"
                 )
             }
-            var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = TimeZone(secondsFromGMT: 0)!
             let components = calendar.dateComponents([.year, .month, .day], from: parsed)
             guard let year = components.year,
                   let month = components.month,
@@ -7749,6 +7945,14 @@ public final class HostBridge {
             isStatic: true
         ) { _, args in
             try listBox(args, "CollectionsKt.firstOrNull").elements.first ?? .null
+        }
+        bridge.register(
+            class: collections,
+            "lastOrNull",
+            prototype: "(Ljava/util/List;)Ljava/lang/Object;",
+            isStatic: true
+        ) { _, args in
+            try listBox(args, "CollectionsKt.lastOrNull").elements.last ?? .null
         }
         bridge.register(
             class: collections,
@@ -10032,6 +10236,72 @@ public final class HostBridge {
         }
         bridge.register(
             class: requestBuilder,
+            "removeHeader",
+            prototype: "(Ljava/lang/String;)Lokhttp3/Request$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.Builder.removeHeader"),
+                  let builder = object.payload as? RequestBuilderBox else {
+                throw VMError.verify("Request.Builder.removeHeader arguments")
+            }
+            let name = try requiredString(args, 1, "Request.Builder.removeHeader")
+            guard !name.isEmpty, name.utf8.count <= 256,
+                  name.utf8.allSatisfy({ byte in
+                      (0x30...0x39).contains(byte)
+                          || (0x41...0x5a).contains(byte)
+                          || (0x61...0x7a).contains(byte)
+                          || "!#$%&'*+-.^_`|~".utf8.contains(byte)
+                  }) else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "invalid header name"
+                )
+            }
+            builder.headers.removeAll {
+                $0.name.caseInsensitiveCompare(name) == .orderedSame
+            }
+            return .obj(object)
+        }
+        bridge.register(
+            class: requestBuilder,
+            "method",
+            prototype: "(Ljava/lang/String;Lokhttp3/RequestBody;)Lokhttp3/Request$Builder;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Request.Builder.method"),
+                  let builder = object.payload as? RequestBuilderBox else {
+                throw VMError.verify("Request.Builder.method arguments")
+            }
+            let method = try requiredString(args, 1, "Request.Builder.method")
+            guard ["GET", "POST", "PUT", "DELETE", "HEAD", "PATCH"].contains(method),
+                  method.utf8.count <= 32 else {
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "unsupported HTTP method")
+            }
+            let body: CompatHTTPRequestBody?
+            switch try argument(args, 2, "Request.Builder.method") {
+            case .null:
+                body = nil
+            case let .obj(bodyObject):
+                guard let value = bodyObject.payload as? CompatHTTPRequestBody else {
+                    throw VMError.verify("Request.Builder.method body")
+                }
+                body = value
+            default:
+                throw VMError.verify("Request.Builder.method body")
+            }
+            guard !(method == "GET" || method == "HEAD") || body == nil,
+                  !["POST", "PUT", "PATCH"].contains(method) || body != nil else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "HTTP method has an invalid request body"
+                )
+            }
+            // Validation precedes both assignments; rejected calls leave the
+            // builder's prior method/body untouched.
+            builder.method = method
+            builder.body = body
+            return .obj(object)
+        }
+        bridge.register(
+            class: requestBuilder,
             "post",
             prototype: "(Lokhttp3/RequestBody;)Lokhttp3/Request$Builder;"
         ) { _, args in
@@ -10959,6 +11229,69 @@ public final class HostBridge {
                 throw htmlThrowable(error)
             }
         }
+        bridge.register(
+            class: document,
+            "createElement",
+            prototype: "(Ljava/lang/String;)Lorg/jsoup/nodes/Element;"
+        ) { _, args in
+            let receiver = try box(args, "Document.createElement")
+            let tagName = try requiredString(args, 1, "Document.createElement")
+            guard !tagName.isEmpty, tagName.utf8.count <= 256,
+                  tagName.utf8.allSatisfy({ byte in
+                      (0x30...0x39).contains(byte)
+                          || (0x41...0x5a).contains(byte)
+                          || (0x61...0x7a).contains(byte)
+                          || [0x3a, 0x5f, 0x2d].contains(byte)
+                  }) else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "invalid HTML tag name"
+                )
+            }
+            do {
+                return value(
+                    try receiver.context.createElement(tagName),
+                    context: receiver.context
+                )
+            } catch {
+                throw htmlThrowable(error)
+            }
+        }
+        bridge.register(class: document, "toString", prototype: "()Ljava/lang/String;") { _, args in
+            let receiver = try box(args, "Document.toString")
+            do {
+                return string(try receiver.context.boundedString(try receiver.element.outerHtml()))
+            } catch {
+                throw htmlThrowable(error)
+            }
+        }
+
+        bridge.register(
+            class: element,
+            "attr",
+            prototype: "(Ljava/lang/String;Ljava/lang/String;)Lorg/jsoup/nodes/Element;"
+        ) { _, args in
+            let receiver = try box(args, "Element.attr")
+            let key = try requiredString(args, 1, "Element.attr")
+            let attributeValue = try requiredString(args, 2, "Element.attr")
+            guard !key.isEmpty,
+                  key.utf8.count <= 256,
+                  key.utf8.allSatisfy({ byte in
+                      byte > 0x20 && byte < 0x7f
+                          && ![0x22, 0x27, 0x3c, 0x3e, 0x2f, 0x3d].contains(byte)
+                  }) else {
+                throw hostThrowable(
+                    "Ljava/lang/IllegalArgumentException;",
+                    "invalid HTML attribute"
+                )
+            }
+            do {
+                try receiver.context.setAttribute(receiver.element, key: key, value: attributeValue)
+                return try argument(args, 0, "Element.attr")
+            } catch {
+                throw htmlThrowable(error)
+            }
+        }
 
         let stringMethods: [(name: String, prototype: String, body: (SwiftSoup.Element) throws -> String)] = [
             ("attr", "(Ljava/lang/String;)Ljava/lang/String;", { _ in "" }),
@@ -11034,6 +11367,48 @@ public final class HostBridge {
                     return .null
                 }
                 return value(sibling, context: receiver.context)
+            } catch {
+                throw htmlThrowable(error)
+            }
+        }
+        bridge.register(
+            class: element,
+            "nextSibling",
+            prototype: "()Lorg/jsoup/nodes/Node;"
+        ) { _, args in
+            let receiver = try box(args, "Element.nextSibling")
+            guard let sibling = receiver.element.nextSibling() else {
+                return .null
+            }
+            if let siblingElement = sibling as? SwiftSoup.Element {
+                return value(siblingElement, context: receiver.context)
+            }
+            let descriptor: String
+            if sibling is SwiftSoup.TextNode {
+                descriptor = "Lorg/jsoup/nodes/TextNode;"
+            } else {
+                descriptor = "Lorg/jsoup/nodes/Node;"
+            }
+            return .obj(ObjInstance(
+                dexType: descriptor,
+                payload: CompatHTMLNodeBox(context: receiver.context, node: sibling),
+                isHost: true
+            ))
+        }
+        bridge.register(
+            class: "Lorg/jsoup/nodes/TextNode;",
+            "text",
+            prototype: "()Ljava/lang/String;"
+        ) { _, args in
+            guard case let .obj(object) = try argument(args, 0, "TextNode.text"),
+                  let node = object.payload as? CompatHTMLNodeBox else {
+                throw VMError.verify("TextNode.text receiver")
+            }
+            do {
+                guard let textNode = node.node as? SwiftSoup.TextNode else {
+                    throw VMError.verify("TextNode.text receiver")
+                }
+                return string(try node.context.boundedString(textNode.text()))
             } catch {
                 throw htmlThrowable(error)
             }

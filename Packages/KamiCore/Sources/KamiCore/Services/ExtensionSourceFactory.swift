@@ -11,6 +11,7 @@ public enum ExtensionSourceFactoryError: Error, Equatable, LocalizedError {
     case signerIdentityMismatch
     case manifestIdentityMismatch
     case sourceIdentityMismatch
+    case sourceConfigurationRequired
     case unsupportedProfile(packageName: String, versionName: String)
 
     public var errorDescription: String? {
@@ -27,6 +28,8 @@ public enum ExtensionSourceFactoryError: Error, Equatable, LocalizedError {
             return "The admitted extension manifest changed before source construction."
         case .sourceIdentityMismatch:
             return "The admitted extension source identities do not match its measured profile."
+        case .sourceConfigurationRequired:
+            return "FoolSlide Customizable requires an explicitly configured HTTPS source URL before it can be enabled."
         case let .unsupportedProfile(packageName, versionName):
             return "Kami does not yet have a measured runtime profile for \(packageName) \(versionName)."
         }
@@ -94,6 +97,18 @@ public struct ExtensionSourceFactory: Sendable {
         admission: ExtensionAdmission,
         requested: InterpretedExtensionPreferences?
     ) throws -> InterpretedExtensionPreferences {
+        if admission.packageName == "eu.kanade.tachiyomi.extension.all.foolslidecustomizable",
+           admission.versionName == "1.6.6",
+           admission.versionCode == 6 {
+            // The APK's default is a loopback placeholder, not a usable source.
+            // Authentication and exact source-ID checks happen first. The
+            // measured profile still validates every supplied preference.
+            guard let requested,
+                  let configuredURL = requested.strings["overrideBaseUrl"],
+                  !configuredURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ExtensionSourceFactoryError.sourceConfigurationRequired
+            }
+        }
         if let requested { return requested }
         guard admission.packageName == "eu.kanade.tachiyomi.extension.zh.baozimanhua",
               admission.versionName == "1.6.29",
