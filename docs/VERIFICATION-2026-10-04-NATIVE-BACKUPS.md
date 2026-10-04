@@ -44,11 +44,11 @@ ledgers operacionales. No se instala, activa o ejecuta una extensión al exporta
 Con Swift 6.3.3 en Linux pasan:
 
 - **371/371 MihonCompatKit**.
-- **222/222 KamiCore con SQLite**.
+- **223/223 KamiCore con SQLite**.
 - **95/95 KamiCore portable**.
 - Parse sintáctico de todos los archivos SwiftUI y `git diff --check`.
 
-Hay **41 regresiones nuevas**: 29 del codec y 12 del snapshot. Cubren campos
+Hay **42 regresiones nuevas**: 29 del codec y 13 del snapshot. Cubren campos
 completos, extremos Int64/valores superiores a 2^53, orden canónico, texto e
 identidades Unicode, baseline ausente frente a cero, claves desconocidas,
 referencias ambiguas/rotas, tipos inválidos, límites inclusivos y cancelación.
@@ -56,6 +56,9 @@ Una biblioteca sintética de 205 capítulos/historial demuestra que los 200
 elementos de la consulta de UI no recortan el backup y que los capítulos
 ocultos conservan estado. También se conservan URLs conocidas sin fila de
 capítulo y fechas/duración mayores que Int32.
+Doce categorías con posiciones repetidas y un orden diferente al de sus IDs
+mantienen su secuencia y pertenencias al codificar/decodificar; las claves
+locales del archivo conservan el orden de los empates.
 
 Los casos de Foo comprueban URL exacta, APK ausente, deshabilitado, hashes,
 signers, IDs, fingerprint/schema y JSON de preferencias dañados, así como

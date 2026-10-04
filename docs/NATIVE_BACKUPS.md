@@ -53,6 +53,8 @@ numerically, manga sort by source ID/exact UTF-8 URL, categories by order/key,
 and chapters by source order/URL. History, known URLs and memberships have
 stable byte ordering. Alternate titles and genres retain their saved sequence.
 Categories use archive-local keys instead of SQLite row IDs.
+Snapshot keys use a padded ordinal, retaining the saved category sequence when
+sort orders are equal; memberships follow that same category ordering.
 
 Source/URL identities and DTO equality compare exact UTF-8 bytes, matching
 SQLite BINARY identity; canonically equivalent Unicode URL spellings remain

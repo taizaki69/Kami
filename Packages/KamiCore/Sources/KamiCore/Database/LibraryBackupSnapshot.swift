@@ -44,14 +44,21 @@ enum LibraryBackupSnapshotReader {
         var categories: [Document.Category] = []
         for (index, row) in categoryRows.enumerated() {
             try Task.checkCancellation()
-            let key = "c\(index)"
+            // Equal sort_order values use the local ID as their display tie.
+            // Padded archive keys retain that sequence in the codec's byte sort.
+            let ordinal = String(index)
+            let key = "c" + String(repeating: "0", count: max(0, 4 - ordinal.count)) + ordinal
             categoryKeys[try integer(row, "id")] = key
             categories.append(.init(key: key, name: try string(row, "name"),
                                     sortOrder: try integer(row, "sort_order"), flags: try integer(row, "flags")))
         }
 
         var memberships: [Int64: [String]] = [:]
-        for row in try db.query("SELECT manga_id, category_id FROM manga_category ORDER BY manga_id, category_id") {
+        for row in try db.query("""
+            SELECT mc.manga_id, mc.category_id FROM manga_category mc
+            JOIN category c ON c.id=mc.category_id
+            ORDER BY mc.manga_id, c.sort_order, c.id
+            """) {
             try Task.checkCancellation()
             guard let key = categoryKeys[try integer(row, "category_id")] else { throw Failure.invalidStoredData }
             memberships[try integer(row, "manga_id"), default: []].append(key)

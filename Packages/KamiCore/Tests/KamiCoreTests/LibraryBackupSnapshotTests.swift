@@ -256,6 +256,24 @@ final class LibraryBackupSnapshotTests: XCTestCase {
         XCTAssertEqual(Set(decoded.manga.map { Data($0.url.utf8) }), [Data(composed.utf8), Data(decomposed.utf8)])
     }
 
+    func testCategoryOrderAndTiesRemainStableThroughCanonicalEncoding() async throws {
+        let f = try fixture()
+        defer { try? FileManager.default.removeItem(at: f.directory) }
+        let names = (0..<12).map { "Category \($0)" }
+        let mangaID = try manga(f)
+        for (index, name) in names.enumerated() {
+            let categoryID = try f.db.insert("INSERT INTO category(name,sort_order) VALUES (?,?)",
+                                            [.text(name), .int(index % 2)])
+            try f.db.run("INSERT INTO manga_category(manga_id,category_id) VALUES (?,?)", [.int(mangaID), .int(categoryID)])
+        }
+        let doc = try await f.store.exportBackupSnapshot(exportedAt: 0)
+        let decoded = try LibraryBackupCodec().decode(LibraryBackupCodec().encode(doc))
+        let expected = [0, 2, 4, 6, 8, 10, 1, 3, 5, 7, 9, 11].map { names[$0] }
+        XCTAssertEqual(doc.categories.map(\.name), expected)
+        XCTAssertEqual(decoded.categories.map(\.name), expected)
+        XCTAssertEqual(decoded, doc)
+    }
+
     func testUnconfiguredFoolSlideIsExplicitlyUnresolvedWithoutCreatingSettings() async throws {
         let f = try fixture()
         defer { try? FileManager.default.removeItem(at: f.directory) }
