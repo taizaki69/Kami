@@ -171,7 +171,7 @@ final class ExtensionPreferencesServiceTests: XCTestCase {
         try legacy.run("INSERT INTO source_preference(source_id,key,value) VALUES (?,?,?)",
                        [.int(Self.sourceID), .text("overrideBaseUrl"), .text("https://unbound.example")])
         let migrated = try LibraryStore(path: legacyPath)
-        XCTAssertEqual(try legacy.query("PRAGMA user_version").first?.int("user_version"), 3)
+        XCTAssertEqual(try legacy.query("PRAGMA user_version").first?.int("user_version"), Migrations.latest)
         let currentTrust = try await migrated.installedExtensionTrust(packageName: Self.package)
         XCTAssertEqual(currentTrust, trust)
         let snapshot = try await ExtensionPreferencesService(store: migrated).configuration(packageName: Self.package)

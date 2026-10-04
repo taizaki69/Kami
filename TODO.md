@@ -6,8 +6,8 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-03
 
 The full native-reader and compatibility objective remains active. The current
-implementation adds persistent FoolSlide settings and revocable source
-registrations on top of the verified FoolSlide/category/manifest-role work.
+implementation adds manual library updates and History resume on top of
+verified persistent FoolSlide settings and revocable source registrations.
 See [verification](docs/VERIFICATION-2026-10-03.md) for actual test/build evidence.
 Completed items below retain some historical checkpoint counts; those counts
 must not be used as evidence for the current commit.
@@ -19,13 +19,20 @@ must not be used as evidence for the current commit.
       Physical-device interaction remains a separate verification task.
 - [x] Reconcile execution/measurement roles for EternalMangas, DocTruyen3Q and
       FoolSlide without changing their APK hashes or granting new trust.
-- [~] Integrate persistent production settings for FoolSlide 1.6.6: authenticated
+- [x] Integrate persistent production settings for FoolSlide 1.6.6: authenticated
       schema, typed SQLite document, stale-save rejection, explicit enablement,
       source/image revocation and transactional source-result persistence.
-      Local evidence and exact-commit Apple CI are recorded separately.
+      Verified at `0ae9c4d` (PR #11), including Linux/macOS SQLite tests,
+      simulator/device compilation and unsigned IPA packaging.
 - [ ] Extend editable settings only after proving each additional profile's
       value domains and execution effects; Baozi keeps its safe banner default.
-- [ ] Continue downloads and library update scanning, then migration/backup UI,
+- [x] Implement manual library scanning, durable chapter discoveries, progress,
+      cancellation, finite per-manga outcomes and paginated Updates UI; resume
+      History/Updates from current persisted reading state. The SQLite and
+      coordination suites pass locally; the implementation PR records Apple
+      verification for its exact commit, separately from interaction testing.
+- [ ] Add scheduled background updates with explicit product controls.
+- [ ] Continue downloads, then migration/backup UI,
       without treating a passing compatibility suite as completion of the app.
 
 ## P0 — Extension research & foundation
@@ -63,7 +70,8 @@ must not be used as evidence for the current commit.
       preservation tests (run on macOS; code complete)
 - [x] Native MangaDex source (popular/latest/search/details/chapters/pages)
 - [x] SwiftUI app: Library / Browse / MangaDetail / Reader (paged) /
-      Extensions (repo add via store client) / History / Updates placeholders
+      Extensions (repo add via store client); History resume and manual
+      Updates are implemented in the active continuation above
 - [x] Reader progress + history persistence wired
 - [x] GitHub Actions: portable tests, Simulator build, unsigned device build,
       and real unsigned IPA artifact

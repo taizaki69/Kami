@@ -4,8 +4,11 @@ Last updated: 2026-10-03 (America/Lima)
 
 ## Canonical continuation — 2026-10-03
 
-The active settings continuation is `assistant/source-preferences-20261003`,
-based on `ecc97bc20adbb57dd62c4d1618319306a3f02c08` from
+The active continuation is `assistant/library-updates-20261003`, based on
+`0ae9c4ded6e5dd01f577798122789827ec2e3842` from
+[PR #11](https://github.com/taizaki69/Kami/pull/11). That settings checkpoint
+passed Linux/macOS tests, simulator/device compilation and unsigned IPA CI.
+It builds on `ecc97bc20adbb57dd62c4d1618319306a3f02c08` from
 [PR #10](https://github.com/taizaki69/Kami/pull/10). PR #10 contains the earlier
 FoolSlide/category work over `a479806ba81c71845ba0a154a096bf47736b7393`.
 The initial inherited
@@ -17,7 +20,7 @@ with the same name.
 The earlier continuation covers exact FoolSlide execution, native categories,
 manifest-role corpus selection and Linux CI. Its corrected head `ecc97bc`
 passed Linux/macOS tests, simulator/device compilation and unsigned IPA CI.
-The new work adds authenticated persistent Foo settings (HTTPS URL and adult
+The settings checkpoint adds authenticated persistent Foo settings (HTTPS URL and adult
 confirmation), explicit activation, revocable source/image lifetimes and a
 transaction that checks configuration freshness while saving source results.
 Any persisted Foo manga prevents changing the website. Disable keeps settings;
@@ -26,8 +29,16 @@ The app clears/recreates browse and reader sessions when a source is replaced.
 Read the current
 [README](README.md), [task tracker](TODO.md), and
 [dated verification record](docs/VERIFICATION-2026-10-03.md) for current scope.
-The broad objective remains active; downloads, update scanning, broader
-extension APIs and other daily-reader capabilities are still required.
+The current work adds a schema-4 discovery ledger, manual scanning with bounded
+source concurrency, cancellation and recoverable summaries, an actual Updates
+feed with pagination and per-manga issues, and History resume from persisted
+chapter state. Missing source chapters retain progress/history. Native MangaDex
+uses the bounded cancellable transport and rejects failed or incomplete API
+responses. Local logs and durable checkpoints are in
+`.git/checkpoints/20261003-library-updates/`; published workflow evidence is
+recorded on the implementation PR. Do not infer Apple success from a Linux parse.
+The broad objective remains active; downloads, scheduled background updates,
+broader extension APIs and other daily-reader capabilities are still required.
 
 Linux verifies the portable packages and can exercise SQLite through an
 explicit system module. SwiftUI, simulator/device compilation and IPA packaging

@@ -1,8 +1,19 @@
 import Foundation
-#if canImport(FoundationNetworking)
-import FoundationNetworking
-#endif
 import MihonCompatKit
+
+public enum MangaDexSourceError: Error, Equatable, Sendable, LocalizedError {
+    case invalidRequest
+    case invalidResponse
+    case httpStatus(Int)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidRequest: return "The MangaDex request is invalid."
+        case .invalidResponse: return "MangaDex returned an incomplete response."
+        case let .httpStatus(status): return "MangaDex returned HTTP \(status)."
+        }
+    }
+}
 
 /// Native MangaDex source speaking the public MangaDex API v5 (jsonapi).
 /// This is a *native* source — not extension compatibility — and exists so
@@ -15,10 +26,18 @@ public struct MangaDexSource: KamiSource {
     public let baseURL = "https://mangadex.org"
 
     private let api = "https://api.mangadex.org"
-    private let session: URLSession
+    static let maximumAPIResponseBytes = 16 * 1024 * 1024
+    private static let apiPolicy = CompatHTTPTransportPolicy(
+        maximumRequestBodyBytes: 1,
+        maximumResponseBodyBytes: maximumAPIResponseBytes,
+        allowsInsecureHTTP: false
+    )
+    private let transport: any CompatHTTPTransport
 
-    public init(session: URLSession = .shared) {
-        self.session = session
+    public init(transport: (any CompatHTTPTransport)? = nil) {
+        self.transport = transport ?? URLSessionCompatHTTPTransport(
+            sourceID: "native:mangadex", policy: Self.apiPolicy
+        )
     }
 
     struct MDResponse<T: Decodable>: Decodable {
@@ -70,6 +89,7 @@ public struct MangaDexSource: KamiSource {
     }
 
     struct MDAggregate: Decodable {
+        let result: String?
         let volumes: [String: Vol]?
         struct Vol: Decodable { let chapters: [String: Chap]?
             struct Chap: Decodable { let chapter: String?; let id: String?; let others: [String]? } }
@@ -88,6 +108,7 @@ public struct MangaDexSource: KamiSource {
     }
 
     private func list(page: Int, order: [String: String], title: String? = nil) async throws -> MangasPageCompat {
+        guard page > 0, page <= Int.max / 24 else { throw MangaDexSourceError.invalidRequest }
         var comps = URLComponents(string: "\(api)/manga")!
         var items: [URLQueryItem] = [
             URLQueryItem(name: "limit", value: "24"),
@@ -101,33 +122,47 @@ public struct MangaDexSource: KamiSource {
         if let title { items.append(URLQueryItem(name: "title", value: title)) }
         comps.queryItems = items
 
-        let (data, _) = try await get(comps.url!)
+        guard let url = comps.url else { throw MangaDexSourceError.invalidRequest }
+        let data = try await get(url)
         let resp = try JSONDecoder().decode(MDResponse<MDManga>.self, from: data)
+        guard resp.result == "ok", let entries = resp.data else { throw MangaDexSourceError.invalidResponse }
         let total = resp.total ?? 0
         let offset = resp.offset ?? 0
-        let mangas = (resp.data ?? []).map(Self.toCompat)
-        return MangasPageCompat(mangas: mangas, hasNextPage: offset + mangas.count < total)
+        guard total >= 0, offset >= 0 else { throw MangaDexSourceError.invalidResponse }
+        let mangas = entries.map(Self.toCompat)
+        return MangasPageCompat(mangas: mangas, hasNextPage: mangas.count < total - min(offset, total))
     }
 
     public func getMangaDetails(manga: SMangaCompat) async throws -> SMangaCompat {
-        var comps = URLComponents(string: "\(api)/manga/\(manga.url)")!
+        guard var comps = URLComponents(string: "\(api)/manga/\(manga.url)") else {
+            throw MangaDexSourceError.invalidRequest
+        }
         comps.queryItems = [URLQueryItem(name: "includes[]", value: "cover_art")]
-        let (data, _) = try await get(comps.url!)
+        guard let url = comps.url else { throw MangaDexSourceError.invalidRequest }
+        let data = try await get(url)
         let single = try JSONDecoder().decode(SingleManga.self, from: data)
+        guard single.result == nil || single.result == "ok" else { throw MangaDexSourceError.invalidResponse }
         return Self.toCompat(single.data)
 
-        struct SingleManga: Decodable { let data: MDManga }
+        struct SingleManga: Decodable { let result: String?; let data: MDManga }
     }
 
     public func getChapterList(manga: SMangaCompat) async throws -> [SChapterCompat] {
         // Aggregate endpoint gives ordered, deduplicated chapters.
-        let (aggData, _) = try await get(URL(string: "\(api)/manga/\(manga.url)/aggregate?translatedLanguage[]=en")!)
+        guard let url = URL(string: "\(api)/manga/\(manga.url)/aggregate?translatedLanguage[]=en") else {
+            throw MangaDexSourceError.invalidRequest
+        }
+        let aggData = try await get(url)
         let agg = try JSONDecoder().decode(MDAggregate.self, from: aggData)
+        guard agg.result == nil || agg.result == "ok", let volumes = agg.volumes else {
+            throw MangaDexSourceError.invalidResponse
+        }
 
         var chapters: [SChapterCompat] = []
-        for (_, volume) in (agg.volumes ?? [:]).sorted(by: { Double($0.key) ?? 0 < Double($1.key) ?? 0 }) {
-            for (_, chapter) in (volume.chapters ?? [:]).sorted(by: { Double($0.key) ?? 0 < Double($1.key) ?? 0 }) {
-                guard let id = chapter.id else { continue }
+        for (_, volume) in volumes.sorted(by: { Double($0.key) ?? 0 < Double($1.key) ?? 0 }) {
+            guard let entries = volume.chapters else { throw MangaDexSourceError.invalidResponse }
+            for (_, chapter) in entries.sorted(by: { Double($0.key) ?? 0 < Double($1.key) ?? 0 }) {
+                guard let id = chapter.id, !id.isEmpty else { throw MangaDexSourceError.invalidResponse }
                 let number = chapter.chapter ?? "?"
                 let epoch = Self.parseDate(nil) // date comes from a chapter fetch; keep 0
                 chapters.append(SChapterCompat(
@@ -143,12 +178,17 @@ public struct MangaDexSource: KamiSource {
 
     public func getPageList(chapter: SChapterCompat) async throws -> [PageCompat] {
         struct AtHome: Decodable {
+            let result: String?
             let baseUrl: String
             let chapter: Chapter
             struct Chapter: Decodable { let hash: String; let data: [String]; let dataSaver: [String] }
         }
-        let (data, _) = try await get(URL(string: "\(api)/at-home/server/\(chapter.url)?forcePort443=false")!)
+        guard let url = URL(string: "\(api)/at-home/server/\(chapter.url)?forcePort443=false") else {
+            throw MangaDexSourceError.invalidRequest
+        }
+        let data = try await get(url)
         let home = try JSONDecoder().decode(AtHome.self, from: data)
+        guard home.result == nil || home.result == "ok" else { throw MangaDexSourceError.invalidResponse }
         return home.chapter.data.enumerated().map { index, file in
             PageCompat(
                 index: index,
@@ -196,17 +236,22 @@ public struct MangaDexSource: KamiSource {
         return Int64(iso.date(from: s)?.timeIntervalSince1970 ?? 0) * 1000
     }
 
-    private func get(_ url: URL) async throws -> (Data, URLResponse) {
-        var request = URLRequest(url: url)
-        request.setValue("Kami/0.1 (iOS manga reader)", forHTTPHeaderField: "User-Agent")
-        return try await withCheckedThrowingContinuation { continuation in
-            session.dataTask(with: request) { data, response, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: (data ?? Data(), response!))
-                }
-            }.resume()
+    private func get(_ url: URL) async throws -> Data {
+        try Task.checkCancellation()
+        let request = CompatHTTPRequest(url: url.absoluteString, headers: [
+            .init(name: "User-Agent", value: "Kami/0.1 (iOS manga reader)")
+        ])
+        try Self.apiPolicy.validate(request: request)
+        let response = try await transport.execute(request)
+        try Task.checkCancellation()
+        guard (200...299).contains(response.statusCode) else {
+            throw MangaDexSourceError.httpStatus(response.statusCode)
         }
+        // The production transport enforces this while streaming; checking the
+        // injected seam also keeps a late/oversized fixture from reaching JSON.
+        guard response.body.count <= Self.maximumAPIResponseBytes else {
+            throw CompatHTTPTransportError.responseBodyTooLarge(limit: Self.maximumAPIResponseBytes)
+        }
+        return Data(response.body)
     }
 }

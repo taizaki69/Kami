@@ -248,13 +248,14 @@ public actor LibraryStore {
     // MARK: - Chapters
 
     public func chapters(mangaId: Int64) throws -> [Chapter] {
-        try db.query("SELECT * FROM chapter WHERE manga_id=? ORDER BY source_order", [.int(mangaId)])
+        try db.query("SELECT * FROM chapter WHERE manga_id=? AND is_current=1 ORDER BY source_order", [.int(mangaId)])
             .compactMap(Self.chapter(from:))
     }
 
     public func replaceChapters(mangaId: Int64, with chapters: [Chapter]) throws {
         try withLibraryTransaction {
             try replaceChaptersInTransaction(mangaId: mangaId, with: chapters)
+            try establishInitialChapterBaseline(mangaId: mangaId)
         }
     }
 
@@ -269,10 +270,14 @@ public actor LibraryStore {
             }
         }
 
-        for (order, ch) in chapters.enumerated() {
+        // A source may repeat a URL. Preserve its first metadata/order and
+        // never write or count the same discovery twice.
+        var acceptedURLs: Set<String> = []
+        let unique = chapters.filter { acceptedURLs.insert($0.url).inserted }
+        for (order, ch) in unique.enumerated() {
             if let id = idsByURL[ch.url] {
                 try db.run("""
-                    UPDATE chapter SET source_order=?, name=?, scanlator=?, number=?, date_upload=?
+                    UPDATE chapter SET source_order=?, name=?, scanlator=?, number=?, date_upload=?, is_current=1
                     WHERE id=?
                     """, [.int(order), .text(ch.name),
                           ch.scanlator.map { SQLiteBindable.text($0) } ?? .null,
@@ -288,12 +293,13 @@ public actor LibraryStore {
             }
         }
 
-        let incomingURLs = Set(chapters.map(\.url))
+        let incomingURLs = Set(unique.map(\.url))
         for row in existing {
             guard let id = row.int64("id"),
                   let url = row.string("url"),
                   !incomingURLs.contains(url) else { continue }
-            try db.run("DELETE FROM chapter WHERE id=?", [.int(id)])
+            // Keep reading state and history if the URL later reappears.
+            try db.run("UPDATE chapter SET is_current=0 WHERE id=?", [.int(id)])
         }
     }
 
@@ -305,35 +311,394 @@ public actor LibraryStore {
         chapters: [SChapterCompat],
         expectedConfiguration: ExtensionExecutionConfiguration?
     ) throws -> SourceMangaUpdate {
-        try withLibraryTransaction {
-            if let expectedConfiguration {
-                try verifyExtensionExecutionConfigurationInTransaction(expectedConfiguration)
-                guard expectedConfiguration.installed.sourceIDs.contains(manga.sourceId) else {
-                    throw SourceUpdatePersistenceError.sourceIdentityMismatch
-                }
-            } else {
-                // The current product has one native source. Downloaded
-                // profiles must never use nil to bypass their CAS token.
-                guard manga.sourceId == MangaDexSource().id else {
-                    throw SourceUpdatePersistenceError.configurationRequired
-                }
-            }
+        try Task.checkCancellation()
+        return try withLibraryTransaction {
+            try verifySourceUpdateConfiguration(manga: manga, expectedConfiguration: expectedConfiguration)
             if let id = manga.id {
                 guard let stored = try self.manga(id: id),
                       stored.sourceId == manga.sourceId, stored.url == manga.url else {
                     throw SourceUpdatePersistenceError.sourceIdentityMismatch
                 }
             }
-            let id = try upsert(manga)
-            let incoming = chapters.enumerated().map { order, chapter in
-                Chapter(mangaId: id, sourceOrder: order, from: chapter)
-            }
-            try replaceChaptersInTransaction(mangaId: id, with: incoming)
-            guard let stored = try self.manga(id: id) else {
+            let result = try persistSourceUpdateInTransaction(manga: manga, chapters: chapters)
+            guard let id = result.manga.id else {
                 throw SourceUpdatePersistenceError.sourceIdentityMismatch
             }
-            return SourceMangaUpdate(manga: stored, chapters: try self.chapters(mangaId: id))
+            _ = try recordChapterDiscoveries(mangaId: id, urls: chapters.map(\.url),
+                                             announce: result.manga.inLibrary)
+            try Task.checkCancellation()
+            return result
         }
+    }
+
+    private func verifySourceUpdateConfiguration(
+        manga: Manga,
+        expectedConfiguration: ExtensionExecutionConfiguration?
+    ) throws {
+        if let expectedConfiguration {
+            try verifyExtensionExecutionConfigurationInTransaction(expectedConfiguration)
+            guard expectedConfiguration.installed.sourceIDs.contains(manga.sourceId) else {
+                throw SourceUpdatePersistenceError.sourceIdentityMismatch
+            }
+        } else {
+            // Downloaded profiles cannot use nil to bypass their CAS token.
+            guard manga.sourceId == MangaDexSource().id else {
+                throw SourceUpdatePersistenceError.configurationRequired
+            }
+        }
+    }
+
+    private func persistSourceUpdateInTransaction(
+        manga: Manga, chapters: [SChapterCompat]
+    ) throws -> SourceMangaUpdate {
+        let id = try upsert(manga)
+        let incoming = chapters.enumerated().map { order, chapter in
+            Chapter(mangaId: id, sourceOrder: order, from: chapter)
+        }
+        try replaceChaptersInTransaction(mangaId: id, with: incoming)
+        guard let stored = try self.manga(id: id) else {
+            throw SourceUpdatePersistenceError.sourceIdentityMismatch
+        }
+        return SourceMangaUpdate(manga: stored, chapters: try self.chapters(mangaId: id))
+    }
+
+    /// A first successful detail/list refresh also gives the next manual scan
+    /// a historical baseline, including when the returned list was empty.
+    private func establishInitialChapterBaseline(mangaId: Int64) throws {
+        let now = Int64(Date().timeIntervalSince1970)
+        try db.run("INSERT OR IGNORE INTO chapter_discovery_baseline(manga_id,established_at) VALUES (?,?)",
+                   [.int(mangaId), .int(now)])
+        try db.run("""
+            INSERT OR IGNORE INTO known_chapter(manga_id,url,first_seen,detected_at)
+            SELECT manga_id,url,?,NULL FROM chapter WHERE manga_id=?
+            """, [.int(now), .int(mangaId)])
+    }
+
+    private func recordChapterDiscoveries(
+        mangaId: Int64, urls: [String], announce: Bool
+    ) throws -> (newChapters: Int, establishedBaseline: Bool) {
+        let baseline = try hasChapterBaseline(mangaId: mangaId)
+        let known = Set(try db.query("SELECT url FROM known_chapter WHERE manga_id=?", [.int(mangaId)])
+            .compactMap { $0.string("url") })
+        var seen: Set<String> = []
+        let unseen = urls.filter { seen.insert($0).inserted && !known.contains($0) }
+        let now = Int64(Date().timeIntervalSince1970)
+        let shouldAnnounce = baseline && announce
+        for url in unseen {
+            try db.run("INSERT INTO known_chapter(manga_id,url,first_seen,detected_at) VALUES (?,?,?,?)",
+                       [.int(mangaId), .text(url), .int(now), shouldAnnounce ? .int(now) : .null])
+        }
+        if !baseline {
+            try db.run("INSERT INTO chapter_discovery_baseline(manga_id,established_at) VALUES (?,?)",
+                       [.int(mangaId), .int(now)])
+        }
+        return (shouldAnnounce ? unseen.count : 0, !baseline)
+    }
+
+    private func hasChapterBaseline(mangaId: Int64) throws -> Bool {
+        try !db.query("SELECT 1 FROM chapter_discovery_baseline WHERE manga_id=?",
+                      [.int(mangaId)]).isEmpty
+    }
+
+    // MARK: - Durable manual library updates
+
+    public func beginLibraryUpdateScan() throws -> LibraryUpdateScanSnapshot {
+        try Task.checkCancellation()
+        return try withLibraryTransaction {
+            guard try db.query("SELECT 1 FROM library_update_scan WHERE status='running'").isEmpty else {
+                throw LibraryUpdatePersistenceError.scanAlreadyRunning
+            }
+            let mangas = try libraryManga()
+            let scanID = UUID()
+            let now = Int64(Date().timeIntervalSince1970)
+            try db.run("""
+                INSERT INTO library_update_scan(scan_id,status,started_at,total)
+                VALUES (?,'running',?,?)
+                """, [.text(scanID.uuidString), .int(now), .int(mangas.count)])
+            var items: [LibraryUpdateItem] = []
+            for manga in mangas {
+                guard let id = manga.id,
+                      let revision = try db.query("SELECT library_revision FROM manga WHERE id=?",
+                                                  [.int(id)]).first?.int64("library_revision") else {
+                    throw LibraryUpdatePersistenceError.invalidStoredScan
+                }
+                try db.run("""
+                    INSERT INTO library_update_target(scan_id,manga_id,title,library_revision)
+                    VALUES (?,?,?,?)
+                    """, [.text(scanID.uuidString), .int(id), .text(manga.title), .int(revision)])
+                items.append(LibraryUpdateItem(manga: manga, hasSuccessfulBaseline: try hasChapterBaseline(mangaId: id)))
+            }
+            try Task.checkCancellation()
+            return LibraryUpdateScanSnapshot(record: try readLibraryUpdateSummary(scanID), items: items)
+        }
+    }
+
+    public func recordLibraryUpdateSuccess(
+        scanID: UUID,
+        manga: Manga,
+        chapters: [SChapterCompat],
+        expectedConfiguration: ExtensionExecutionConfiguration?
+    ) throws -> LibraryUpdateCommitResult {
+        try Task.checkCancellation()
+        return try withLibraryTransaction {
+            let target = try activeLibraryUpdateTarget(scanID: scanID, mangaID: manga.id)
+            guard let mangaID = target.int64("manga_id") else {
+                throw LibraryUpdatePersistenceError.invalidStoredScan
+            }
+            switch target.string("outcome") {
+            case "checked":
+                return LibraryUpdateCommitResult(
+                    summary: try readLibraryUpdateSummary(scanID),
+                    outcome: .updated(newChapters: target.int("new_chapters") ?? 0,
+                                      establishedBaseline: target.bool("established_baseline"))
+                )
+            case "skipped":
+                return LibraryUpdateCommitResult(summary: try readLibraryUpdateSummary(scanID),
+                                                 outcome: .skippedNotInLibrary)
+            case "pending": break
+            default: throw LibraryUpdatePersistenceError.targetAlreadyRecorded
+            }
+            // The revision rejects a result even if a manga was removed and
+            // re-added while its request was in flight.
+            let membership = try db.query("SELECT in_library,library_revision FROM manga WHERE id=?",
+                                          [.int(mangaID)]).first
+            guard membership?.bool("in_library") == true,
+                  membership?.int64("library_revision") == target.int64("library_revision") else {
+                try recordLibraryUpdateOutcome(scanID: scanID, mangaID: mangaID, outcome: .skipped,
+                                               reason: .removedFromLibrary)
+                return LibraryUpdateCommitResult(summary: try readLibraryUpdateSummary(scanID),
+                                                 outcome: .skippedNotInLibrary)
+            }
+            guard let stored = try self.manga(id: mangaID),
+                  stored.sourceId == manga.sourceId, stored.url == manga.url else {
+                throw LibraryUpdatePersistenceError.sourceIdentityMismatch
+            }
+            try verifySourceUpdateConfiguration(manga: manga, expectedConfiguration: expectedConfiguration)
+            var seen: Set<String> = []
+            let unique = chapters.filter { seen.insert($0.url).inserted }
+            let discovery = try recordChapterDiscoveries(mangaId: mangaID, urls: unique.map(\.url), announce: true)
+            _ = try persistSourceUpdateInTransaction(manga: manga, chapters: unique)
+            let newCount = discovery.newChapters
+            try db.run("""
+                UPDATE library_update_target SET outcome='checked',new_chapters=?,established_baseline=?
+                WHERE scan_id=? AND manga_id=?
+                """, [.int(newCount), .bool(discovery.establishedBaseline), .text(scanID.uuidString), .int(mangaID)])
+            try Task.checkCancellation()
+            return LibraryUpdateCommitResult(summary: try readLibraryUpdateSummary(scanID),
+                                             outcome: .updated(newChapters: newCount,
+                                                               establishedBaseline: discovery.establishedBaseline))
+        }
+    }
+
+    /// Avoid fetching queued work removed since the library snapshot. The
+    /// success transaction repeats this check because membership can still
+    /// change after this read and during the request.
+    public func libraryUpdateTargetIsCurrent(scanID: UUID, mangaID: Int64) throws -> Bool {
+        try withLibraryTransaction(readOnly: true) {
+            let target = try activeLibraryUpdateTarget(scanID: scanID, mangaID: mangaID)
+            guard target.string("outcome") == "pending",
+                  let membership = try db.query("SELECT in_library,library_revision FROM manga WHERE id=?",
+                                                [.int(mangaID)]).first else { return false }
+            return membership.bool("in_library")
+                && membership.int64("library_revision") == target.int64("library_revision")
+        }
+    }
+
+    public func recordLibraryUpdateSkip(
+        scanID: UUID, mangaID: Int64, reason: LibraryUpdateTargetReason
+    ) throws -> LibraryUpdateSummary {
+        guard [.sourceUnavailable, .configurationChanged, .onlyFetchOnce, .removedFromLibrary].contains(reason) else {
+            throw LibraryUpdatePersistenceError.invalidTargetReason
+        }
+        return try withLibraryTransaction {
+            let target = try activeLibraryUpdateTarget(scanID: scanID, mangaID: mangaID)
+            if target.string("outcome") == "pending" {
+                try recordLibraryUpdateOutcome(scanID: scanID, mangaID: mangaID, outcome: .skipped, reason: reason)
+            }
+            return try readLibraryUpdateSummary(scanID)
+        }
+    }
+
+    public func recordLibraryUpdateFailure(
+        scanID: UUID, mangaID: Int64, reason: LibraryUpdateTargetReason = .requestFailed
+    ) throws -> LibraryUpdateSummary {
+        guard [.requestFailed, .configurationChanged].contains(reason) else {
+            throw LibraryUpdatePersistenceError.invalidTargetReason
+        }
+        return try withLibraryTransaction {
+            let target = try activeLibraryUpdateTarget(scanID: scanID, mangaID: mangaID)
+            if target.string("outcome") == "pending" {
+                let membership = try db.query("SELECT in_library,library_revision FROM manga WHERE id=?",
+                                              [.int(mangaID)]).first
+                let current = membership?.bool("in_library") == true
+                    && membership?.int64("library_revision") == target.int64("library_revision")
+                try recordLibraryUpdateOutcome(scanID: scanID, mangaID: mangaID,
+                                               outcome: current ? .failed : .skipped,
+                                               reason: current ? reason : .removedFromLibrary)
+            }
+            return try readLibraryUpdateSummary(scanID)
+        }
+    }
+
+    /// Terminal writes invalidate pending callbacks. Repeating finish after a
+    /// worker/cancel race returns the existing terminal result unchanged.
+    public func finishLibraryUpdateScan(
+        scanID: UUID, status: LibraryUpdateScanStatus
+    ) throws -> LibraryUpdateSummary {
+        guard status == .completed || status == .cancelled else {
+            throw LibraryUpdatePersistenceError.invalidTerminalStatus
+        }
+        return try withLibraryTransaction {
+            let summary = try readLibraryUpdateSummary(scanID)
+            guard summary.status == .running else { return summary }
+            if status == .completed, summary.processedCount != summary.total {
+                throw LibraryUpdatePersistenceError.unfinishedTargets
+            }
+            try terminateLibraryUpdateScan(scanID: scanID, status: status)
+            return try readLibraryUpdateSummary(scanID)
+        }
+    }
+
+    /// Call once on application/service recovery, never on an ordinary store
+    /// open: another live connection may still own the running scan.
+    @discardableResult
+    public func recoverInterruptedLibraryUpdateScans() throws -> LibraryUpdateSummary? {
+        try withLibraryTransaction {
+            for row in try db.query("SELECT scan_id FROM library_update_scan WHERE status='running'") {
+                guard let rawID = row.string("scan_id"), let scanID = UUID(uuidString: rawID) else {
+                    throw LibraryUpdatePersistenceError.invalidStoredScan
+                }
+                try terminateLibraryUpdateScan(scanID: scanID, status: .interrupted)
+            }
+            return try latestLibraryUpdateSummary()
+        }
+    }
+
+    public func libraryUpdatesSnapshot(
+        discoveryLimit: Int = 500, after cursor: LibraryChapterDiscoveryCursor? = nil
+    ) throws -> LibraryUpdatesSnapshot {
+        try withLibraryTransaction(readOnly: true) {
+            let limit = max(1, min(500, discoveryLimit))
+            var parameters: [SQLiteBindable] = []
+            let cursorPredicate: String
+            if let cursor {
+                cursorPredicate = "AND (k.detected_at,k.manga_id,k.url) < (?,?,?)"
+                parameters = [.int(cursor.detectedAt), .int(cursor.mangaID), .text(cursor.chapterURL)]
+            } else { cursorPredicate = "" }
+            parameters.append(.int(limit + 1))
+            let rows = try db.query("""
+                SELECT m.*,k.detected_at,c.id AS chapter_id,c.manga_id AS chapter_manga_id,
+                    c.url AS chapter_url,c.name AS chapter_name,c.source_order AS chapter_source_order,
+                    c.scanlator AS chapter_scanlator,c.number AS chapter_number,
+                    c.date_upload AS chapter_date_upload,c.read AS chapter_read,
+                    c.bookmark AS chapter_bookmark,c.last_page_read AS chapter_last_page_read
+                FROM known_chapter k
+                JOIN manga m ON m.id=k.manga_id AND m.in_library=1
+                JOIN chapter c ON c.manga_id=k.manga_id AND c.url=k.url AND c.is_current=1
+                WHERE k.detected_at IS NOT NULL
+                \(cursorPredicate)
+                ORDER BY k.detected_at DESC,k.manga_id DESC,k.url DESC
+                LIMIT ?
+                """, parameters)
+            let discoveries = rows.prefix(limit).compactMap { row -> LibraryChapterDiscovery? in
+                guard let mangaID = row.int64("chapter_manga_id"), let chapterID = row.int64("chapter_id"),
+                      let detectedAt = row.int64("detected_at"),
+                      let manga = Self.manga(from: row), let chapterURL = row.string("chapter_url"),
+                      let chapterName = row.string("chapter_name") else { return nil }
+                let chapter = Self.joinedChapter(from: row, id: chapterID, mangaID: mangaID,
+                                                 url: chapterURL, name: chapterName)
+                return LibraryChapterDiscovery(manga: manga, chapter: chapter, detectedAt: detectedAt)
+            }
+            let hasMore = rows.count > limit
+            let nextCursor = hasMore ? discoveries.last.map {
+                LibraryChapterDiscoveryCursor(detectedAt: $0.detectedAt, mangaID: $0.chapter.mangaId,
+                                              chapterURL: $0.chapter.url)
+            } : nil
+            let latest = try latestLibraryUpdateSummary()
+            let issues: [LibraryUpdateIssue]
+            if let latest {
+                issues = try db.query("""
+                    SELECT t.manga_id AS target_manga_id,t.title AS target_title,t.outcome,t.reason,m.*
+                    FROM library_update_target t LEFT JOIN manga m ON m.id=t.manga_id
+                    WHERE t.scan_id=? AND t.reason IS NOT NULL
+                    ORDER BY t.title COLLATE NOCASE,t.manga_id
+                    """, [.text(latest.scanID.uuidString)]).compactMap { row in
+                        guard let mangaID = row.int64("target_manga_id"), let title = row.string("target_title"),
+                              let outcomeText = row.string("outcome"),
+                              let outcome = LibraryUpdateTargetOutcome(rawValue: outcomeText),
+                              let reasonText = row.string("reason"),
+                              let reason = LibraryUpdateTargetReason(rawValue: reasonText) else { return nil }
+                        return LibraryUpdateIssue(mangaID: mangaID, title: title, manga: Self.manga(from: row),
+                                                  outcome: outcome, reason: reason)
+                    }
+            } else { issues = [] }
+            return LibraryUpdatesSnapshot(latestScan: latest, latestScanIssues: issues,
+                                          discoveries: discoveries, hasMore: hasMore, nextCursor: nextCursor)
+        }
+    }
+
+    private func activeLibraryUpdateTarget(scanID: UUID, mangaID: Int64?) throws -> SQLiteDatabase.Row {
+        guard let scan = try db.query("SELECT status FROM library_update_scan WHERE scan_id=?",
+                                       [.text(scanID.uuidString)]).first else {
+            throw LibraryUpdatePersistenceError.scanNotFound
+        }
+        guard scan.string("status") == LibraryUpdateScanStatus.running.rawValue else {
+            throw LibraryUpdatePersistenceError.scanNotRunning
+        }
+        guard let mangaID,
+              let target = try db.query("SELECT * FROM library_update_target WHERE scan_id=? AND manga_id=?",
+                                        [.text(scanID.uuidString), .int(mangaID)]).first else {
+            throw LibraryUpdatePersistenceError.mangaNotInScan
+        }
+        return target
+    }
+
+    private func recordLibraryUpdateOutcome(
+        scanID: UUID, mangaID: Int64, outcome: LibraryUpdateTargetOutcome, reason: LibraryUpdateTargetReason
+    ) throws {
+        try db.run("UPDATE library_update_target SET outcome=?,reason=? WHERE scan_id=? AND manga_id=?",
+                   [.text(outcome.rawValue), .text(reason.rawValue), .text(scanID.uuidString), .int(mangaID)])
+    }
+
+    private func terminateLibraryUpdateScan(scanID: UUID, status: LibraryUpdateScanStatus) throws {
+        try db.run("UPDATE library_update_target SET outcome='cancelled',reason='cancelled' WHERE scan_id=? AND outcome='pending'",
+                   [.text(scanID.uuidString)])
+        try db.run("UPDATE library_update_scan SET status=?,finished_at=? WHERE scan_id=?",
+                   [.text(status.rawValue), .int(Int64(Date().timeIntervalSince1970)), .text(scanID.uuidString)])
+    }
+
+    private func latestLibraryUpdateSummary() throws -> LibraryUpdateSummary? {
+        guard let rawID = try db.query(
+            "SELECT scan_id FROM library_update_scan ORDER BY started_at DESC,rowid DESC LIMIT 1"
+        ).first?.string("scan_id") else { return nil }
+        guard let id = UUID(uuidString: rawID) else { throw LibraryUpdatePersistenceError.invalidStoredScan }
+        return try readLibraryUpdateSummary(id)
+    }
+
+    private func readLibraryUpdateSummary(_ scanID: UUID) throws -> LibraryUpdateSummary {
+        guard let row = try db.query("SELECT * FROM library_update_scan WHERE scan_id=?",
+                                     [.text(scanID.uuidString)]).first else {
+            throw LibraryUpdatePersistenceError.scanNotFound
+        }
+        guard let statusText = row.string("status"), let status = LibraryUpdateScanStatus(rawValue: statusText),
+              let startedAt = row.int64("started_at"), let total = row.int("total") else {
+            throw LibraryUpdatePersistenceError.invalidStoredScan
+        }
+        let counts = try db.query("""
+            SELECT
+                SUM(CASE WHEN outcome='checked' THEN 1 ELSE 0 END) AS checked,
+                SUM(CASE WHEN outcome='skipped' THEN 1 ELSE 0 END) AS skipped,
+                SUM(CASE WHEN outcome='failed' THEN 1 ELSE 0 END) AS failed,
+                SUM(CASE WHEN outcome='cancelled' THEN 1 ELSE 0 END) AS cancelled,
+                SUM(new_chapters) AS new_chapters,SUM(established_baseline) AS baselines
+            FROM library_update_target WHERE scan_id=?
+            """, [.text(scanID.uuidString)]).first
+        return LibraryUpdateSummary(
+            scanID: scanID, status: status, startedAt: startedAt, finishedAt: row.int64("finished_at"),
+            total: total, checked: counts?.int("checked") ?? 0, newChapters: counts?.int("new_chapters") ?? 0,
+            baselines: counts?.int("baselines") ?? 0, skipped: counts?.int("skipped") ?? 0,
+            failed: counts?.int("failed") ?? 0, cancelled: counts?.int("cancelled") ?? 0
+        )
     }
 
     public func markRead(_ read: Bool, chapterId: Int64) throws {
@@ -352,7 +717,10 @@ public actor LibraryStore {
 
     public func history() throws -> [(Manga, Chapter, Int64)] {
         let rows = try db.query("""
-            SELECT m.*, c.url AS chapter_url, c.name AS chapter_name, c.id AS chapter_id, h.last_read
+            SELECT m.*, c.url AS chapter_url, c.name AS chapter_name, c.id AS chapter_id,h.last_read,
+                c.source_order AS chapter_source_order,c.scanlator AS chapter_scanlator,
+                c.number AS chapter_number,c.date_upload AS chapter_date_upload,
+                c.read AS chapter_read,c.bookmark AS chapter_bookmark,c.last_page_read AS chapter_last_page_read
             FROM history h JOIN manga m ON m.id = h.manga_id JOIN chapter c ON c.id = h.chapter_id
             ORDER BY h.last_read DESC LIMIT 200
             """)
@@ -362,7 +730,8 @@ public actor LibraryStore {
                   let chapterUrl = row.string("chapter_url"),
                   let chapterName = row.string("chapter_name"),
                   let lastRead = row.int64("last_read") else { return nil }
-            return (m, Chapter(id: chapterId, mangaId: m.id ?? 0, url: chapterUrl, name: chapterName), lastRead)
+            return (m, Self.joinedChapter(from: row, id: chapterId, mangaID: m.id ?? 0,
+                                          url: chapterUrl, name: chapterName), lastRead)
         }
     }
 
@@ -789,6 +1158,18 @@ public actor LibraryStore {
             read: row.bool("read"),
             bookmark: row.bool("bookmark"),
             lastPageRead: row.int("last_page_read") ?? 0
+        )
+    }
+
+    private static func joinedChapter(
+        from row: SQLiteDatabase.Row, id: Int64, mangaID: Int64, url: String, name: String
+    ) -> Chapter {
+        Chapter(
+            id: id, mangaId: mangaID, sourceOrder: row.int("chapter_source_order") ?? 0,
+            url: url, name: name, scanlator: row.string("chapter_scanlator"),
+            number: row.double("chapter_number") ?? -1, dateUpload: row.int64("chapter_date_upload") ?? 0,
+            read: row.bool("chapter_read"), bookmark: row.bool("chapter_bookmark"),
+            lastPageRead: row.int("chapter_last_page_read") ?? 0
         )
     }
 }

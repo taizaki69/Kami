@@ -5,7 +5,7 @@ import Foundation
 /// Versioned schema migrations. Every change ships as a new step; the
 /// `user_version` pragma tracks the applied version.
 enum Migrations {
-    static let latest: Int = 3
+    static let latest: Int = 4
 
     static let steps: [Int: String] = [
         1: """
@@ -117,6 +117,59 @@ enum Migrations {
             schema_revision INTEGER NOT NULL,
             revision INTEGER NOT NULL CHECK(revision > 0),
             user_values TEXT NOT NULL CHECK(length(CAST(user_values AS BLOB)) <= 16384)
+        );
+        """,
+        4: """
+        ALTER TABLE manga ADD COLUMN library_revision INTEGER NOT NULL DEFAULT 0;
+        CREATE TRIGGER manga_library_revision AFTER UPDATE OF in_library ON manga
+        WHEN OLD.in_library != NEW.in_library
+        BEGIN
+            UPDATE manga SET library_revision=library_revision+1 WHERE id=NEW.id;
+        END;
+
+        ALTER TABLE chapter ADD COLUMN is_current INTEGER NOT NULL DEFAULT 1 CHECK(is_current IN (0,1));
+        CREATE INDEX idx_chapter_current ON chapter(manga_id,is_current,source_order);
+        CREATE TABLE chapter_discovery_baseline (
+            manga_id INTEGER PRIMARY KEY REFERENCES manga(id) ON DELETE CASCADE,
+            established_at INTEGER NOT NULL
+        );
+        CREATE TABLE known_chapter (
+            manga_id INTEGER NOT NULL REFERENCES manga(id) ON DELETE CASCADE,
+            url TEXT NOT NULL,
+            first_seen INTEGER NOT NULL,
+            detected_at INTEGER,
+            PRIMARY KEY(manga_id, url)
+        );
+        INSERT INTO chapter_discovery_baseline(manga_id, established_at)
+            SELECT DISTINCT manga_id, 0 FROM chapter;
+        INSERT INTO known_chapter(manga_id, url, first_seen, detected_at)
+            SELECT manga_id, url, 0, NULL FROM chapter;
+        CREATE INDEX idx_chapter_discovery_feed
+            ON known_chapter(detected_at DESC,manga_id DESC,url DESC) WHERE detected_at IS NOT NULL;
+
+        CREATE TABLE library_update_scan (
+            scan_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL CHECK(status IN ('running','completed','cancelled','interrupted')),
+            started_at INTEGER NOT NULL,
+            finished_at INTEGER,
+            total INTEGER NOT NULL CHECK(total >= 0)
+        );
+        CREATE UNIQUE INDEX one_running_library_update
+            ON library_update_scan(status) WHERE status='running';
+        CREATE TABLE library_update_target (
+            scan_id TEXT NOT NULL REFERENCES library_update_scan(scan_id) ON DELETE CASCADE,
+            manga_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            library_revision INTEGER NOT NULL,
+            outcome TEXT NOT NULL DEFAULT 'pending'
+                CHECK(outcome IN ('pending','checked','skipped','failed','cancelled')),
+            new_chapters INTEGER NOT NULL DEFAULT 0 CHECK(new_chapters >= 0),
+            established_baseline INTEGER NOT NULL DEFAULT 0 CHECK(established_baseline IN (0,1)),
+            reason TEXT CHECK(reason IN (
+                'sourceUnavailable','configurationChanged','onlyFetchOnce',
+                'requestFailed','removedFromLibrary','cancelled'
+            )),
+            PRIMARY KEY(scan_id, manga_id)
         );
         """,
     ]

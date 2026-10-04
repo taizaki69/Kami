@@ -182,7 +182,8 @@ public struct LibraryService {
             author: stored.author,
             status: stored.status,
             description: stored.descriptionText,
-            genres: stored.genres
+            genres: stored.genres,
+            updateStrategy: stored.updateStrategy
         )
         let update = try await source.getMangaUpdate(manga: compat)
         let chapters = update.chapters
@@ -197,6 +198,7 @@ public struct LibraryService {
         stored.descriptionText = compat.description
         stored.genres = compat.genres
         stored.status = compat.status
+        stored.updateStrategy = compat.updateStrategy
         stored.dateUpdated = Int64(Date().timeIntervalSince1970)
         try Task.checkCancellation()
         return try await store.persistSourceUpdate(manga: stored, chapters: chapters,
