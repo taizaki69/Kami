@@ -76,6 +76,7 @@ final class LibraryUpdateServiceTests: XCTestCase {
     /// Real-store tests below separately enforce source-token authority and
     /// baseline/discovery semantics without constructing a transport.
     private actor Ledger: LibraryUpdatePersisting {
+        private let context = LibraryMutationContext(ownerID: UUID(), epoch: .init(bytes: Data(repeating: 1, count: 16)))
         private enum Outcome {
             case checked(new: Int, baseline: Bool)
             case skipped(LibraryUpdateTargetReason)
@@ -124,19 +125,24 @@ final class LibraryUpdateServiceTests: XCTestCase {
             let captured = items.map {
                 LibraryUpdateItem(manga: $0.manga, hasSuccessfulBaseline: $0.manga.id.map(baselines.contains) ?? false)
             }
-            return LibraryUpdateScanSnapshot(record: current!, items: captured)
+            return LibraryUpdateScanSnapshot(record: current!, items: captured, mutationContext: context)
         }
         func libraryUpdateTargetIsCurrent(scanID: UUID, mangaID: Int64) throws -> Bool {
             try check(scanID)
             return outcomes[mangaID] == nil
         }
-        func verifyLibraryUpdateSourceConfiguration(sourceID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?) throws {
+        func verifyLibraryUpdateSourceConfiguration(
+            sourceID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?, context: LibraryMutationContext
+        ) throws {
+            guard context == self.context else { throw LibraryMutationError.foreignContext }
             if staleSources.contains(sourceID) { throw ExtensionPreferencesError.staleConfiguration }
         }
         func recordLibraryUpdateSuccess(scanID: UUID, manga: Manga, chapters: [SChapterCompat],
-                                       expectedConfiguration: ExtensionExecutionConfiguration?) throws -> LibraryUpdateCommitResult {
+                                       expectedConfiguration: ExtensionExecutionConfiguration?,
+                                       context: LibraryMutationContext) throws -> LibraryUpdateCommitResult {
             try check(scanID)
-            try verifyLibraryUpdateSourceConfiguration(sourceID: manga.sourceId, expectedConfiguration: expectedConfiguration)
+            try verifyLibraryUpdateSourceConfiguration(sourceID: manga.sourceId, expectedConfiguration: expectedConfiguration,
+                                                       context: context)
             if failCommit { throw SQLiteDatabase.SQLiteError.step("private path", sql: "secret fixture") }
             let id = try XCTUnwrap(manga.id)
             let establish = !baselines.contains(id)

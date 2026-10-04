@@ -19,7 +19,7 @@ UUID identifies each LibraryStore instance. Neither value is exported in a
 native backup or derived from imported data.
 
 `MangaReadingSnapshot` reads manga, current/downloaded chapters, an optional
-requested hidden chapter, the epoch and opaque `ChapterWriteTarget` values in
+requested hidden chapter, the epoch, a `LibraryMutationContext` and opaque `ChapterWriteTarget` values in
 one transaction. Source ID, parent/child row IDs and both URL byte sequences
 are part of a target. The target and epoch have no public constructor or
 Codable representation. The selected chapter set includes hidden chapters
@@ -103,12 +103,17 @@ termination or background execution.
 These are Core and App prerequisites for later restore work. Restore remains
 unavailable. [Durable Foo content binding](SOURCE_CONTENT_BINDING.md) now preserves
 the saved website independently of executable settings. The next steps must
-add shared scene invalidation and synchronous operation-intent barriers, epoch checks for source
-results/category/membership and other queued writes, immutable preview state
+add shared scene invalidation and synchronous operation-intent barriers,
+coordination for the remaining producers, immutable preview state
 validation and an atomic conservative merge. Epoch rotation must be part of
 that successful restore transaction; this increment exposes no standalone
 rotation or restore operation. An epoch is not a general same-generation
 concurrent-edit conflict detector or a complete restore preview token.
+
+[Library mutation contexts](LIBRARY_MUTATIONS.md) now guard category,
+membership and source-result writes with the same durable epoch and store
+owner. They accompany the values they authorize; callers must retain the
+original context rather than obtain a fresh one after suspension.
 
 The [dated verification record](VERIFICATION-2026-10-04-READING-STATE.md) and
 implementation PR distinguish deterministic

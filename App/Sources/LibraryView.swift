@@ -10,17 +10,16 @@ struct LibraryView: View {
     @State private var showCategories = false
     @State private var selecting = false
     @State private var selectedIDs = Set<Int64>()
+    @State private var selectionContext: LibraryMutationContext?
     @State private var assignment: CategoryAssignmentRequest?
     @State private var showDownloads = false
     @State private var showBackups = false
 
-    private var filtered: [Manga] {
-        model.librarySnapshot.filteredManga(category: category, search: search)
-    }
-
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 12)]
 
     var body: some View {
+        let snapshot = model.librarySnapshot
+        let filtered = snapshot.filteredManga(category: category, search: search)
         NavigationStack {
             VStack(spacing: 0) {
                 categoryPicker
@@ -41,7 +40,7 @@ struct LibraryView: View {
                     } else {
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(filtered) { manga in
-                                mangaCell(manga)
+                                mangaCell(manga, context: snapshot.mutationContext)
                             }
                         }
                         .padding()
@@ -75,12 +74,13 @@ struct LibraryView: View {
                     Button(selecting ? "Done" : "Select") {
                         selecting.toggle()
                         selectedIDs.removeAll()
+                        selectionContext = selecting ? snapshot.mutationContext : nil
                     }
                     .disabled(model.library.isEmpty)
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                if selecting { selectionBar }
+                if selecting { selectionBar(filtered: filtered, context: snapshot.mutationContext) }
             }
             .navigationDestination(for: Manga.self) { manga in
                 MangaDetailView(manga: manga)
@@ -93,13 +93,18 @@ struct LibraryView: View {
             .sheet(isPresented: $showCategories) { CategoriesView() }
             .sheet(isPresented: $showBackups) { LibraryBackupsView() }
             .sheet(item: $assignment) { request in
-                CategoryAssignmentSheet(mangaIDs: request.mangaIDs, title: request.title)
+                CategoryAssignmentSheet(mangaIDs: request.mangaIDs, title: request.title, context: request.context)
             }
             .onChange(of: model.categories) { _, _ in
                 category = model.librarySnapshot.availableFilter(category)
             }
             .onChange(of: filtered.compactMap(\.id)) { _, ids in
                 selectedIDs.formIntersection(Set(ids))
+            }
+            .onChange(of: model.librarySnapshot.mutationContext) { _, _ in
+                selectedIDs.removeAll()
+                selectionContext = nil
+                selecting = false
             }
         }
     }
@@ -141,9 +146,10 @@ struct LibraryView: View {
     }
 
     @ViewBuilder
-    private func mangaCell(_ manga: Manga) -> some View {
+    private func mangaCell(_ manga: Manga, context: LibraryMutationContext?) -> some View {
         if selecting, let id = manga.id {
             Button {
+                guard context == selectionContext else { return }
                 if selectedIDs.contains(id) { selectedIDs.remove(id) }
                 else { selectedIDs.insert(id) }
             } label: {
@@ -165,7 +171,7 @@ struct LibraryView: View {
                 .contextMenu {
                     if let id = manga.id {
                         Button {
-                            assignment = CategoryAssignmentRequest(mangaIDs: [id], title: manga.title)
+                            assignment = CategoryAssignmentRequest(mangaIDs: [id], title: manga.title, context: context)
                         } label: {
                             Label("Set categories", systemImage: "folder")
                         }
@@ -174,15 +180,18 @@ struct LibraryView: View {
         }
     }
 
-    private var selectionBar: some View {
+    private func selectionBar(filtered: [Manga], context: LibraryMutationContext?) -> some View {
         HStack {
             Text("\(selectedIDs.count) selected").font(.subheadline)
             Spacer()
-            Button("Select shown") { selectedIDs = Set(filtered.compactMap(\.id)) }
+            Button("Select shown") {
+                selectedIDs = Set(filtered.compactMap(\.id))
+                selectionContext = context
+            }
                 .disabled(filtered.isEmpty)
             Button("Categories") {
                 assignment = CategoryAssignmentRequest(mangaIDs: selectedIDs,
-                                                       title: "\(selectedIDs.count) manga")
+                    title: "\(selectedIDs.count) manga", context: selectionContext)
             }
             .buttonStyle(.borderedProminent)
             .disabled(selectedIDs.isEmpty)

@@ -11,6 +11,7 @@ public struct LibrarySnapshot: Sendable {
     public let manga: [Manga]
     public let categories: [Category]
     public let categoryIDsByManga: [Int64: Set<Int64>]
+    public let mutationContext: LibraryMutationContext?
 
     public init(
         manga: [Manga] = [],
@@ -19,6 +20,7 @@ public struct LibrarySnapshot: Sendable {
     ) {
         self.manga = manga
         self.categories = categories
+        self.mutationContext = nil
         let mangaIDs = Set(manga.compactMap(\.id))
         let categoryIDs = Set(categories.compactMap(\.id))
         self.categoryIDsByManga = categoryIDsByManga.reduce(into: [:]) { result, entry in
@@ -26,6 +28,15 @@ public struct LibrarySnapshot: Sendable {
             let valid = entry.value.intersection(categoryIDs)
             if !valid.isEmpty { result[entry.key] = valid }
         }
+    }
+
+    init(manga: [Manga], categories: [Category],
+         categoryIDsByManga: [Int64: Set<Int64>], mutationContext: LibraryMutationContext) {
+        let values = LibrarySnapshot(manga: manga, categories: categories, categoryIDsByManga: categoryIDsByManga)
+        self.manga = values.manga
+        self.categories = values.categories
+        self.categoryIDsByManga = values.categoryIDsByManga
+        self.mutationContext = mutationContext
     }
 
     public func filteredManga(

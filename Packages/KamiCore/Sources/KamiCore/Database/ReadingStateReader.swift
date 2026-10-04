@@ -105,7 +105,8 @@ enum ReadingStateReader {
                                                     mangaURL: manga.url, chapterURL: chapter.url)
         }
         if requestedChapterID != nil, requested == nil { throw Failure.chapterNotFound }
-        return MangaReadingSnapshot(manga: manga, epoch: epoch, currentChapters: current,
+        return MangaReadingSnapshot(manga: manga, epoch: epoch,
+                                    mutationContext: .init(ownerID: ownerID, epoch: epoch), currentChapters: current,
                                     downloadedChapters: downloaded, requestedChapter: requested, targets: targets)
     }
 

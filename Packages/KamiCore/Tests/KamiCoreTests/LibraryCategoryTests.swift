@@ -298,13 +298,17 @@ final class LibraryCategoryStoreTests: XCTestCase {
         do {
             try await store.setCategories([targetID], mangaIDs: [first, second])
             XCTFail("Expected the fixture write failure")
-        } catch is SQLiteDatabase.SQLiteError {}
+        } catch let error as LibraryMutationError {
+            XCTAssertEqual(error, .storageUnavailable)
+        }
         let snapshot = try await store.librarySnapshot()
         XCTAssertEqual(snapshot.categoryIDsByManga, [first: [originalID], second: [originalID]])
         do {
             try await store.updateCategories(adding: [targetID], removing: [originalID], mangaIDs: [first, second])
             XCTFail("Expected the fixture write failure on the UI's delta path")
-        } catch is SQLiteDatabase.SQLiteError {}
+        } catch let error as LibraryMutationError {
+            XCTAssertEqual(error, .storageUnavailable)
+        }
         let afterDeltaFailure = try await store.librarySnapshot()
         XCTAssertEqual(afterDeltaFailure.categoryIDsByManga, snapshot.categoryIDsByManga)
     }

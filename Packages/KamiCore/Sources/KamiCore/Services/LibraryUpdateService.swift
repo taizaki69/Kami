@@ -15,11 +15,13 @@ public enum LibraryUpdateSourceContext: Sendable {
 public enum LibraryUpdateServiceError: Error, Equatable, Sendable, LocalizedError {
     case alreadyRunning
     case storageUnavailable
+    case libraryChanged
 
     public var errorDescription: String? {
         switch self {
         case .alreadyRunning: "A library update is already running."
         case .storageUnavailable: "The library update could not be stored. Please try again."
+        case .libraryChanged: "The library changed during this update. Reload it before checking again."
         }
     }
 }
@@ -51,11 +53,11 @@ protocol LibraryUpdatePersisting: Sendable {
     func beginLibraryUpdateScan() async throws -> LibraryUpdateScanSnapshot
     func libraryUpdateTargetIsCurrent(scanID: UUID, mangaID: Int64) async throws -> Bool
     func verifyLibraryUpdateSourceConfiguration(
-        sourceID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?
+        sourceID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?, context: LibraryMutationContext
     ) async throws
     func recordLibraryUpdateSuccess(
         scanID: UUID, manga: Manga, chapters: [SChapterCompat],
-        expectedConfiguration: ExtensionExecutionConfiguration?
+        expectedConfiguration: ExtensionExecutionConfiguration?, context: LibraryMutationContext
     ) async throws -> LibraryUpdateCommitResult
     func recordLibraryUpdateSkip(
         scanID: UUID, mangaID: Int64, reason: LibraryUpdateTargetReason
@@ -70,18 +72,9 @@ protocol LibraryUpdatePersisting: Sendable {
 
 extension LibraryStore: LibraryUpdatePersisting {
     func verifyLibraryUpdateSourceConfiguration(
-        sourceID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?
+        sourceID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?, context: LibraryMutationContext
     ) throws {
-        if let expectedConfiguration {
-            guard expectedConfiguration.installed.sourceIDs.contains(sourceID) else {
-                throw SourceUpdatePersistenceError.sourceIdentityMismatch
-            }
-            try verifyExtensionExecutionConfiguration(expectedConfiguration)
-        } else {
-            guard sourceID == MangaDexSource().id else {
-                throw SourceUpdatePersistenceError.configurationRequired
-            }
-        }
+        try validateSourceExecution(sourceID: sourceID, expectedConfiguration: expectedConfiguration, context: context)
     }
 }
 
@@ -231,6 +224,7 @@ public actor LibraryUpdateService {
     }
 
     private func process(_ queue: SourceQueue, scanID: UUID) async {
+        guard let context = state?.snapshot.mutationContext, state?.summary.scanID == scanID else { return }
         var configurationUnavailable = false
         for item in queue.items {
             guard canWork(scanID), let mangaID = item.manga.id else { return }
@@ -244,12 +238,12 @@ public actor LibraryUpdateService {
                     continue
                 }
                 try await persistence.verifyLibraryUpdateSourceConfiguration(
-                    sourceID: queue.sourceID, expectedConfiguration: queue.configuration
+                    sourceID: queue.sourceID, expectedConfiguration: queue.configuration, context: context
                 )
             } catch {
                 guard canWork(scanID) else { return }
                 guard Self.configurationChanged(error) else {
-                    await invalidateRun(scanID: scanID, error: .storageUnavailable)
+                    await invalidateRun(scanID: scanID, error: Self.persistenceFailure(error))
                     return
                 }
                 configurationUnavailable = true
@@ -281,7 +275,7 @@ public actor LibraryUpdateService {
                 do {
                     let result = try await persistence.recordLibraryUpdateSuccess(
                         scanID: scanID, manga: refreshed, chapters: update.chapters,
-                        expectedConfiguration: queue.configuration
+                        expectedConfiguration: queue.configuration, context: context
                     )
                     accept(result.summary, scanID: scanID)
                 } catch {
@@ -292,7 +286,7 @@ public actor LibraryUpdateService {
                         } else {
                             // A successful request followed by a failed store
                             // commit is never attributed to the source website.
-                            await invalidateRun(scanID: scanID, error: .storageUnavailable)
+                            await invalidateRun(scanID: scanID, error: Self.persistenceFailure(error))
                         }
                     }
                 }
@@ -313,6 +307,13 @@ public actor LibraryUpdateService {
             return error != .storageUnavailable
         }
         return error as? LibraryUpdatePersistenceError == .sourceIdentityMismatch
+    }
+
+    private static func persistenceFailure(_ error: Error) -> LibraryUpdateServiceError {
+        if let error = error as? LibraryMutationError, error == .staleEpoch || error == .foreignContext {
+            return .libraryChanged
+        }
+        return .storageUnavailable
     }
 
     private func recordSkip(scanID: UUID, mangaID: Int64, reason: LibraryUpdateTargetReason) async {

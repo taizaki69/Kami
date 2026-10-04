@@ -18,7 +18,6 @@ struct MangaDetailView: View {
     @State private var inLibrary = false
     @State private var loading = true
     @State private var errorText: String?
-    @State private var storedId: Int64?
     @State private var libraryBusy = false
     @State private var libraryError: String?
     @State private var categoryAssignment: CategoryAssignmentRequest?
@@ -27,6 +26,8 @@ struct MangaDetailView: View {
     @State private var showDownloads = false
 
     var body: some View {
+        let snapshot = readingSnapshot
+        let savedInLibrary = inLibrary
         List {
             if let errorText {
                 Section {
@@ -50,18 +51,18 @@ struct MangaDetailView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                             Spacer(minLength: 0)
                             Button {
-                                toggleLibrary()
+                                toggleLibrary(snapshot: snapshot, adding: !savedInLibrary)
                             } label: {
-                                Label(inLibrary ? "In library" : "Add to library",
-                                      systemImage: inLibrary ? "checkmark.circle.fill" : "plus.circle")
+                                Label(savedInLibrary ? "In library" : "Add to library",
+                                      systemImage: savedInLibrary ? "checkmark.circle.fill" : "plus.circle")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(libraryBusy || storedId == nil)
-                            if inLibrary, let id = storedId {
+                            .disabled(libraryBusy || snapshot?.manga.id == nil)
+                            if savedInLibrary, let id = snapshot?.manga.id {
                                 Button {
                                     categoryAssignment = CategoryAssignmentRequest(mangaIDs: [id],
-                                                                                   title: detail.title)
+                                        title: detail.title, context: snapshot?.mutationContext)
                                 } label: {
                                     Label(categoryLabel(mangaId: id), systemImage: "folder")
                                         .frame(maxWidth: .infinity)
@@ -98,8 +99,8 @@ struct MangaDetailView: View {
                 ForEach(chapters) { chapter in
                     VStack(alignment: .leading, spacing: 8) {
                         NavigationLink {
-                            if let readingSnapshot {
-                                ReaderView(snapshot: readingSnapshot, chapter: chapter,
+                            if let snapshot {
+                                ReaderView(snapshot: snapshot, chapter: chapter,
                                            openingPolicy: isDownloaded(chapter) ? .offlineOnly : .automatic)
                             }
                         } label: {
@@ -120,7 +121,7 @@ struct MangaDetailView: View {
                                 }
                             }
                         }
-                        .disabled(readingSnapshot?.target(for: chapter) == nil
+                        .disabled(snapshot?.target(for: chapter) == nil
                                   || (!hasCurrentSource && !isDownloaded(chapter)))
                         ChapterDownloadControls(manga: manga, chapter: chapter, inLibrary: inLibrary)
                     }
@@ -145,7 +146,7 @@ struct MangaDetailView: View {
         .refreshable { await load() }
         .onDisappear { loadGeneration &+= 1 }
         .sheet(item: $categoryAssignment) { request in
-            CategoryAssignmentSheet(mangaIDs: request.mangaIDs, title: request.title)
+            CategoryAssignmentSheet(mangaIDs: request.mangaIDs, title: request.title, context: request.context)
         }
         .sheet(isPresented: $showDownloads) { DownloadsView() }
         .alert("Could not update library", isPresented: Binding(
@@ -198,14 +199,15 @@ struct MangaDetailView: View {
         do {
             await model.waitForReadingSaves()
             guard !Task.isCancelled, generation == loadGeneration else { return }
-            let initial = try await model.store.readingSnapshot(sourceID: manga.sourceId, mangaURL: manga.url)
+            let sourceSnapshot = try await model.store.sourceMangaSnapshot(sourceID: manga.sourceId, mangaURL: manga.url)
+            let initial = sourceSnapshot.reading
+            let mutationContext = sourceSnapshot.mutationContext
             let existing = initial?.manga
             guard !Task.isCancelled, generation == loadGeneration else { return }
             if let initial, let existing, let id = existing.id {
                 await model.refreshDownloadAvailability(mangaID: id)
                 guard !Task.isCancelled, generation == loadGeneration else { return }
                 detail = savedDetail(existing)
-                storedId = id
                 inLibrary = existing.inLibrary
                 readingSnapshot = initial
                 chapters = initial.readerChapters
@@ -216,7 +218,8 @@ struct MangaDetailView: View {
                 return
             }
             let execution = try model.sourceExecutionConfiguration(id: manga.sourceId, revision: revision)
-            try await model.store.validateSourceExecution(sourceID: manga.sourceId, expectedConfiguration: execution)
+            try await model.store.validateSourceExecution(sourceID: manga.sourceId, expectedConfiguration: execution,
+                                                           context: mutationContext)
             guard canPublish(revision: revision, generation: generation) else { return }
 
             var compat = prefetchedSourceRevision == revision
@@ -240,18 +243,17 @@ struct MangaDetailView: View {
             let saved = try await model.store.persistSourceUpdate(
                 manga: persisted,
                 chapters: chapterList,
-                expectedConfiguration: execution
+                expectedConfiguration: execution, context: mutationContext
             )
             guard canPublish(revision: revision, generation: generation) else { return }
-            storedId = saved.manga.id
-            inLibrary = saved.manga.inLibrary
-            detail = compat
             guard let savedID = saved.manga.id else { throw DownloadPersistenceError.chapterNotFound }
-            guard let savedReading = try await model.store.readingSnapshot(
-                sourceID: manga.sourceId, mangaURL: manga.url
-            ) else { throw ReadingStateError.mangaNotFound }
+            let current = try await model.store.sourceMangaSnapshot(
+                sourceID: manga.sourceId, mangaURL: manga.url, validating: mutationContext)
+            guard let savedReading = current.reading else { throw ReadingStateError.mangaNotFound }
             await model.refreshDownloadAvailability(mangaID: savedID)
             guard canPublish(revision: revision, generation: generation) else { return }
+            inLibrary = savedReading.manga.inLibrary
+            detail = savedDetail(savedReading.manga)
             readingSnapshot = savedReading
             chapters = savedReading.readerChapters
             loadedSourceRevision = revision
@@ -259,7 +261,8 @@ struct MangaDetailView: View {
             return
         } catch {
             guard !Task.isCancelled, generation == loadGeneration else { return }
-            errorText = "This manga could not be refreshed. Saved chapters and downloads remain available. Please try again when the source is available."
+            errorText = (error as? LibraryMutationError)?.errorDescription
+                ?? "This manga could not be refreshed. Saved chapters and downloads remain available. Please try again when the source is available."
         }
     }
 
@@ -275,18 +278,18 @@ struct MangaDetailView: View {
             && model.isSourceCurrent(id: manga.sourceId, revision: revision)
     }
 
-    private func toggleLibrary() {
-        guard let id = storedId, !libraryBusy else { return }
-        let adding = !inLibrary
+    private func toggleLibrary(snapshot: MangaReadingSnapshot?, adding: Bool) {
+        guard let snapshot, let id = snapshot.manga.id, !libraryBusy else { return }
+        let context = snapshot.mutationContext
         libraryBusy = true
         Task {
             defer { libraryBusy = false }
             do {
-                try await model.setLibrary(adding, mangaId: id)
+                try await model.setLibrary(adding, mangaId: id, context: context)
                 inLibrary = adding
                 if adding, !model.categories.isEmpty {
                     categoryAssignment = CategoryAssignmentRequest(mangaIDs: [id],
-                                                                   title: detail?.title ?? manga.title)
+                        title: detail?.title ?? manga.title, context: context)
                 }
             } catch {
                 libraryError = model.libraryErrorMessage(for: error)

@@ -213,34 +213,34 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func createCategory(name: String) async throws {
-        _ = try await store.createCategory(name: name)
+    func createCategory(name: String, context: LibraryMutationContext) async throws {
+        _ = try await store.createCategory(name: name, context: context)
         await refreshLibrary()
     }
 
-    func renameCategory(id: Int64, name: String) async throws {
-        try await store.renameCategory(id: id, name: name)
+    func renameCategory(id: Int64, name: String, context: LibraryMutationContext) async throws {
+        try await store.renameCategory(id: id, name: name, context: context)
         await refreshLibrary()
     }
 
-    func reorderCategories(ids: [Int64]) async throws {
-        try await store.reorderCategories(ids: ids)
+    func reorderCategories(ids: [Int64], context: LibraryMutationContext) async throws {
+        try await store.reorderCategories(ids: ids, context: context)
         await refreshLibrary()
     }
 
-    func deleteCategories(ids: Set<Int64>) async throws {
-        try await store.deleteCategories(ids: ids)
+    func deleteCategories(ids: Set<Int64>, context: LibraryMutationContext) async throws {
+        try await store.deleteCategories(ids: ids, context: context)
         await refreshLibrary()
     }
 
-    func updateCategories(_ draft: CategoryAssignmentDraft) async throws {
+    func updateCategories(_ draft: CategoryAssignmentDraft, context: LibraryMutationContext) async throws {
         try await store.updateCategories(adding: draft.additions, removing: draft.removals,
-                                         mangaIDs: draft.mangaIDs)
+                                         mangaIDs: draft.mangaIDs, context: context)
         await refreshLibrary()
     }
 
-    func setLibrary(_ inLibrary: Bool, mangaId: Int64) async throws {
-        try await store.setLibrary(inLibrary, mangaId: mangaId)
+    func setLibrary(_ inLibrary: Bool, mangaId: Int64, context: LibraryMutationContext) async throws {
+        try await store.setLibrary(inLibrary, mangaId: mangaId, context: context)
         await refreshLibrary()
         await refreshDownloadCounts()
         await refreshDownloadAvailability(mangaID: mangaId)
@@ -248,7 +248,8 @@ final class AppModel: ObservableObject {
     }
 
     func libraryErrorMessage(for error: Error) -> String {
-        (error as? LibraryCategoryError)?.errorDescription
+        (error as? LibraryMutationError)?.errorDescription
+            ?? (error as? LibraryCategoryError)?.errorDescription
             ?? "Your changes could not be saved. Please try again."
     }
 
@@ -1109,11 +1110,11 @@ final class AppModel: ObservableObject {
         return "The extension operation could not be completed. Please try again."
     }
 
-    func toggleLibrary(_ manga: Manga) {
+    func toggleLibrary(_ manga: Manga, context: LibraryMutationContext) {
         guard let id = manga.id else { return }
         Task {
             do {
-                try await setLibrary(!manga.inLibrary, mangaId: id)
+                try await setLibrary(!manga.inLibrary, mangaId: id, context: context)
             } catch {
                 libraryError = libraryErrorMessage(for: error)
             }

@@ -28,9 +28,18 @@ de la descarga correcta, reaparición, detalle, escaneo repetido y paginación.
 MihonCompatKit no cambia respecto al padre verificado con **371/371** pruebas.
 
 Los logs, revisión y snapshot publicado quedan bajo
-`.git/checkpoints/20261004-exact-chapter-url-identity/`. El PR de implementación
-registra los workflows y artefactos del commit final; Linux no demuestra por
-sí solo compilación o interacción Apple.
+`.git/checkpoints/20261004-exact-chapter-url-identity/`.
+[PR #18](https://github.com/taizaki69/Kami/pull/18), listo y sin fusionar, publicó
+`1c6b43e2a199171766358e51ab9d8e2c5c93a22f`. Pasaron los workflows de
+[Swift](https://github.com/taizaki69/Kami/actions/runs/37239200526)
+(Linux 371 Compat + 296 Core/SQLite; macOS 371 Compat + 299 Core),
+[simulador/dispositivo](https://github.com/taizaki69/Kami/actions/runs/37239200609)
+y [IPA sin firma](https://github.com/taizaki69/Kami/actions/runs/37239200535).
+El árbol del merge de CI `09264995d3550c1a7815401b8d0dfae4849b0f47`
+coincide con el del head: `869196966bc07300cfb03b88ea3cdafdc60264a0`.
+El artefacto IPA es `11316594291`, de 4 705 348 bytes, con digest
+`sha256:690ea877dbfe38faddd7d630832f2b75472377a1a0f0fc7cb23b0ea843679667`.
+Estos checks no verifican interacción en un dispositivo físico.
 
 No hay migración de esquema ni cambio de admisión de extensiones. Un capítulo
 omitido anteriormente necesita un nuevo refresh exitoso para volver a entrar.
