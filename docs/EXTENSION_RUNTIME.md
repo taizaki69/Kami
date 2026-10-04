@@ -25,11 +25,14 @@ and compares the installation and document inside one SQLite transaction;
 corrupt, unsupported or stale documents fail closed. Disable preserves settings,
 while an identity-changing admission invalidates the document atomically.
 
-FoolSlide source IDs do not encode the deployment host. Any stored manga under
-its ID therefore blocks a URL change, including the first configuration when
-legacy manga has no host binding. Source metadata and chapter writes check the
-captured execution configuration in their own write transaction, closing both
-orders of a race between URL save and an old network result.
+FoolSlide source IDs do not encode the deployment host. Schema 7 retains its
+[content website](SOURCE_CONTENT_BINDING.md) independently of preferences.
+Any stored manga blocks a byte-distinct URL change. The first configuration
+after preference loss may use the exact known website; unresolved legacy
+content cannot be assigned to an unproven one. Snapshots and source-result
+checks include the binding revision. Detail, online reading and LibraryService
+also validate captured configuration before requesting content; final writes
+repeat the check in their own transaction.
 
 Downloaded registrations publish revocable facades. Replacement validates the
 whole admitted source set before mutation; disable/replacement revokes retained

@@ -86,7 +86,11 @@ inactive. Its settings form saves the URL and adult-content confirmation for
 the authenticated 1.6.6 APK. Saving a disabled extension keeps it disabled;
 enabling it is a separate choice. Settings survive restarts and disabling.
 Changing the website is blocked once any manga from this source has been
-stored, including manga outside the library. Replacing or disabling a source
+stored, including manga outside the library. Its
+[saved content website](docs/SOURCE_CONTENT_BINDING.md) survives loss of
+installation settings. Configuring it again requires the same exact address;
+an unknown original website remains explicitly unresolved.
+Replacing or disabling a source
 revokes its old requests and refreshes open browse/reader sessions.
 Baozi's unsupported Android bitmap banner transform remains disabled by the
 factory default, including when a partial raw preference set omits that mode.

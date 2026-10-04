@@ -4,10 +4,25 @@ Last updated: 2026-10-04 (America/Lima)
 
 ## Canonical continuation — 2026-10-04
 
-The active continuation is `assistant/atomic-reader-state-20261004`, based on
-`7bcbe7cb94c80527dd371a746fe591308f91aa49` from
-[PR #15](https://github.com/taizaki69/Kami/pull/15). The native export checkpoint
-is ready for review and unmerged. Its exact head passed Linux 371 Compat +
+The active continuation is `assistant/foolslide-content-binding-20261004`,
+based on `b122ee94870b7b457739b5226b73de2943d24b1c` from
+[PR #16](https://github.com/taizaki69/Kami/pull/16). That reader checkpoint is
+ready and unmerged; its exact head passed Linux 371 Compat + 270 Core/SQLite,
+macOS 371 Compat + 273 Core, simulator/device compilation and unsigned IPA.
+The CI merge tree matched the published head tree. Evidence is retained in
+`.git/checkpoints/20261004-atomic-reader-state/published-ci-evidence.json`.
+The new continuation adds schema-7 durable Foo content provenance, exact-byte
+settings/binding CAS and execution checks. See
+[content binding](docs/SOURCE_CONTENT_BINDING.md) and its
+[verification record](docs/VERIFICATION-2026-10-04-CONTENT-BINDING.md).
+Final local checks pass 371 Compat, 291 Core/SQLite and 95 portable Core tests,
+plus the SwiftUI syntax parse and diff whitespace check. The implementation PR
+will record exact-head Apple workflow results after publication.
+This does not enable restore or replace the outstanding shared operation barriers.
+
+The reader checkpoint was based on `7bcbe7cb94c80527dd371a746fe591308f91aa49`
+from [PR #15](https://github.com/taizaki69/Kami/pull/15). The native export
+checkpoint is ready for review and unmerged. Its exact head passed Linux 371 Compat +
 223 Core/SQLite, macOS 371 Compat + 226 Core, simulator/device compilation and
 unsigned IPA packaging. Publication evidence is retained under
 `.git/checkpoints/20261004-native-library-backups/`.
@@ -19,7 +34,7 @@ implementation and test status; this prerequisite does not enable restoration.
 The final local reader-state checks pass 371 Compat, 270 Core/SQLite and
 95 portable Core tests. Its 47 new persistence/queue cases cover atomic
 rollback, retained targets, final-save ownership and bounded retry ordering.
-SwiftUI syntax parses locally; exact-head Apple verification belongs to its PR.
+Its Apple workflow evidence is linked from PR #16 and the dated record.
 The native backup branch was based on
 `8b7d98046dd04cd1ba99d2e27ee856629876f64e` from
 [PR #14](https://github.com/taizaki69/Kami/pull/14). That Mihon decoder checkpoint
@@ -91,8 +106,9 @@ validation, canonical Int64 strings and exact byte identities. A single SQLite
 read transaction includes all stored manga, hidden chapters, every history row
 and duration, empty categories and durable discovery state. Descriptive Foo
 namespace provenance is bounded and validated without loading/enabling an APK.
-Malformed library data fails the whole export; corrupt Foo provenance stays
-explicitly unresolved. No authority, settings, download files or operational
+Malformed library data fails the whole export. Schema 7 now migrates legacy
+Foo provenance once: unproven content becomes explicitly unresolved; a known
+durable website survives later settings loss. No authority, settings, download files or operational
 ledgers are archived or changed.
 
 The Library options menu opens a cancellable export sheet with counts and
@@ -105,8 +121,9 @@ Logs/reviews/publication state are in
 Reader-state work and verification are checkpointed under
 `.git/checkpoints/20261004-atomic-reader-state/`.
 Immutable preview and atomic restore remain required product work. They must reject
-stale input/store state and use exact source/URL identities. Foo needs durable
-content binding/conflict handling. Reader writes now validate a durable epoch;
+stale input/store state and use exact source/URL identities. Foo's durable
+content binding supplies identity prerequisites; restore conflict handling
+remains outstanding. Reader writes now validate a durable epoch;
 source results and other queued producers still need a shared restore barrier
 and scene invalidation. MangaDex mapping evidence now pins the English ID
 2499283573021220255 and strict /manga/UUID and /chapter/UUID forms through the

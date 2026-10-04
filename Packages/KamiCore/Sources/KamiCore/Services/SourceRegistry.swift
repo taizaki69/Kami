@@ -213,6 +213,8 @@ public struct LibraryService {
         guard stored.sourceId == source.id else {
             throw SourceUpdatePersistenceError.sourceIdentityMismatch
         }
+        try await store.validateSourceExecution(sourceID: stored.sourceId, expectedConfiguration: expectedConfiguration)
+        try Task.checkCancellation()
         var compat = SMangaCompat(
             url: stored.url,
             title: stored.title,

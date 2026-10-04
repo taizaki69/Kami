@@ -48,19 +48,28 @@ sincrónicamente la carga al seleccionar otro capítulo y mantiene los fallos
 fuera de la vida de la vista. Antes de salir o vaciar las páginas, captura un
 cambio que SwiftUI aún no haya notificado, sin repetir un índice ya encolado.
 El parse de SwiftUI y `git diff --check` pasan.
-La publicación y los workflows Apple deben verificar el commit final; no se
-deduce su resultado de estas pruebas Linux.
+
+El [PR #16](https://github.com/taizaki69/Kami/pull/16) quedó listo para revisión,
+sin fusionar, en `b122ee94870b7b457739b5226b73de2943d24b1c`.
+[Swift CI](https://github.com/taizaki69/Kami/actions/runs/37235573651) pasó
+371 Compat + 270 Core/SQLite en Linux y 371 Compat + 273 Core en macOS.
+[iOS Build](https://github.com/taizaki69/Kami/actions/runs/37235573735) compiló
+simulador y dispositivo; [IPA Package](https://github.com/taizaki69/Kami/actions/runs/37235573680)
+produjo el IPA sin firmar. El árbol del merge de CI `d9f5067` coincide con
+el árbol publicado `77ce308d87d14427ca756c2878b1f4ed7cf6e8e0`.
 
 Logs, revisiones y estado de publicación se guardan en
 `.git/checkpoints/20261004-atomic-reader-state/`. Los resultados finales y el
-PR deben identificar el commit exacto. Un parse de SwiftUI en Linux no es
+PR identifican el commit exacto. Un parse de SwiftUI en Linux no es
 una compilación Apple ni una prueba de interacción en un dispositivo.
 
 ## Trabajo restante
 
-No se habilita restauración. Faltan binding durable de Foo, invalidación entre
+No se habilita restauración. En este checkpoint faltaban binding durable de Foo, invalidación entre
 escenas, barreras para intents y operaciones pendientes, protección de otros
 productores de cambios, preview inmutable y fusión atómica. La rotación del
 epoch deberá pertenecer a esa transacción de restore; no existe una API pública
 para rotarlo por separado. Tampoco se demuestra rendimiento/memoria en iOS,
 interacción con Files ni ejecución de nuevos APK o sitios reales.
+La continuación del [binding durable](SOURCE_CONTENT_BINDING.md) aborda ese
+prerrequisito por separado y conserva pendientes las barreras generales.

@@ -216,6 +216,8 @@ struct MangaDetailView: View {
                 return
             }
             let execution = try model.sourceExecutionConfiguration(id: manga.sourceId, revision: revision)
+            try await model.store.validateSourceExecution(sourceID: manga.sourceId, expectedConfiguration: execution)
+            guard canPublish(revision: revision, generation: generation) else { return }
 
             var compat = prefetchedSourceRevision == revision
                 ? prefetched ?? SMangaCompat(url: manga.url, title: manga.title)

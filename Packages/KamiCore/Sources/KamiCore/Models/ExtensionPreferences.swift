@@ -8,6 +8,10 @@ public enum ExtensionPreferencesError: Error, Equatable, Sendable, LocalizedErro
     case staleInstallation
     case staleConfiguration
     case deploymentInUse
+    case unresolvedContent
+    case staleContentBinding
+    case invalidContentBinding
+    case contentBindingMismatch
     case configurationRequired
     case invalidStoredConfiguration
     case storageUnavailable
@@ -20,6 +24,10 @@ public enum ExtensionPreferencesError: Error, Equatable, Sendable, LocalizedErro
         case .staleInstallation: return "The installation changed. Open its settings again."
         case .staleConfiguration: return "The settings changed. Open them again before saving."
         case .deploymentInUse: return "The source URL cannot change while manga from this source are stored."
+        case .unresolvedContent: return "The saved manga have no confirmed website address. Their source cannot be assigned through extension settings."
+        case .staleContentBinding: return "The saved content's website changed. Open the settings again before saving."
+        case .invalidContentBinding: return "The saved content's website information is unavailable or invalid."
+        case .contentBindingMismatch: return "The extension settings do not match the saved content's website. Correct the settings before using this source."
         case .configurationRequired: return "Configure a source URL before enabling this extension."
         case .invalidStoredConfiguration: return "The saved extension settings are invalid."
         case .storageUnavailable: return "The extension settings could not be stored."
@@ -38,6 +46,7 @@ public struct ExtensionConfigurationSnapshot: Equatable, Sendable {
     public let userValues: [InterpretedExtensionPreferenceSchema.FieldID: InterpretedExtensionPreferenceSchema.Value]
     public let identityFingerprint: String
     public let revision: Int64
+    public let contentBinding: SourceContentBindingSnapshot?
     let installed: InstalledExtensionTrust
 
     init(
@@ -45,7 +54,8 @@ public struct ExtensionConfigurationSnapshot: Equatable, Sendable {
         schema: InterpretedExtensionPreferenceSchema,
         userValues: [InterpretedExtensionPreferenceSchema.FieldID: InterpretedExtensionPreferenceSchema.Value],
         identityFingerprint: String,
-        revision: Int64
+        revision: Int64,
+        contentBinding: SourceContentBindingSnapshot? = nil
     ) {
         self.packageName = installed.packageName
         self.versionName = installed.versionName
@@ -55,7 +65,25 @@ public struct ExtensionConfigurationSnapshot: Equatable, Sendable {
         self.userValues = userValues
         self.identityFingerprint = identityFingerprint
         self.revision = revision
+        self.contentBinding = contentBinding
         self.installed = installed
+    }
+
+    public func matches(userValues values: [InterpretedExtensionPreferenceSchema.FieldID: InterpretedExtensionPreferenceSchema.Value]) -> Bool {
+        guard userValues.keys.count == values.keys.count else { return false }
+        return userValues.allSatisfy { key, value in
+            switch (value, values[key]) {
+            case let (.string(lhs), .string(rhs)?): return Data(lhs.utf8) == Data(rhs.utf8)
+            case let (.boolean(lhs), .boolean(rhs)?): return lhs == rhs
+            default: return false
+            }
+        }
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.installed == rhs.installed && lhs.schema == rhs.schema
+            && lhs.identityFingerprint == rhs.identityFingerprint && lhs.revision == rhs.revision
+            && lhs.contentBinding == rhs.contentBinding && lhs.matches(userValues: rhs.userValues)
     }
 }
 
@@ -184,7 +212,12 @@ struct StoredExtensionPreferenceValues: Codable {
             guard text.utf8.count <= maximumBytes else {
                 throw ExtensionPreferencesError.invalidStoredConfiguration
             }
-            let payload = try JSONDecoder().decode(Self.self, from: Data(text.utf8))
+            let data = Data(text.utf8)
+            var preflight = try LibraryBackupJSONPreflight(data: data, policy: .init(
+                maximumInputBytes: maximumBytes, maximumDepth: 3, maximumJSONValues: 32,
+                maximumJSONStringBytes: 8192, maximumJSONObjectKeys: 8, maximumJSONArrayElements: 4))
+            try preflight.run()
+            let payload = try JSONDecoder().decode(Self.self, from: data)
             // Re-enter the validating scalar initializer, then the exact
             // product schema; Codable alone must never bypass either gate.
             let bounded = try InterpretedExtensionPreferences(strings: payload.strings, booleans: payload.booleans)
