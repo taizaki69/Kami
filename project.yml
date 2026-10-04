@@ -32,6 +32,14 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         UIRequiresFullScreen: false
         ITSAppUsesNonExemptEncryption: false
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: app.kami.library-backup
+            UTTypeDescription: Kami Library Backup
+            UTTypeConformsTo:
+              - public.json
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - kamibackup
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.kami.reader

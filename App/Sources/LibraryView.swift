@@ -12,6 +12,7 @@ struct LibraryView: View {
     @State private var selectedIDs = Set<Int64>()
     @State private var assignment: CategoryAssignmentRequest?
     @State private var showDownloads = false
+    @State private var showBackups = false
 
     private var filtered: [Manga] {
         model.librarySnapshot.filteredManga(category: category, search: search)
@@ -57,10 +58,19 @@ struct LibraryView: View {
                     } label: {
                         Label("Downloads", systemImage: "arrow.down.circle")
                     }
-                    Button {
-                        showCategories = true
+                    Menu {
+                        Button {
+                            showCategories = true
+                        } label: {
+                            Label("Manage categories", systemImage: "folder.badge.gearshape")
+                        }
+                        Button {
+                            showBackups = true
+                        } label: {
+                            Label("Library backups", systemImage: "externaldrive")
+                        }
                     } label: {
-                        Label("Manage categories", systemImage: "folder.badge.gearshape")
+                        Label("Library options", systemImage: "ellipsis.circle")
                     }
                     Button(selecting ? "Done" : "Select") {
                         selecting.toggle()
@@ -81,6 +91,7 @@ struct LibraryView: View {
             }
             .sheet(isPresented: $showDownloads) { DownloadsView() }
             .sheet(isPresented: $showCategories) { CategoriesView() }
+            .sheet(isPresented: $showBackups) { LibraryBackupsView() }
             .sheet(item: $assignment) { request in
                 CategoryAssignmentSheet(mangaIDs: request.mangaIDs, title: request.title)
             }
