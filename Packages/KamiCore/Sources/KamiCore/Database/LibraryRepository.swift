@@ -60,6 +60,62 @@ public actor LibraryStore {
         }
     }
 
+    /// Reads immutable input and target state without changing the library.
+    /// Exclusions are explicit and are part of this store-issued preview.
+    public func previewLibraryRestore(
+        from data: Data, excludingConflictedSources: Bool = false,
+        policy: LibraryBackupPolicy = .default
+    ) throws -> LibraryRestorePreview {
+        let input = try LibraryBackupCodec(policy: policy).decode(data)
+        do {
+            let stamp = try db.restoreChangeStamp()
+            let preview = try withLibraryTransaction(readOnly: true) {
+                let state = try LibraryRestorePersistence.state(db, policy: policy)
+                let plan = try LibraryRestorePlanner.plan(input: input, target: state.document,
+                    foolSlideBinding: state.binding, policy: policy)
+                try Task.checkCancellation()
+                return LibraryRestorePreview(id: UUID(), inputSHA256: APKSignatureVerifier.apkSHA256(Array(data)),
+                    summary: plan.summary, conflicts: plan.conflicts, excludesConflictedSources: excludingConflictedSources,
+                    sources: input.sources, ownerID: readingOwnerID, epoch: state.epoch,
+                    dependencyDigest: state.digest, changeStamp: stamp, policy: policy, plan: plan)
+            }
+            // A WAL writer may commit while our read snapshot is open. Never
+            // associate that newer data_version with an older approved snapshot.
+            guard try db.restoreChangeStamp() == stamp else { throw LibraryRestoreError.previewExpired }
+            try Task.checkCancellation()
+            return preview
+        } catch is SQLiteDatabase.SQLiteError { throw LibraryRestoreError.storageUnavailable }
+        catch is ReadingStateError { throw LibraryRestoreError.invalidStoredData }
+        catch is ExtensionPreferencesError { throw LibraryRestoreError.invalidStoredData }
+    }
+
+    /// The app must hold its shared exclusive operation scope for this call.
+    /// Database revalidation also guards other connections and durable workers.
+    public func commitLibraryRestore(_ preview: LibraryRestorePreview) throws -> LibraryRestoreReport {
+        try Task.checkCancellation()
+        guard preview.ownerID == readingOwnerID else { throw LibraryRestoreError.foreignPreview }
+        guard preview.canRestore else { throw LibraryRestoreError.sourceConflicts }
+        do {
+            return try withLibraryTransaction {
+                try LibraryRestorePersistence.requireIdle(db)
+                guard try db.restoreChangeStamp() == preview.changeStamp,
+                      try ReadingStateReader.epoch(db) == preview.epoch else { throw LibraryRestoreError.previewExpired }
+                let current = try LibraryRestorePersistence.state(db, policy: preview.policy)
+                guard current.digest == preview.dependencyDigest else { throw LibraryRestoreError.previewExpired }
+                try LibraryRestorePersistence.write(db, plan: preview.plan)
+                try Task.checkCancellation()
+                try db.run("UPDATE library_data_state SET epoch=randomblob(16) WHERE singleton=1")
+                guard try ReadingStateReader.epoch(db) != preview.epoch else { throw LibraryRestoreError.storageUnavailable }
+                try Task.checkCancellation()
+                return LibraryRestoreReport(previewID: preview.id, summary: preview.summary)
+            }
+        } catch is SQLiteDatabase.SQLiteError { throw LibraryRestoreError.storageUnavailable }
+        catch is ReadingStateError { throw LibraryRestoreError.invalidStoredData }
+        catch is ExtensionPreferencesError { throw LibraryRestoreError.invalidStoredData }
+        catch is LibraryBackupError { throw LibraryRestoreError.invalidStoredData }
+        catch is LibraryBackupSnapshotError { throw LibraryRestoreError.invalidStoredData }
+    }
+
     // MARK: - Manga
 
     public func libraryManga() throws -> [Manga] {

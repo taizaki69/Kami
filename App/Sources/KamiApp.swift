@@ -35,7 +35,10 @@ struct RootTabView: View {
         .disabled(model.libraryPresentation.isExclusive)
         .overlay {
             if model.libraryPresentation.isExclusive {
-                ProgressView("Updating library…")
+                VStack(spacing: 12) {
+                    ProgressView("Restoring library…")
+                    Button("Cancel") { model.cancelLibraryRestore() }
+                }
                     .padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
         }
@@ -45,7 +48,18 @@ struct RootTabView: View {
         )) {
             Button("OK", role: .cancel) { model.libraryOperationError = nil }
         } message: { Text(model.libraryOperationError ?? "") }
-        .safeAreaInset(edge: .top) { ReadingSaveFailureBanner() }
+        .safeAreaInset(edge: .top) {
+            VStack(spacing: 0) {
+                ReadingSaveFailureBanner()
+                if let notice = model.libraryRestoreNotice {
+                    HStack {
+                        Text(notice).font(.footnote)
+                        Spacer()
+                        Button("Dismiss") { model.libraryRestoreNotice = nil }
+                    }.padding().background(.regularMaterial)
+                }
+            }
+        }
         .onAppear { model.downloadsSceneChanged(sceneID: sceneID, active: scenePhase == .active) }
         .onChange(of: scenePhase) { _, phase in model.downloadsSceneChanged(sceneID: sceneID, active: phase == .active) }
         .onDisappear { model.downloadsSceneChanged(sceneID: sceneID, active: false) }

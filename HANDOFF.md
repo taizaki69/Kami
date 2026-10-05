@@ -4,24 +4,38 @@ Last updated: 2026-10-04 (America/Lima)
 
 ## Canonical continuation — 2026-10-04
 
-The active continuation is `assistant/shared-library-operations-20261004`,
-based on `32482b1ff5e41a6fa758a1bd550c38171dfbf8c3` from
-[PR #19](https://github.com/taizaki69/Kami/pull/19). That checkpoint is ready
-and unmerged: Linux 371 Compat + 310 Core/SQLite, macOS 371 Compat + 313 Core,
-simulator/device and unsigned IPA all passed. Its CI merge tree matches the
-published head. Evidence is in
-`.git/checkpoints/20261004-library-mutation-contexts/published-ci-evidence.json`.
-The current increment integrates shared synchronous operation ownership,
-reader/run/prompt lifetimes and generation invalidation across WindowGroup
-scenes. Existing database-issued contexts and reading targets remain required.
-Local checks pass 327 Core/SQLite, 112 portable Core and 371 Compat tests,
-including 15 coordinator and two writer regression cases. See
-[shared operations](docs/LIBRARY_OPERATIONS.md) and its
-[verification record](docs/VERIFICATION-2026-10-04-LIBRARY-OPERATIONS.md).
-Restore is still disabled; immutable preview, durable dependency checks and
-atomic merge remain pending. Publication and exact-head CI checks are automatic;
-PRs stay unmerged. Evidence and continuation records are checkpointed under
-`.git/checkpoints/20261004-shared-library-operations/`.
+The active continuation is `assistant/native-library-restore-20261004`, based
+on `a3c3560489040dd33b4a8412397232b66b48f6ea` from
+[PR #20](https://github.com/taizaki69/Kami/pull/20), ready and unmerged. That
+base passed Linux 371 Compat + 327 Core/SQLite, macOS 371 Compat + 330 Core,
+simulator/device compilation and unsigned IPA. Its CI merge tree matched its
+published head; evidence is in
+`.git/checkpoints/20261004-shared-library-operations/published-ci-evidence.json`.
+
+This increment implements native restore through Files: bounded immutable
+acquisition, store-issued preview with counts/source conflicts, explicit
+exclusions and a conservative atomic merge. A preview binds exact input,
+owner/epoch, domain/identity/configuration dependencies and SQLite change
+stamps. Commit revalidates under BEGIN IMMEDIATE, refuses active durable
+workers, preserves downloads/settings/trust and rotates the epoch atomically.
+The actual coordinator operation reserves synchronously, owns cancellation
+through worker drainage and publishes only committed success. Late cancellation
+cannot report rollback. AppModel retains completion/failure independently of
+the sheet; failed previews require review again.
+
+See [native backups](docs/NATIVE_BACKUPS.md),
+[shared operations](docs/LIBRARY_OPERATIONS.md) and the
+[restore verification](docs/VERIFICATION-2026-10-04-NATIVE-RESTORE.md).
+Publication and exact-head CI verification are automatic; PRs remain unmerged.
+Logs and publication evidence are under
+`.git/checkpoints/20261004-native-library-restore/`.
+
+The main-branch Markdown audit is separate
+[PR #21](https://github.com/taizaki69/Kami/pull/21), ready and unmerged at
+`806e3f398120a3aaa08eff541c2b5b98968b185f`. All four checks passed. It documents
+main's narrower merged scope; it must be reconciled with this continuation
+when integrating the stacked feature PRs. Do not overwrite either history.
+Earlier checkpoints below describe their own implementation stages and counts.
 
 The mutation-context continuation paired opaque store/epoch contexts with
 stored snapshots and required them for category, membership and source-result
@@ -42,7 +56,8 @@ discovery reconciliation, including Updates IDs/cursors. Five regressions
 reproduce the previous failures and now pass; full local Core/SQLite passes
 296 tests and portable Core passes 96. See the
 [chapter identity verification](docs/VERIFICATION-2026-10-04-CHAPTER-IDENTITY.md).
-Shared restore barriers, immutable preview and atomic merge remain pending.
+At that checkpoint shared restore barriers, preview and merge were pending;
+they are implemented by the later operation and native-restore continuations.
 
 The content-binding continuation was `assistant/foolslide-content-binding-20261004`,
 based on `b122ee94870b7b457739b5226b73de2943d24b1c` from
@@ -58,7 +73,7 @@ settings/binding CAS and execution checks. See
 Final local checks pass 371 Compat, 291 Core/SQLite and 95 portable Core tests,
 plus the SwiftUI syntax parse and diff whitespace check. PR #17 records the
 successful exact-head Apple workflows.
-This does not enable restore or replace the outstanding shared operation barriers.
+That checkpoint alone did not enable restore or supply shared operation barriers.
 
 The reader checkpoint was based on `7bcbe7cb94c80527dd371a746fe591308f91aa49`
 from [PR #15](https://github.com/taizaki69/Kami/pull/15). The native export
@@ -154,19 +169,17 @@ ledgers are archived or changed.
 The Library options menu opens a cancellable export sheet with counts and
 Save to Files. Its immutable bytes are prepared off the main actor, fallback
 storage is rejected, stale tasks cannot publish, and save success comes only
-from the system exporter. The screen states that restore is unavailable.
+from the system exporter. At that checkpoint the screen stated that restore
+was unavailable; the native-restore continuation above adds it.
 Logs/reviews/publication state are in
 `.git/checkpoints/20261004-native-library-backups/`.
 
 Reader-state work and verification are checkpointed under
 `.git/checkpoints/20261004-atomic-reader-state/`.
-Immutable preview and atomic restore remain required product work. They must reject
-stale input/store state and use exact source/URL identities. Foo's durable
-content binding supplies identity prerequisites; restore conflict handling
-remains outstanding. Reader writes now validate a durable epoch;
-category, membership and source-result writes now carry the same generation
-context. A shared restore barrier and scene invalidation are still required
-for all queued producers. MangaDex mapping evidence now pins the English ID
+Native preview, conservative merge, Foo conflict handling and shared scene
+barriers are now implemented. Reader, category, membership and source writes
+retain their store/epoch targets; restore never silently renews them.
+MangaDex mapping evidence now pins the English ID
 2499283573021220255 and strict /manga/UUID and /chapter/UUID forms through the
 actual Gradle/KSP source-ID chain; see the local
 `20261004-backup-decoding/next-mangadex-mapping.md` checkpoint. That research

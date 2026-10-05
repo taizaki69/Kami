@@ -138,6 +138,79 @@ public final class SQLiteDatabase {
         return sqlite3_last_insert_rowid(handle)
     }
 
+    /// Connection-local writes (including rolled-back writes) and commits by
+    /// other connections invalidate a retained restore preview, including ABA.
+    func restoreChangeStamp() throws -> [Int64] {
+        guard let version = try query("PRAGMA data_version").first?.int64("data_version") else {
+            throw LibraryRestoreError.invalidStoredData
+        }
+        return [sqlite3_total_changes64(handle), version]
+    }
+
+    /// Fixed internal projections only. Bounds precede value copies; types and
+    /// byte lengths delimit values so neither Unicode folding nor C-string
+    /// truncation can erase a dependency from a restore fingerprint.
+    func restoreDependencyBytes(_ sql: String, maximumRows: Int,
+                                maximumColumnBytes: Int, maximumBytes: Int) throws -> [UInt8] {
+        let stmt = try prepare(sql, [])
+        defer { sqlite3_finalize(stmt) }
+        var output: [UInt8] = [], rows = 0
+        func append(_ bytes: [UInt8]) throws {
+            guard bytes.count <= maximumBytes - output.count else { throw LibraryRestoreError.resultLimitExceeded }
+            output.append(contentsOf: bytes)
+        }
+        func word(_ value: UInt64) throws {
+            var value = value.bigEndian
+            try withUnsafeBytes(of: &value) { try append(Array($0)) }
+        }
+        let columns = sqlite3_column_count(stmt)
+        guard columns > 0, columns <= 32 else { throw LibraryRestoreError.invalidStoredData }
+        var result = sqlite3_step(stmt)
+        while result == SQLITE_ROW {
+            try Task.checkCancellation()
+            guard rows < maximumRows else { throw LibraryRestoreError.resultLimitExceeded }
+            rows += 1
+            try append([0xFE])
+            for column in 0..<columns {
+                let type = sqlite3_column_type(stmt, column)
+                try append([UInt8(type)])
+                switch type {
+                case SQLITE_INTEGER: try word(UInt64(bitPattern: sqlite3_column_int64(stmt, column)))
+                case SQLITE_FLOAT:
+                    let value = sqlite3_column_double(stmt, column)
+                    guard value.isFinite else { throw LibraryRestoreError.invalidStoredData }
+                    try word(value.bitPattern)
+                case SQLITE_TEXT, SQLITE_BLOB:
+                    let length = Int(sqlite3_column_bytes(stmt, column))
+                    guard length <= maximumColumnBytes, length <= maximumBytes - output.count - 8 else {
+                        throw LibraryRestoreError.resultLimitExceeded
+                    }
+                    let bytes: [UInt8]
+                    if let pointer = sqlite3_column_blob(stmt, column) {
+                        bytes = Array(UnsafeRawBufferPointer(start: pointer, count: length))
+                    } else {
+                        guard length == 0 else { throw LibraryRestoreError.invalidStoredData }
+                        bytes = []
+                    }
+                    if type == SQLITE_TEXT {
+                        guard !bytes.contains(0), String(bytes: bytes, encoding: .utf8) != nil else {
+                            throw LibraryRestoreError.invalidStoredData
+                        }
+                    }
+                    try word(UInt64(length)); try append(bytes)
+                case SQLITE_NULL: break
+                default: throw LibraryRestoreError.invalidStoredData
+                }
+            }
+            result = sqlite3_step(stmt)
+        }
+        guard result == SQLITE_DONE else {
+            throw SQLiteError.step(String(cString: sqlite3_errmsg(handle)), sql: sql)
+        }
+        try append([0xFF])
+        return output
+    }
+
     private func prepare(_ sql: String, _ params: [SQLiteBindable]) throws -> OpaquePointer {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {

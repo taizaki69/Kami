@@ -1,8 +1,8 @@
 # Backup decoding and restoration scope
 
-Native Kami library export is implemented separately as versioned JSON saved
-through Files; see [native backup scope and format](NATIVE_BACKUPS.md).
-Neither format currently has a product restoration flow.
+Native Kami library export and reviewed restore are implemented separately as
+versioned JSON through Files; see [native backup scope and format](NATIVE_BACKUPS.md).
+Mihon decoding remains a library API without a product import flow.
 
 ## Verified upstream format — 2026-10-04
 
@@ -108,10 +108,11 @@ represent a user backup exported from a running Android application.
 
 The implementation PR records the final suite/build evidence for its exact
 commit. A passing decoder suite does not establish restoration or Files UI.
-Native Kami export now includes all history, hidden chapters, duration and
-durable discovery state. Remaining work includes immutable restore preview,
-atomic merge and reports of unavailable/conflicting sources and unsupported
-fields. Native export does not establish Mihon import interoperability.
+Native Kami export includes all history, hidden chapters, duration and durable
+discovery state. Native restore now has immutable preview, atomic merge and
+unavailable/conflicting source reporting. Mihon still needs explicit source/URL
+adapters and a review of unsupported-field coverage before using that merge
+path. Native restore does not establish Mihon import interoperability.
 
 Restoration must match exact source/URL identities and preserve reading state.
 Fuzzy title or chapter-number matching belongs to a separately chosen source
