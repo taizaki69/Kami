@@ -6,9 +6,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-04
 
 The full native-reader and compatibility objective remains active. The current
-continuation adds a reviewed Mihon import for the measured English MangaDex
-identity and exact paths, using the native atomic merge, shared operation
-ownership and store-issued contexts.
+continuation adds persistent reader tap actions, fitting, reversible border
+cropping and brightness, with shared display-effect ownership across active
+windows. It follows the reviewed Mihon import for the measured English MangaDex
+identity and exact paths, native atomic merge and store-issued contexts.
 It builds on durable FoolSlide website identity, atomic reader state with database-issued reading targets, bounded
 native export to Files, Mihon gzip/raw backup decoding, offline downloads,
 updates, History resume and revocable source registrations. Native restore is
@@ -47,6 +48,13 @@ must not be used as evidence for the current commit.
       separately from physical-device interaction and performance.
 - [ ] Continue migration/backup UI and remaining reader controls,
       without treating a passing compatibility suite as completion of the app.
+- [x] Integrate persistent reader tap actions, whole-page/width/height fitting,
+      bounded panning and reversible uniform-border cropping in online/offline
+      readers. Keep a controls recovery button when custom tap actions hide UI.
+- [x] Add a brightness override and shared keep-awake/display ownership;
+      preserve other readers and observed system changes, release on inactivity
+      and use the actual window screen. Apple supports brightness only on the
+      main display. See [reader controls](docs/READER.md) for validation limits.
 - [x] Verify strict gzip/raw backup decoding against real Kotlin serializer
       output; retain library data and explicit unsupported-field coverage.
 - [x] Add versioned native library export: strict bounded JSON, a complete
@@ -361,9 +369,10 @@ must not be used as evidence for the current commit.
       zones, paged zoom/pan, settings, keep-awake, bounded header-aware image
       loading/prefetch, off-main downsampling, retry, and progress/history
 - [x] Previous/next chapter flow (implemented before this continuation).
-- [ ] Reader completion: configurable tap actions,
-      fit/crop/brightness controls, cookie continuity for page-URL paths without
-      a source executor, and memory-pressure purging
+- [x] Reader tap-action, fit, crop and brightness controls; active continuation
+      above. Physical gesture/brightness/multiwindow checks remain open.
+- [ ] Reader completion: cookie continuity for page-URL paths without a source
+      executor, memory-pressure purging and long-image tiling/performance
 - [ ] Cloudflare WKWebView bridge + cookie sync (M4)
 - [ ] Global search across enabled sources
 

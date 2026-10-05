@@ -75,6 +75,9 @@ struct ReaderPageImage: View {
     let requestGeneration: Int
     @ObservedObject var store: ReaderImageStore
     let layout: Layout
+    let fit: ReaderPageFit
+    let trimBorders: Bool
+    let rightToLeft: Bool
     let isActive: Bool
     let background: Color
     let foreground: Color
@@ -83,6 +86,7 @@ struct ReaderPageImage: View {
     var onReadOnline: (() -> Void)? = nil
 
     @State private var image: UIImage?
+    @State private var croppedImage: UIImage?
     @State private var loading = true
     @State private var errorText: String?
     @State private var attempt = 0
@@ -93,18 +97,21 @@ struct ReaderPageImage: View {
         Group {
             if !isActive {
                 background
-            } else if let image {
+            } else if let image = presentedImage {
                 switch layout {
                 case .paged:
                     ZoomableReaderImage(
                         image: image,
                         allowsZoom: true,
+                        fit: fit, rightToLeft: rightToLeft,
                         onSingleTap: onSingleTap
                     )
+                    .id(trimBorders)
                 case .webtoon:
                     ZoomableReaderImage(
                         image: image,
                         allowsZoom: false,
+                        fit: .fitPage, rightToLeft: false,
                         onSingleTap: onSingleTap
                     )
                     .aspectRatio(
@@ -120,9 +127,11 @@ struct ReaderPageImage: View {
         .background(background)
         .task(id: loadID) { await loadImage() }
         .onDisappear {
-            if layout == .webtoon { image = nil }
+            if layout == .webtoon { image = nil; croppedImage = nil }
         }
     }
+
+    private var presentedImage: UIImage? { trimBorders ? croppedImage ?? image : image }
 
     @ViewBuilder
     private var placeholder: some View {
@@ -159,6 +168,7 @@ struct ReaderPageImage: View {
         guard !Task.isCancelled else { return }
         guard isActive else {
             image = nil
+            croppedImage = nil
             loading = false
             errorText = nil
             return
@@ -166,6 +176,7 @@ struct ReaderPageImage: View {
         loading = true
         errorText = nil
         image = nil
+        croppedImage = nil
         var resolvedRequest = request
         let requestedAttempt = attempt
         if offlineLease == nil, requestedAttempt != lastResolvedAttempt {
@@ -203,6 +214,7 @@ struct ReaderPageImage: View {
             )
             guard !Task.isCancelled else { return }
             image = decoded.image
+            croppedImage = decoded.croppedImage
             loading = false
         } catch is CancellationError {
             return
@@ -219,100 +231,102 @@ struct ReaderPageImage: View {
 private struct ZoomableReaderImage: View {
     let image: UIImage
     let allowsZoom: Bool
+    let fit: ReaderPageFit
+    let rightToLeft: Bool
     let onSingleTap: (CGFloat) -> Void
 
-    @State private var scale: CGFloat = 1
-    @State private var settledScale: CGFloat = 1
-    @State private var offset: CGSize = .zero
-    @State private var settledOffset: CGSize = .zero
+    @State private var scale: Double = 1
+    @State private var settledScale: Double = 1
+    @State private var offset = ReaderPageOffset()
+    @State private var settledOffset = ReaderPageOffset()
 
     var body: some View {
         GeometryReader { proxy in
-            if allowsZoom {
-                zoomableImage
-                    .highPriorityGesture(tapGesture(width: proxy.size.width))
-                    .simultaneousGesture(magnifyGesture)
-                    .simultaneousGesture(panGesture)
-            } else {
-                fittedImage
-                    .highPriorityGesture(singleTapGesture(width: proxy.size.width))
-            }
+            let plan = ReaderPageLayout(imageWidth: Double(image.size.width), imageHeight: Double(image.size.height),
+                                        viewportWidth: Double(proxy.size.width), viewportHeight: Double(proxy.size.height),
+                                        fit: fit, rightToLeft: rightToLeft)
+            imageSurface(plan: plan)
+                .onAppear { reset(plan: plan) }
+                .onChange(of: plan) { _, updated in reset(plan: updated) }
+                .onChange(of: fit) { _, _ in reset(plan: plan) }
+                .onChange(of: rightToLeft) { _, _ in reset(plan: plan) }
         }
         .clipped()
     }
 
-    private var fittedImage: some View {
-        Image(uiImage: image)
+    @ViewBuilder
+    private func imageSurface(plan: ReaderPageLayout) -> some View {
+        let content = Image(uiImage: image)
             .resizable()
-            .scaledToFit()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: CGFloat(plan.width), height: CGFloat(plan.height))
+            .scaleEffect(CGFloat(scale))
+            .offset(x: CGFloat(offset.x), y: CGFloat(offset.y))
+            .frame(width: CGFloat(plan.viewportWidth), height: CGFloat(plan.viewportHeight))
             .contentShape(Rectangle())
+            .clipped()
+        if allowsZoom {
+            content.highPriorityGesture(tapGesture(plan: plan))
+                .highPriorityGesture(panGesture(plan: plan), including: plan.canPan(scale: scale) ? .all : .subviews)
+                .simultaneousGesture(magnifyGesture(plan: plan))
+        } else {
+            content.highPriorityGesture(SpatialTapGesture(count: 1).onEnded { tap in
+                onSingleTap(tap.location.x / CGFloat(max(plan.viewportWidth, 1)))
+            })
+        }
     }
 
-    private var zoomableImage: some View {
-        fittedImage
-            .scaleEffect(scale)
-            .offset(offset)
+    private func reset(plan: ReaderPageLayout) {
+        scale = 1; settledScale = 1
+        offset = plan.initialOffset; settledOffset = offset
     }
 
-    private func singleTapGesture(width: CGFloat) -> some Gesture {
-        SpatialTapGesture(count: 1)
-            .onEnded { tap in
-                onSingleTap(tap.location.x / max(width, 1))
-            }
-    }
-
-    private func tapGesture(width: CGFloat) -> some Gesture {
-        TapGesture(count: 2)
+    private func tapGesture(plan: ReaderPageLayout) -> some Gesture {
+        SpatialTapGesture(count: 2)
             .exclusively(before: SpatialTapGesture(count: 1))
             .onEnded { value in
                 switch value {
-                case .first:
-                    guard allowsZoom else { return }
+                case let .first(tap):
+                    guard allowsZoom else {
+                        onSingleTap(tap.location.x / CGFloat(max(plan.viewportWidth, 1))); return
+                    }
                     withAnimation(.easeInOut(duration: 0.2)) {
-                        if scale > 1 {
-                            scale = 1
-                            settledScale = 1
-                            offset = .zero
-                            settledOffset = .zero
-                        } else {
-                            scale = 2.5
-                            settledScale = 2.5
-                        }
+                        let next = scale > 1 ? 1.0 : 2.5
+                        offset = plan.zoomedOffset(offset, from: scale, to: next,
+                                                   anchor: .init(x: Double(tap.location.x) - plan.viewportWidth / 2,
+                                                                 y: Double(tap.location.y) - plan.viewportHeight / 2))
+                        scale = next; settledScale = next; settledOffset = offset
                     }
                 case let .second(tap):
-                    onSingleTap(tap.location.x / max(width, 1))
+                    onSingleTap(tap.location.x / CGFloat(max(plan.viewportWidth, 1)))
                 }
             }
     }
 
-    private var magnifyGesture: some Gesture {
+    private func magnifyGesture(plan: ReaderPageLayout) -> some Gesture {
         MagnifyGesture()
             .onChanged { value in
                 guard allowsZoom else { return }
-                scale = min(5, max(1, settledScale * value.magnification))
+                let next = ReaderPageLayout.normalizedScale(settledScale * Double(value.magnification))
+                offset = plan.zoomedOffset(settledOffset, from: settledScale, to: next)
+                scale = next
             }
             .onEnded { _ in
                 guard allowsZoom else { return }
                 settledScale = scale
-                if scale <= 1 {
-                    offset = .zero
-                    settledOffset = .zero
-                }
+                offset = plan.boundedOffset(offset, scale: scale)
+                settledOffset = offset
             }
     }
 
-    private var panGesture: some Gesture {
+    private func panGesture(plan: ReaderPageLayout) -> some Gesture {
         DragGesture(minimumDistance: 5)
             .onChanged { value in
-                guard allowsZoom, scale > 1 else { return }
-                offset = CGSize(
-                    width: settledOffset.width + value.translation.width,
-                    height: settledOffset.height + value.translation.height
-                )
+                guard allowsZoom, plan.canPan(scale: scale) else { return }
+                offset = plan.boundedOffset(.init(x: settledOffset.x + Double(value.translation.width),
+                                                  y: settledOffset.y + Double(value.translation.height)), scale: scale)
             }
             .onEnded { _ in
-                guard allowsZoom, scale > 1 else { return }
+                guard allowsZoom, plan.canPan(scale: scale) else { return }
                 settledOffset = offset
             }
     }
@@ -320,6 +334,7 @@ private struct ZoomableReaderImage: View {
 
 private struct DecodedReaderImage: @unchecked Sendable {
     let image: UIImage
+    let croppedImage: UIImage?
 }
 
 private enum ReaderImageDecoder {
@@ -328,9 +343,10 @@ private enum ReaderImageDecoder {
         maximumPixelDimension: Int
     ) async throws -> DecodedReaderImage {
         let result = try await NativeImageValidation.thumbnail(
-            data: data, maximumPixelDimension: maximumPixelDimension
+            data: data, maximumPixelDimension: maximumPixelDimension, prepareBorderTrim: true
         )
         try Task.checkCancellation()
-        return DecodedReaderImage(image: UIImage(cgImage: result.image))
+        return DecodedReaderImage(image: UIImage(cgImage: result.image),
+                                 croppedImage: result.borderTrimmedImage.map { UIImage(cgImage: $0) })
     }
 }

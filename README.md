@@ -8,7 +8,10 @@ extension APKs. Created and maintained by
 
 Kami includes a native MangaDex source, a persistent library, history and
 reading progress, source browsing and filters, and an LTR/RTL/webtoon reader
-with previous/next chapters, zoom, bounded image prefetch and retry. Categories
+with previous/next chapters, zoom, bounded image prefetch and retry. The
+[reader controls](docs/READER.md) include persistent tap actions, page fitting,
+reversible uniform-border cropping and an optional brightness override, with
+shared keep-awake/brightness ownership across active readers. Categories
 can be created, renamed, reordered and deleted, assigned individually or in
 bulk, and combined with library search. Deleting a category preserves manga,
 chapter progress and history; bulk changes preserve untouched memberships.

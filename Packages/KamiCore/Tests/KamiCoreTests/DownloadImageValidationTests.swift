@@ -65,12 +65,61 @@ final class DownloadImageValidationTests: XCTestCase, @unchecked Sendable {
         let data = try png()
         let task = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return try await NativeImageValidation.thumbnail(data: data, maximumPixelDimension: 512)
+            return try await NativeImageValidation.thumbnail(data: data, maximumPixelDimension: 512, prepareBorderTrim: true)
         }
         do {
             _ = try await task.value
             XCTFail("Cancelled decoding returned an image")
         } catch is CancellationError { }
+    }
+
+    func testReaderPreparesReversibleCropWithoutChangingOriginalOrSourceBytes() async throws {
+        var pixels = [UInt8](repeating: 255, count: 40 * 32 * 4)
+        for y in 6..<25 { for x in 8..<30 {
+            let i = (y * 40 + x) * 4
+            pixels[i] = 80; pixels[i + 1] = 100; pixels[i + 2] = 120
+        } }
+        let image = try XCTUnwrap(CGImage(
+            width: 40, height: 32, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 160,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
+            provider: try XCTUnwrap(CGDataProvider(data: Data(pixels) as CFData)), decode: nil,
+            shouldInterpolate: false, intent: .defaultIntent))
+        let encoded = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(encoded, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let source = encoded as Data, saved = source
+        let normal = try await NativeImageValidation.thumbnail(data: source, maximumPixelDimension: 512)
+        XCTAssertNil(normal.borderTrimmedImage)
+        let result = try await NativeImageValidation.thumbnail(data: source, maximumPixelDimension: 512, prepareBorderTrim: true)
+        let cropped = try XCTUnwrap(result.borderTrimmedImage)
+        XCTAssertEqual(result.image.width, 40); XCTAssertEqual(result.image.height, 32)
+        XCTAssertEqual(result.sourceWidth, 40); XCTAssertEqual(result.sourceHeight, 32)
+        XCTAssertEqual(cropped.width, 26); XCTAssertEqual(cropped.height, 23)
+        XCTAssertEqual(source, saved)
+        var rendered = Data(count: cropped.width * cropped.height * 4)
+        try rendered.withUnsafeMutableBytes { bytes in
+            let context = try XCTUnwrap(CGContext(data: bytes.baseAddress, width: cropped.width, height: cropped.height,
+                                                 bitsPerComponent: 8, bytesPerRow: cropped.width * 4,
+                                                 space: CGColorSpaceCreateDeviceRGB(),
+                                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+            context.draw(cropped, in: CGRect(x: 0, y: 0, width: cropped.width, height: cropped.height))
+        }
+        // Asymmetric margins prove that the analysis and CGImage crop use the
+        // same pixel origin; a vertical flip would cut one of these margins.
+        XCTAssertGreaterThan(rendered[(1 * 26 + 2) * 4], 240)
+        XCTAssertLessThan(rendered[(2 * 26 + 2) * 4], 200)
+    }
+
+    func testBlankReaderThumbnailKeepsItsFullBoundedDimensions() async throws {
+        let data = try png()
+        let result = try await NativeImageValidation.thumbnail(data: data, maximumPixelDimension: 512, prepareBorderTrim: true)
+        let cropped = try XCTUnwrap(result.borderTrimmedImage)
+        XCTAssertEqual(cropped.width, result.image.width)
+        XCTAssertEqual(cropped.height, result.image.height)
+        XCTAssertLessThanOrEqual(cropped.width, 512)
+        XCTAssertLessThanOrEqual(cropped.height, 512)
     }
 }
 #else
