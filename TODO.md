@@ -3,12 +3,14 @@
 Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocked
 
 
-## Active continuation — 2026-10-04
+## Active continuation — 2026-10-05
 
 The full native-reader and compatibility objective remains active. The current
-continuation adds persistent reader tap actions, fitting, reversible border
-cropping and brightness, with shared display-effect ownership across active
-windows. It follows the reviewed Mihon import for the measured English MangaDex
+continuation handles reader memory warnings with cache purging, cancelable
+prefetch ownership, viewport-based decoded residency and reduced visible
+bitmaps without re-fetching them. It follows persistent reader tap actions,
+fitting, reversible border cropping, brightness and shared display ownership,
+and the reviewed Mihon import for the measured English MangaDex
 identity and exact paths, native atomic merge and store-issued contexts.
 It builds on durable FoolSlide website identity, atomic reader state with database-issued reading targets, bounded
 native export to Files, Mihon gzip/raw backup decoding, offline downloads,
@@ -55,6 +57,13 @@ must not be used as evidence for the current commit.
       preserve other readers and observed system changes, release on inactivity
       and use the actual window screen. Apple supports brightness only on the
       main display. See [reader controls](docs/READER.md) for validation limits.
+- [x] Handle iOS memory warnings in online/offline readers: purge compressed
+      cache, disable prefetch for the open reader, cancel unneeded flights,
+      release offscreen pixels and reduce visible bitmaps without another fetch.
+      Retain measured webtoon geometry and existing crop/zoom/progress.
+- [ ] Profile memory-warning delivery, scroll stability and peak memory on an
+      Apple device; add long-image tiling and test 500-page chapters. A bounded
+      thumbnail or pure 500-index residency test does not establish performance.
 - [x] Verify strict gzip/raw backup decoding against real Kotlin serializer
       output; retain library data and explicit unsupported-field coverage.
 - [x] Add versioned native library export: strict bounded JSON, a complete
@@ -371,8 +380,10 @@ must not be used as evidence for the current commit.
 - [x] Previous/next chapter flow (implemented before this continuation).
 - [x] Reader tap-action, fit, crop and brightness controls; active continuation
       above. Physical gesture/brightness/multiwindow checks remain open.
+- [x] Reader memory-warning response and cancellation-aware image ownership;
+      see [verification](docs/VERIFICATION-2026-10-05-READER-MEMORY.md).
 - [ ] Reader completion: cookie continuity for page-URL paths without a source
-      executor, memory-pressure purging and long-image tiling/performance
+      executor and long-image tiling/performance
 - [ ] Cloudflare WKWebView bridge + cookie sync (M4)
 - [ ] Global search across enabled sources
 

@@ -38,8 +38,8 @@ public enum ReaderImageCachePolicy: Sendable {
 /// concurrent requests for the same public and hidden execution identity share
 /// one task.
 public actor ReaderImagePipeline {
-    private struct RequestIdentity: Hashable {
-        struct Header: Hashable {
+    private struct RequestIdentity: Hashable, Sendable {
+        struct Header: Hashable, Sendable {
             let name: String
             let value: String
         }
@@ -58,7 +58,9 @@ public actor ReaderImagePipeline {
         let id: UUID
         let task: Task<Data, Error>
         let isReload: Bool
-        var waiterCount = 1
+        // Each caller owns its registration until completion or cancellation.
+        // A speculative flight may acquire (and later lose) visible callers.
+        var waiters: [UUID: Bool]
     }
 
     private let transport: any CompatHTTPTransport
@@ -69,6 +71,7 @@ public actor ReaderImagePipeline {
     private var cachedBytes = 0
     private var accessCounter: UInt64 = 0
     private var inFlight: [RequestIdentity: InFlightRequest] = [:]
+    private var memoryConstrained = false
 
     public init(
         sourceID: String,
@@ -107,7 +110,16 @@ public actor ReaderImagePipeline {
         for imageRequest: ImageRequest,
         policy: ReaderImageLoadPolicy = .useCache
     ) async throws -> Data {
+        try await load(imageRequest, policy: policy, speculative: false)
+    }
+
+    private func load(
+        _ imageRequest: ImageRequest,
+        policy: ReaderImageLoadPolicy,
+        speculative: Bool
+    ) async throws -> Data {
         try Task.checkCancellation()
+        if speculative && memoryConstrained { throw CancellationError() }
         try imageRequest.checkAvailability()
 
         // Validate every public projection before cache or in-flight lookup.
@@ -153,18 +165,11 @@ public actor ReaderImagePipeline {
             }
         }
 
+        let waiterID = UUID()
         if var existing = inFlight[key] {
-            existing.waiterCount += 1
+            existing.waiters[waiterID] = !speculative
             inFlight[key] = existing
-            defer {
-                if inFlight[key]?.id == existing.id {
-                    inFlight[key]?.waiterCount -= 1
-                }
-            }
-            let data = try await existing.task.value
-            try Task.checkCancellation()
-            try imageRequest.checkAvailability()
-            return data
+            return try await awaitFlight(existing, key: key, waiterID: waiterID, imageRequest: imageRequest)
         }
 
         try Task.checkCancellation()
@@ -200,34 +205,71 @@ public actor ReaderImagePipeline {
             }
             return Data(response.body)
         }
-        inFlight[key] = InFlightRequest(id: requestID, task: task, isReload: isReload)
+        let flight = InFlightRequest(id: requestID, task: task, isReload: isReload,
+                                     waiters: [waiterID: !speculative])
+        inFlight[key] = flight
+        return try await awaitFlight(flight, key: key, waiterID: waiterID, imageRequest: imageRequest)
+    }
 
-        do {
-            let data = try await task.value
-            try imageRequest.checkAvailability()
-            if inFlight[key]?.id == requestID {
-                inFlight.removeValue(forKey: key)
-                // The shared flight may still serve other callers after this
-                // waiter is canceled. clear()/reload supersede it by ID; the
-                // flight itself checks cancellation before returning bytes.
-                insert(data, for: key)
+    private func awaitFlight(
+        _ flight: InFlightRequest, key: RequestIdentity, waiterID: UUID, imageRequest: ImageRequest
+    ) async throws -> Data {
+        defer { removeWaiter(waiterID, from: key, flightID: flight.id) }
+        return try await withTaskCancellationHandler {
+            do {
+                let data = try await flight.task.value
+                try imageRequest.checkAvailability()
+                if inFlight[key]?.id == flight.id {
+                    inFlight.removeValue(forKey: key)
+                    // Any waiter can publish the shared result, including a
+                    // canceled initiator when other callers still need it.
+                    // Superseded flights and pressure cannot refill the cache.
+                    insert(data, for: key)
+                }
+                try Task.checkCancellation()
+                return data
+            } catch {
+                if inFlight[key]?.id == flight.id {
+                    inFlight.removeValue(forKey: key)
+                }
+                throw error
             }
-            try Task.checkCancellation()
-            return data
-        } catch {
-            if inFlight[key]?.id == requestID {
-                inFlight.removeValue(forKey: key)
-            }
-            throw error
+        } onCancel: {
+            Task { await self.removeWaiter(waiterID, from: key, flightID: flight.id) }
+        }
+    }
+
+    private func removeWaiter(_ waiterID: UUID, from key: RequestIdentity, flightID: UUID) {
+        guard var flight = inFlight[key], flight.id == flightID else { return }
+        flight.waiters.removeValue(forKey: waiterID)
+        if flight.waiters.isEmpty || (memoryConstrained && !flight.waiters.values.contains(true)) {
+            flight.task.cancel()
+            inFlight.removeValue(forKey: key)
+        } else {
+            inFlight[key] = flight
+        }
+    }
+
+    /// Keep demanded requests alive, release reloadable compressed bytes and
+    /// disable speculative work for this reader's remaining lifetime. A later
+    /// chapter reset must not immediately recreate the memory that was freed.
+    public func handleMemoryPressure() {
+        memoryConstrained = true
+        cache.removeAll(keepingCapacity: false)
+        cachedBytes = 0
+        for (key, flight) in inFlight where !flight.waiters.values.contains(true) {
+            flight.task.cancel()
+            inFlight.removeValue(forKey: key)
         }
     }
 
     public func prefetch(_ requests: [ImageRequest]) async {
+        guard !memoryConstrained, !Task.isCancelled else { return }
         let bounded = Array(requests.prefix(ReaderSettings.maximumPrefetchPages))
         await withTaskGroup(of: Void.self) { group in
             for request in bounded {
                 group.addTask {
-                    _ = try? await self.data(for: request)
+                    _ = try? await self.load(request, policy: .useCache, speculative: true)
                 }
             }
         }
@@ -241,12 +283,13 @@ public actor ReaderImagePipeline {
         cachedBytes = 0
     }
 
-    func cacheStatistics() -> (entries: Int, bytes: Int, inFlightWaiters: Int) {
-        (cache.count, cachedBytes, inFlight.values.reduce(0) { $0 + $1.waiterCount })
+    func cacheStatistics() -> (entries: Int, bytes: Int, inFlightWaiters: Int, visibleWaiters: Int) {
+        (cache.count, cachedBytes, inFlight.values.reduce(0) { $0 + $1.waiters.count },
+         inFlight.values.reduce(0) { $0 + $1.waiters.values.filter { $0 }.count })
     }
 
     private func insert(_ data: Data, for key: RequestIdentity) {
-        guard data.count <= maximumCacheBytes else { return }
+        guard !memoryConstrained, data.count <= maximumCacheBytes else { return }
         if let previous = cache.removeValue(forKey: key) {
             cachedBytes -= previous.data.count
         }
