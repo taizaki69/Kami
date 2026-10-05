@@ -40,7 +40,8 @@ fields; a failed restore is disabled by the app.
 
 PRs #10–20 add category management, typed FoolSlide settings, discovery state,
 download storage, backup snapshots, atomic reading state, deployment binding
-and mutation epochs/contexts. Read the pinned
-[continuation database guide](https://github.com/taizaki69/Kami/blob/a3c3560489040dd33b4a8412397232b66b48f6ea/docs/DATABASE.md)
+and mutation epochs/contexts. PRs #22–23 add reviewed native restore and the
+measured English MangaDex Mihon adapter using atomic database merges. Read the
+pinned [continuation database guide](https://github.com/taizaki69/Kami/blob/2251ffc6034471434dca867e1eced6cbf889d38e/docs/DATABASE.md)
 when changing those branches. Do not apply a schema-v2 description to schema-v7
 work or treat `LibraryStore` actor serialization as a complete stale-work gate.

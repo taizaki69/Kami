@@ -101,5 +101,5 @@ conditional modules.
 
 The old 262 compatibility / 30 macOS core / 19 portable core counts describe
 the `fd15d76` reader-retry checkpoint, not current verification. Historical
-run links remain in [HANDOFF.md](HANDOFF.md). The continuation's verified
-PR #20 counts and runs are recorded in [project status](docs/PROJECT_STATUS.md).
+run links remain in [HANDOFF.md](HANDOFF.md). The latest verified continuation
+head, counts and runs are recorded in [project status](docs/PROJECT_STATUS.md).
