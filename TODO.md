@@ -6,9 +6,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-05
 
 The full native-reader and compatibility objective remains active. The current
-continuation handles reader memory warnings with cache purging, cancelable
-prefetch ownership, viewport-based decoded residency and reduced visible
-bitmaps without re-fetching them. It follows persistent reader tap actions,
+continuation adds tiled drawing and aspect-aware long-page resolution, plus
+hosted simulator rendering regressions. The bounded source bitmap still decodes
+as a whole; region decoding and device profiling remain open. It follows reader
+memory warnings with cache purging, cancelable prefetch ownership, viewport-based
+decoded residency and reduced visible bitmaps without re-fetching them, and persistent reader tap actions,
 fitting, reversible border cropping, brightness and shared display ownership,
 and the reviewed Mihon import for the measured English MangaDex
 identity and exact paths, native atomic merge and store-issued contexts.
@@ -62,8 +64,14 @@ must not be used as evidence for the current commit.
       release offscreen pixels and reduce visible bitmaps without another fetch.
       Retain measured webtoon geometry and existing crop/zoom/progress.
 - [ ] Profile memory-warning delivery, scroll stability and peak memory on an
-      Apple device; add long-image tiling and test 500-page chapters. A bounded
+      Apple device and test 500-page chapters. A bounded
       thumbnail or pure 500-index residency test does not establish performance.
+- [x] Draw reader pages with asynchronous image tiles and retain more detail
+      in long pages using explicit normal/pressure pixel budgets. Add native
+      pixel/seam tests and hosted UIKit rendering/scroll/replacement tests.
+- [ ] Add region decoding or a bounded tile-file pipeline so very large source
+      pages can retain detail without holding a whole decoded bitmap. Tiled
+      drawing alone does not complete that requirement or establish peak memory.
 - [x] Verify strict gzip/raw backup decoding against real Kotlin serializer
       output; retain library data and explicit unsupported-field coverage.
 - [x] Add versioned native library export: strict bounded JSON, a complete
@@ -383,7 +391,7 @@ must not be used as evidence for the current commit.
 - [x] Reader memory-warning response and cancellation-aware image ownership;
       see [verification](docs/VERIFICATION-2026-10-05-READER-MEMORY.md).
 - [ ] Reader completion: cookie continuity for page-URL paths without a source
-      executor and long-image tiling/performance
+      executor, long-image region decoding and measured performance
 - [ ] Cloudflare WKWebView bridge + cookie sync (M4)
 - [ ] Global search across enabled sources
 

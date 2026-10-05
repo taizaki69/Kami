@@ -50,6 +50,18 @@ targets:
         GENERATE_INFOPLIST_FILE: false
 
 
+  KamiTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: App/Tests
+    dependencies:
+      - target: Kami
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+        SWIFT_VERSION: "5.9"
+
 schemes:
   Kami:
     build:
@@ -59,3 +71,5 @@ schemes:
       config: Debug
     test:
       config: Debug
+      targets:
+        - KamiTests

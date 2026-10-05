@@ -4,7 +4,22 @@ Last updated: 2026-10-05 (America/Lima)
 
 ## Canonical continuation — 2026-10-05
 
-The active branch is `assistant/reader-memory-20261005`, based on
+The active branch is `assistant/reader-tiles-20261005`, based on
+`c5ae522f57732e6316ee8eb1804784cbecb769a0` from
+[PR #25](https://github.com/taizaki69/Kami/pull/25), ready and unmerged. That
+base passed Linux 372 Compat + 398 Core/SQLite, macOS 372 Compat + 406 Core,
+simulator/device compilation and unsigned IPA, with identical head/CI trees.
+This increment adds CATiledLayer drawing, aspect-aware normal/pressure budgets
+for long pages, portable geometry and actual pixel tests, and a hosted UIKit
+simulator rendering suite. Whole bounded source bitmaps remain resident: region
+decoding, physical-device memory and 500-page performance remain open.
+See [rendering verification](docs/VERIFICATION-2026-10-05-READER-TILES.md).
+Checkpoints are in `.git/checkpoints/20261005-reader-tiles/`. Continue the broad
+goal, publish/verify autonomously and keep PRs unmerged.
+
+## Earlier memory continuation — 2026-10-05
+
+The preceding branch was `assistant/reader-memory-20261005`, based on
 `c180f57661e2834bdf7450709bd5ebe0eff5711e` from
 [PR #24](https://github.com/taizaki69/Kami/pull/24), ready and unmerged. That
 base passed Linux 372 Compat + 390 Core/SQLite, macOS 372 Compat + 395 Core,

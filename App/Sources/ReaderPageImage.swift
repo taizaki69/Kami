@@ -129,6 +129,7 @@ struct ReaderPageImage: View {
                         aspectRatio: presentedAspect,
                         allowsZoom: true,
                         fit: fit, rightToLeft: rightToLeft,
+                        memoryConstrained: store.memoryConstrained,
                         onSingleTap: onSingleTap
                     )
                     .id(trimBorders)
@@ -138,6 +139,7 @@ struct ReaderPageImage: View {
                         aspectRatio: presentedAspect,
                         allowsZoom: false,
                         fit: .fitPage, rightToLeft: false,
+                        memoryConstrained: store.memoryConstrained,
                         onSingleTap: onSingleTap
                     )
                     .aspectRatio(
@@ -175,7 +177,7 @@ struct ReaderPageImage: View {
               max(decodedImage.native.image.width, decodedImage.native.image.height) > 2_048 else { return }
         let revision = imageRevision
         do {
-            let reduced = try await NativeImageValidation.reduced(decodedImage.native)
+            let reduced = try await NativeImageValidation.reducedReaderPage(decodedImage.native)
             guard !Task.isCancelled, revision == imageRevision else { return }
             self.decodedImage = DecodedReaderImage(reduced)
             // Keep the original layout ratio and revision: rounding the new
@@ -261,7 +263,8 @@ struct ReaderPageImage: View {
             lastLoadedAttempt = requestedAttempt
             let decoded = try await ReaderImageDecoder.decode(
                 data,
-                maximumPixelDimension: store.memoryConstrained ? 2_048 : (layout == .paged ? 6_144 : 4_096)
+                maximumPixelDimension: layout == .paged ? 6_144 : 4_096,
+                memoryConstrained: store.memoryConstrained
             )
             guard !Task.isCancelled else { return }
             decodedImage = decoded
@@ -292,6 +295,7 @@ private struct ZoomableReaderImage: View {
     let allowsZoom: Bool
     let fit: ReaderPageFit
     let rightToLeft: Bool
+    let memoryConstrained: Bool
     let onSingleTap: (CGFloat) -> Void
 
     @State private var scale: Double = 1
@@ -315,8 +319,10 @@ private struct ZoomableReaderImage: View {
 
     @ViewBuilder
     private func imageSurface(plan: ReaderPageLayout) -> some View {
-        let content = Image(uiImage: image)
-            .resizable()
+        let content = ReaderTiledImage(image: image.cgImage)
+            // Drop rendered tile caches after pressure/replacement while
+            // preserving this parent's page geometry and zoom/pan state.
+            .id(TileIdentity(image: ObjectIdentifier(image), constrained: memoryConstrained))
             .frame(width: CGFloat(plan.width), height: CGFloat(plan.height))
             .scaleEffect(CGFloat(scale))
             .offset(x: CGFloat(offset.x), y: CGFloat(offset.y))
@@ -332,6 +338,11 @@ private struct ZoomableReaderImage: View {
                 onSingleTap(tap.location.x / CGFloat(max(plan.viewportWidth, 1)))
             })
         }
+    }
+
+    private struct TileIdentity: Hashable {
+        let image: ObjectIdentifier
+        let constrained: Bool
     }
 
     private func reset(plan: ReaderPageLayout) {
@@ -406,10 +417,12 @@ private struct DecodedReaderImage: @unchecked Sendable {
 private enum ReaderImageDecoder {
     static func decode(
         _ data: Data,
-        maximumPixelDimension: Int
+        maximumPixelDimension: Int,
+        memoryConstrained: Bool
     ) async throws -> DecodedReaderImage {
-        let result = try await NativeImageValidation.thumbnail(
-            data: data, maximumPixelDimension: maximumPixelDimension, prepareBorderTrim: true
+        let result = try await NativeImageValidation.readerPage(
+            data: data, ordinaryMaximumDimension: maximumPixelDimension,
+            memoryConstrained: memoryConstrained, prepareBorderTrim: true
         )
         try Task.checkCancellation()
         return DecodedReaderImage(result)
