@@ -184,4 +184,18 @@ fun main(arguments: Array<String>) {
         sources = listOf(ReferenceSource("Reference negative signed source", Long.MIN_VALUE)),
     ))
     writeFixture(directory, "kotlin-empty-root", ReferenceBackup(emptyList()))
+    val mappedChapterUrls = listOf(
+        "/chapter/22222222-2222-4222-8222-222222222222",
+        "/chapter/33333333-3333-4333-9333-333333333333",
+    )
+    val englishMangaDex = manga.first().copy(
+        sourceId = 2_499_283_573_021_220_255L,
+        url = "/manga/11111111-1111-4111-8111-111111111111",
+        chapters = manga.first().chapters.mapIndexed { index, chapter -> chapter.copy(url = mappedChapterUrls[index]) },
+        history = manga.first().history.mapIndexed { index, history -> history.copy(url = mappedChapterUrls[index]) },
+    )
+    writeFixture(directory, "kotlin-mangadex-import", ReferenceBackup(
+        manga = listOf(englishMangaDex), categories = categories,
+        sources = listOf(ReferenceSource("Synthetic English MangaDex", englishMangaDex.sourceId)),
+    ))
 }

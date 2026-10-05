@@ -2,7 +2,7 @@ import Foundation
 
 public enum LibraryRestoreError: Error, Equatable, Sendable, LocalizedError {
     case foreignPreview, previewExpired, sourceConflicts, activeWork
-    case invalidStoredData, resultLimitExceeded, categoryOrderOverflow, storageUnavailable
+    case invalidStoredData, resultLimitExceeded, categoryOrderOverflow, storageUnavailable, importReviewRequired
 
     public var errorDescription: String? {
         switch self {
@@ -14,6 +14,7 @@ public enum LibraryRestoreError: Error, Equatable, Sendable, LocalizedError {
         case .resultLimitExceeded: "The combined library would exceed the backup limits. No restore was applied."
         case .categoryOrderOverflow: "The saved category order cannot accommodate more categories. Reorder categories and review again."
         case .storageUnavailable: "The restore could not be saved. Your existing library has been kept."
+        case .importReviewRequired: "Review the Mihon mapping and exclusions before importing supported data."
         }
     }
 }
@@ -51,7 +52,13 @@ public struct LibraryRestorePreview: Sendable, Identifiable {
     public let conflicts: [LibraryRestoreConflict]
     public let excludesConflictedSources: Bool
     public let sources: [LibraryBackupDocument.Source]
-    public var canRestore: Bool { conflicts.isEmpty || excludesConflictedSources }
+    public let mihonReport: MihonLibraryImportReport?
+    public let acknowledgesMihonLimitations: Bool
+    public var canRestore: Bool { restoreBlockReason == nil }
+    var restoreBlockReason: LibraryRestoreError? {
+        if let report = mihonReport, !acknowledgesMihonLimitations || !report.hasImportableData { return .importReviewRequired }
+        return conflicts.isEmpty || excludesConflictedSources ? nil : .sourceConflicts
+    }
 
     let ownerID: UUID
     let epoch: LibraryDataEpoch

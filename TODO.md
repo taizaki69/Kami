@@ -6,13 +6,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-04
 
 The full native-reader and compatibility objective remains active. The current
-continuation implements reviewed native backup restore and atomic conservative
-merge, using shared operation ownership, scene invalidation and store-issued
-contexts for category, membership and source writes.
+continuation adds a reviewed Mihon import for the measured English MangaDex
+identity and exact paths, using the native atomic merge, shared operation
+ownership and store-issued contexts.
 It builds on durable FoolSlide website identity, atomic reader state with database-issued reading targets, bounded
 native export to Files, Mihon gzip/raw backup decoding, offline downloads,
 updates, History resume and revocable source registrations. Native restore is
-available; Mihon import and source migration remain pending.
+available; the measured Mihon subset now imports with explicit coverage and
+exclusion review. Broader source adapters and migration remain pending.
 See [native backup verification](docs/VERIFICATION-2026-10-04-NATIVE-BACKUPS.md),
 [reading-state design](docs/READING_STATE.md),
 [Mihon decoder verification](docs/VERIFICATION-2026-10-04.md) and
@@ -80,9 +81,12 @@ must not be used as evidence for the current commit.
       stale-plan rejection, exact identities, source conflicts and Files review.
       Preserve downloads, metadata, trust and settings; publish a fresh epoch
       and scene generation only after commit. See [native restore](docs/NATIVE_BACKUPS.md).
-- [ ] Adapt the measured Mihon MangaDex English ID and exact URL forms to native
+- [x] Adapt the measured Mihon MangaDex English ID and exact URL forms to native
       identities; show unsupported-field and source-mapping coverage before
-      commit. Keep unsupported identities inert or explicitly excluded.
+      commit. Unsupported identities are explicitly excluded, never routed to a
+      native source. See [Mihon import](docs/MIHON_IMPORT.md).
+- [ ] Add evidence-backed adapters for further sources/languages and supported
+      URL forms; retain original identities and honest exclusion coverage.
 - [ ] Verify Files providers, cancellation, large-library memory use and
       restored-reader navigation on an Apple device; compilation is separate evidence.
 
@@ -351,7 +355,8 @@ must not be used as evidence for the current commit.
 - [x] Categories UI + management (PR #10); device interaction remains unverified.
 - [ ] Migration flow (multi-source search + chapter matching)
 - [x] Native backup export and reviewed restore UI with counts/conflicts.
-- [ ] Mihon import UI with source mapping and unsupported-field report.
+- [x] Mihon import UI with measured English MangaDex mapping and coverage report.
+- [ ] Broaden source mapping and supported Mihon fields with producer evidence.
 - [x] Reader foundation: persistent LTR/RTL/webtoon modes, direction-aware tap
       zones, paged zoom/pan, settings, keep-awake, bounded header-aware image
       loading/prefetch, off-main downsampling, retry, and progress/history

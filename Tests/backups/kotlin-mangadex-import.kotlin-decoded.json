@@ -1,0 +1,85 @@
+{
+    "manga": [
+        {
+            "sourceId": 2499283573021220255,
+            "url": "/manga/11111111-1111-4111-8111-111111111111",
+            "title": "Reference default favorite",
+            "artist": "Fixture artist",
+            "author": "Fixture author",
+            "description": "No personal data.\nIndependent serializer fixture.",
+            "genres": [
+                "Reference",
+                "Action"
+            ],
+            "status": 1,
+            "thumbnailUrl": "https://fixtures.invalid/reference-cover.jpg",
+            "dateAdded": 1770000012345,
+            "chapters": [
+                {
+                    "url": "/chapter/22222222-2222-4222-8222-222222222222",
+                    "name": "Reference chapter 2.25",
+                    "scanlator": "Fixture team",
+                    "read": true,
+                    "bookmark": false,
+                    "lastPageRead": 7,
+                    "dateFetch": 1780000000111,
+                    "dateUpload": 1779999999999,
+                    "chapterNumber": 2.25,
+                    "sourceOrder": 3
+                },
+                {
+                    "url": "/chapter/33333333-3333-4333-9333-333333333333",
+                    "name": "Reference chapter 3.5",
+                    "scanlator": null,
+                    "read": false,
+                    "bookmark": true,
+                    "lastPageRead": 4294967311,
+                    "dateFetch": 0,
+                    "dateUpload": 0,
+                    "chapterNumber": 3.5,
+                    "sourceOrder": 4294967305
+                }
+            ],
+            "categoryOrders": [
+                7,
+                4294967301
+            ],
+            "favorite": true,
+            "history": [
+                {
+                    "url": "/chapter/22222222-2222-4222-8222-222222222222",
+                    "lastRead": 1780009876543,
+                    "readDuration": 90123
+                },
+                {
+                    "url": "/chapter/33333333-3333-4333-9333-333333333333",
+                    "lastRead": 1780009999999,
+                    "readDuration": 5000000001
+                }
+            ],
+            "updateStrategy": "ONLY_FETCH_ONCE",
+            "favoriteModifiedAt": 1760000123,
+            "initialized": true
+        }
+    ],
+    "categories": [
+        {
+            "name": "Reference reading",
+            "order": 7,
+            "id": 101,
+            "flags": 9
+        },
+        {
+            "name": "Reference archived",
+            "order": 4294967301,
+            "id": 202,
+            "flags": 64
+        }
+    ],
+    "sources": [
+        {
+            "name": "Synthetic English MangaDex",
+            "sourceId": 2499283573021220255
+        }
+    ]
+}

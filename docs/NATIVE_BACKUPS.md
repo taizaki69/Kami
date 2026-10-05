@@ -12,8 +12,9 @@ could not be opened; the app's temporary fallback library cannot be exported.
 The same screen provides **Choose a Kami backup**, an immutable preview with
 counts and source conflicts, and explicit restore. Both export and restore
 require durable storage. This flow accepts native JSON v1; Mihon decoding has a
-separate [compatibility contract](BACKUP_COMPATIBILITY.md). Mihon import, source
-migration and `.tachibk` export remain pending.
+separate [compatibility contract](BACKUP_COMPATIBILITY.md) and a
+[measured import flow](MIHON_IMPORT.md). Source migration and `.tachibk` export
+remain pending.
 
 The `.kamibackup` file is uncompressed UTF-8 JSON. It contains reading history
 and descriptive source URLs. It includes all saved domain rows, not just the
@@ -181,5 +182,6 @@ iOS app and do not establish Files interaction or device memory/performance.
 The [native restore verification](VERIFICATION-2026-10-04-NATIVE-RESTORE.md)
 records persistence, file and operation-lifetime regressions. Files-provider
 interaction, physical multiwindow behavior and large-library device memory
-remain unmeasured. Mihon import still needs explicit URL/source adapters and
-coverage reporting; decoding a Mihon DTO does not authorize native restoration.
+remain unmeasured. The [Mihon import flow](MIHON_IMPORT.md) adds a measured
+source/URL adapter and coverage review; decoding a DTO alone still does not
+authorize native restoration.

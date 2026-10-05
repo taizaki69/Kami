@@ -67,16 +67,36 @@ public actor LibraryStore {
         policy: LibraryBackupPolicy = .default
     ) throws -> LibraryRestorePreview {
         let input = try LibraryBackupCodec(policy: policy).decode(data)
+        return try makeRestorePreview(data: data, excludingConflictedSources: excludingConflictedSources,
+            policy: policy, acknowledgesMihonLimitations: false) { _ in (input, nil) }
+    }
+
+    public func previewMihonRestore(
+        from data: Data, acknowledgingLimitations: Bool = false,
+        decodingPolicy: TachibkReader.Policy = .default, policy: LibraryBackupPolicy = .default
+    ) throws -> LibraryRestorePreview {
+        return try makeRestorePreview(data: data, excludingConflictedSources: false,
+            policy: policy, acknowledgesMihonLimitations: acknowledgingLimitations) { target in
+                let mapped = try MihonLibraryImport.decode(data, decodingPolicy: decodingPolicy, policy: policy, target: target)
+                return (mapped.document, mapped.report)
+            }
+    }
+
+    private func makeRestorePreview(data: Data, excludingConflictedSources: Bool,
+                                    policy: LibraryBackupPolicy, acknowledgesMihonLimitations: Bool,
+                                    prepare: (LibraryBackupDocument) throws -> (LibraryBackupDocument, MihonLibraryImportReport?)) throws -> LibraryRestorePreview {
         do {
             let stamp = try db.restoreChangeStamp()
             let preview = try withLibraryTransaction(readOnly: true) {
                 let state = try LibraryRestorePersistence.state(db, policy: policy)
+                let (input, mihonReport) = try prepare(state.document)
                 let plan = try LibraryRestorePlanner.plan(input: input, target: state.document,
                     foolSlideBinding: state.binding, policy: policy)
                 try Task.checkCancellation()
                 return LibraryRestorePreview(id: UUID(), inputSHA256: APKSignatureVerifier.apkSHA256(Array(data)),
                     summary: plan.summary, conflicts: plan.conflicts, excludesConflictedSources: excludingConflictedSources,
-                    sources: input.sources, ownerID: readingOwnerID, epoch: state.epoch,
+                    sources: input.sources, mihonReport: mihonReport, acknowledgesMihonLimitations: acknowledgesMihonLimitations,
+                    ownerID: readingOwnerID, epoch: state.epoch,
                     dependencyDigest: state.digest, changeStamp: stamp, policy: policy, plan: plan)
             }
             // A WAL writer may commit while our read snapshot is open. Never
@@ -94,7 +114,7 @@ public actor LibraryStore {
     public func commitLibraryRestore(_ preview: LibraryRestorePreview) throws -> LibraryRestoreReport {
         try Task.checkCancellation()
         guard preview.ownerID == readingOwnerID else { throw LibraryRestoreError.foreignPreview }
-        guard preview.canRestore else { throw LibraryRestoreError.sourceConflicts }
+        if let reason = preview.restoreBlockReason { throw reason }
         do {
             return try withLibraryTransaction {
                 try LibraryRestorePersistence.requireIdle(db)

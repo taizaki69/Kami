@@ -9,6 +9,7 @@ the supplied tools directory. CI tests consume checked-in fixtures directly.
 import argparse
 import hashlib
 import json
+import shutil
 from pathlib import Path
 import subprocess
 import tarfile
@@ -71,6 +72,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tools-dir", type=Path, required=True)
     parser.add_argument("--fetch", action="store_true")
+    parser.add_argument("--candidate-output", type=Path,
+                        help="Copy generated candidates to this directory; existing locked fixtures are still verified.")
     arguments = parser.parse_args()
     fixtures = Path(__file__).resolve().parent
     manifest = json.loads((fixtures / "manifest.json").read_text())
@@ -114,6 +117,11 @@ def main():
         subprocess.run([
             str(java), "-cp", str(jar) + ":" + classpath, producer["mainClass"], str(generated),
         ], check=True)
+        if arguments.candidate_output:
+            destination = arguments.candidate_output.resolve()
+            if destination == fixtures:
+                raise ValueError("Generate candidates outside the committed fixture directory.")
+            shutil.copytree(generated, destination, dirs_exist_ok=False)
         for fixture in manifest["fixtures"]:
             for path_key, hash_key in [
                 ("rawPath", "rawSHA256"),

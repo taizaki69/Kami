@@ -29,10 +29,12 @@ recipe, and records exact decoded values and authoritative dependency hashes.
 | `kotlin-categories-only` | No manga field; raw stream starts with category tag 0x12. |
 | `kotlin-sources-only` | No manga/category field; raw stream starts with source tag 0xaa 0x06. |
 | `kotlin-negative-source` | Long.MIN_VALUE preserves its signed varint identity; nullable favoriteModifiedAt=0 is present and differs from omitted null. |
+| `kotlin-mangadex-import` | Synthetic English MangaDex ID and exact UUID paths, positive import case with existing producer metadata, full-width progress/history, categories and omitted favorite=true. |
 | `kotlin-empty-root` | Required-at-construction manga=[] encodes to zero protobuf bytes and decodes to empty lists; gzip member is 20 bytes. |
 
-The high/negative values test wire fidelity, not acceptance into a future
-domain restore. Preference polymorphism, tracking, memo/reader flags, legacy
+The high/negative values test wire fidelity, not automatic acceptance into a
+domain restore. The positive import fixture uses a separately demonstrated
+source/path mapping; it does not prove source existence or runtime behavior. Preference polymorphism, tracking, memo/reader flags, legacy
 structures, unsupported-field counts, source mapping and runtime APK
 compatibility are not demonstrated by these minimal fixtures.
 
@@ -66,3 +68,7 @@ targets JVM 17, and uses Java `GZIPOutputStream`. Its header has flags=0,
 mtime=0, XFL=0 and OS=255. The compressed-byte lock applies to this exact
 producer/toolchain; another valid compressor may encode the same protobuf
 differently. Normal CI consumes the locked files and does not regenerate them.
+
+To inspect new producer outputs without overwriting committed fixtures, add
+`--candidate-output /absolute/path/to/new-directory`. Locked outputs are still
+verified, and the destination must not exist or be the fixture directory.
