@@ -1,10 +1,27 @@
 # Kami Continuation Handoff
 
-Last updated: 2026-10-04 (America/Lima)
+Last updated: 2026-10-05 (America/Lima)
 
-## Canonical continuation — 2026-10-04
+## Canonical continuation — 2026-10-05
 
-The active branch is `assistant/reader-controls-20261004`, based on
+The active branch is `assistant/reader-memory-20261005`, based on
+`c180f57661e2834bdf7450709bd5ebe0eff5711e` from
+[PR #24](https://github.com/taizaki69/Kami/pull/24), ready and unmerged. That
+base passed Linux 372 Compat + 390 Core/SQLite, macOS 372 Compat + 395 Core,
+simulator/device compilation and unsigned IPA packaging, with matching CI/head
+trees. This increment responds to UIKit memory warnings: purge compressed
+cache, stop speculative prefetch, retain live demanded requests, release
+offscreen pixels and reduce existing visible bitmaps without re-fetching.
+Webtoon geometry and the zoom/pan plan retain their measured ratios.
+See [reader behavior](docs/READER.md) and the
+[memory verification](docs/VERIFICATION-2026-10-05-READER-MEMORY.md).
+Checkpoints are in `.git/checkpoints/20261005-reader-memory/`. Long-image
+tiling, actual warning/gesture interaction and device performance remain open.
+Continue the broad goal, publish and verify automatically, and keep PRs unmerged.
+
+## Earlier continuation — 2026-10-04
+
+The preceding branch was `assistant/reader-controls-20261004`, based on
 `2251ffc6034471434dca867e1eced6cbf889d38e` from
 [PR #23](https://github.com/taizaki69/Kami/pull/23), ready and unmerged. Its
 matching-tree CI passed Linux 372 Compat + 368 Core/SQLite, macOS 372 Compat +

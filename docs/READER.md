@@ -112,9 +112,40 @@ This native reader transform does not implement Android bitmap APIs for APKs.
   pixels on either axis or 250 million source pixels are rejected. ImageIO
   downsamples off the main actor to at most 6,144 pixels in paged mode and
   4,096 pixels in webtoon mode.
-- Paged mode retains decoded images only for the current page and its immediate
-  neighbors. Webtoon pages release their decoded image when they leave the lazy
-  viewport; compressed prefetch bytes remain available within the LRU budget.
+- Paged mode normally retains decoded images for the current page and its
+  immediate neighbors. Webtoon mode uses actual viewport intersections plus
+  immediate neighbors, rather than the larger lazy realization window. Inactive
+  rows retain only their measured original/cropped aspect ratios, so releasing
+  pixels does not collapse the scroll layout. A programmatic target also stays
+  eligible while its new viewport geometry is pending.
+
+The reader observes UIKit's
+[`didReceiveMemoryWarningNotification`](https://developer.apple.com/documentation/uikit/uiapplication/didreceivememorywarningnotification).
+The first warning purges the compressed cache, stops prefetch and limits decoded
+residency to current/visible pages for the remaining reader session, including
+chapter changes. Closing and reopening the reader creates a fresh policy.
+The pipeline tracks each caller's live ownership: a speculative flight with a
+demanded caller continues, while losing the final demanded caller under pressure
+cancels it. Late canceled results cannot replace a newer flight or refill cache.
+Demanded loads still validate the source's URL, headers and revocable capability.
+
+Already decoded visible pages are reduced off the main actor to a maximum of
+2,048 pixels per axis, using their existing pixels and crop. The original remains
+readable until its replacement is ready; revision/cancellation guards reject a
+replacement for an obsolete page or Retry. This conversion does not reload local
+files, refresh source requests or use the network. New decodes use the same
+reduced limit. Previously measured ratios remain stable across reduction and
+reactivation, preserving webtoon heights and the paged zoom/pan plan. Explicit
+Retry may measure a genuinely different replacement image again.
+
+This follows Apple's advice to
+[release reloadable images and caches](https://developer.apple.com/documentation/uikit/responding-to-memory-warnings).
+Warnings are best-effort; they do not establish a safe process-wide memory
+budget or guarantee survival. The reduction briefly retains both the old and
+new visible bitmap, and several short pages can be visible together. Offline
+files, leases, progress and persistent settings remain governed by their normal
+lifetimes. See [memory verification](VERIFICATION-2026-10-05-READER-MEMORY.md)
+for tested boundaries and remaining device/profiling work.
 
 Plain native requests use the image pipeline's own source-scoped cookie jar.
 An interpreted request with a supported execution capability instead reuses the
@@ -159,7 +190,7 @@ execution UUIDs remain part of request identity. Requests have no generic TTL;
 explicit Retry is the refresh trigger and does not imply automatic login,
 OAuth, challenge, or credential renewal.
 
-All six reader regressions pass locally on Windows. At exact checkpoint
+Historical evidence: six reader regressions passed locally on Windows at checkpoint
 `fd15d76`, [Swift CI](https://github.com/taizaki69/Kami/actions/runs/35416577528)
 passes them on macOS and proves ImageIO rejects the invalid cached body and decodes the replacement
 PNG. [iOS Build](https://github.com/taizaki69/Kami/actions/runs/35416577530)
@@ -170,14 +201,11 @@ unverified.
 
 ## Tracked next
 
-1. Previous/next chapter navigation, end-of-chapter behavior, and configurable
-   tap-zone actions.
+1. Long-image tiling and device profiling under memory pressure. Persistent
+   chapter downloads have a separate bounded store and local read leases.
 2. Dual-page spreads on iPad and landscape, including cover-page separation.
-3. Fit-width/fit-height controls, crop-borders, brightness override, and
-   tap-centered zoom with stricter pan bounds.
-4. Memory-pressure-driven cache purging and long-image tiling. Persistent
-   chapter downloads now have a separate bounded store and local read leases.
-5. Add Baozi image-transform regressions only after a portable bounded
+3. Add Baozi image-transform regressions only after a portable bounded
    pixel/JPEG codec exists; a metadata-only Bitmap shim is not compatibility.
-6. Physical-device profiling and accessibility testing, including 500-page
-   webtoon chapters, rotation, VoiceOver labels, and interrupted/retried loads.
+4. Physical-device interaction and accessibility testing: 500-page webtoon
+   chapters, warning-driven eviction/reduction, rotation, VoiceOver, interrupted
+   loads, tap-zone actions, fitting, border cropping and multiwindow brightness.

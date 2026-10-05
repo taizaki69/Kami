@@ -405,6 +405,160 @@ final class ReaderSupportTests: XCTestCase {
     }
 }
 
+extension ReaderSupportTests {
+    func testPressurePurgesCacheAndStopsRefillingAcrossChapterResets() async throws {
+        let request = ImageRequest(url: "https://cdn.example/pressure.jpg", headers: ["Referer": "https://reader.example"])
+        let response = CompatHTTPResponse(finalURL: request.url, statusCode: 200, body: [1, 2, 3])
+        let transport = RecordingImageTransport(responses: Array(repeating: response, count: 4))
+        let pipeline = ReaderImagePipeline(sourceID: "pressure", transport: transport)
+        await pipeline.prefetch([request])
+        let before = await pipeline.cacheStatistics()
+        XCTAssertEqual(before.entries, 1)
+        await pipeline.handleMemoryPressure()
+        await pipeline.handleMemoryPressure()
+        let purged = await pipeline.cacheStatistics()
+        XCTAssertEqual(purged.entries, 0); XCTAssertEqual(purged.bytes, 0)
+        await pipeline.prefetch([request])
+        _ = try await pipeline.data(for: request)
+        _ = try await pipeline.data(for: request, policy: .reload)
+        await pipeline.clear()
+        await pipeline.prefetch([request])
+        _ = try await pipeline.data(for: request)
+        let after = await pipeline.cacheStatistics()
+        XCTAssertEqual(after.entries, 0); XCTAssertEqual(after.bytes, 0)
+        let requests = await transport.recordedRequests()
+        XCTAssertEqual(requests.count, 4)
+        XCTAssertTrue(requests.allSatisfy { $0.headers == [CompatHTTPHeader(name: "Referer", value: "https://reader.example")] })
+        await XCTAssertThrowsErrorAsync(
+            try await pipeline.data(for: ImageRequest(url: "http://cdn.example/pressure.jpg")),
+            equals: CompatHTTPTransportError.disallowedScheme)
+        let validatedRequests = await transport.recordedRequests()
+        XCTAssertEqual(validatedRequests.count, 4)
+    }
+
+    func testPressurePreservesPrefetchThatAcquiredVisibleWaiterAndDropsOtherWork() async throws {
+        let started = expectation(description: "two prefetches entered transport")
+        let response = CompatHTTPResponse(finalURL: "https://cdn.example/visible.jpg", statusCode: 200, body: [7, 7])
+        let transport = GatedImageTransport(fallbackResponse: response, onRequest: { if $0 == 2 { started.fulfill() } })
+        defer { Task { await transport.finish() } }
+        let pipeline = ReaderImagePipeline(sourceID: "pressure-shared", transport: transport)
+        let visibleRequest = ImageRequest(url: response.finalURL)
+        let speculativeRequest = ImageRequest(url: "https://cdn.example/speculative.jpg")
+        let prefetch = Task { await pipeline.prefetch([visibleRequest, speculativeRequest]) }
+        defer { prefetch.cancel() }
+        guard await XCTWaiter.fulfillment(of: [started], timeout: 5) == .completed else {
+            return XCTFail("Prefetch did not start")
+        }
+        let visible = Task { try await pipeline.data(for: visibleRequest) }
+        defer { visible.cancel() }
+        guard await waitForWaiters(pipeline, total: 3, visible: 1) else { return }
+        await pipeline.handleMemoryPressure()
+        let preserved = await pipeline.cacheStatistics()
+        XCTAssertEqual(preserved.inFlightWaiters, 2)
+        XCTAssertEqual(preserved.visibleWaiters, 1)
+        // The transport deliberately completes canceled work late. Its result
+        // cannot populate the cache, remove the visible flight or leak bytes.
+        let requests = await transport.recordedRequests()
+        for request in requests {
+            await transport.resumeNext(with: CompatHTTPResponse(finalURL: request.url, statusCode: 200,
+                                                                body: request.url == visibleRequest.url ? [7, 7] : [9, 9]))
+        }
+        let data = try await visible.value
+        await prefetch.value
+        XCTAssertEqual(data, Data([7, 7]))
+        let after = await pipeline.cacheStatistics()
+        XCTAssertEqual(after.bytes, 0); XCTAssertEqual(after.inFlightWaiters, 0)
+        let finalRequests = await transport.recordedRequests()
+        XCTAssertEqual(finalRequests.count, 2)
+    }
+
+    func testCanceledVisibleOwnershipDoesNotProtectSpeculativeWorkFromPressure() async throws {
+        // Exercise cancellation both before the warning and after a shared
+        // flight was temporarily protected by its visible waiter.
+        for pressureFirst in [false, true] {
+            let started = expectation(description: "prefetch started \(pressureFirst)")
+            let response = CompatHTTPResponse(finalURL: "https://cdn.example/cancel.jpg", statusCode: 200, body: [4])
+            let transport = GatedImageTransport(fallbackResponse: response, onRequest: { if $0 == 1 { started.fulfill() } })
+            defer { Task { await transport.finish() } }
+            let pipeline = ReaderImagePipeline(sourceID: "pressure-canceled", transport: transport)
+            let request = ImageRequest(url: response.finalURL)
+            let prefetch = Task { await pipeline.prefetch([request]) }
+            defer { prefetch.cancel() }
+            guard await XCTWaiter.fulfillment(of: [started], timeout: 5) == .completed else {
+                return XCTFail("Prefetch did not start")
+            }
+            let visible = Task { try await pipeline.data(for: request) }
+            defer { visible.cancel() }
+            guard await waitForWaiters(pipeline, total: 2, visible: 1) else { return }
+            if pressureFirst { await pipeline.handleMemoryPressure() }
+            visible.cancel()
+            guard await waitForWaiters(pipeline, total: pressureFirst ? 0 : 1, visible: 0) else { return }
+            await pipeline.handleMemoryPressure()
+            let after = await pipeline.cacheStatistics()
+            XCTAssertEqual(after.inFlightWaiters, 0)
+            await transport.resumeNext(with: response)
+            do {
+                _ = try await visible.value
+                XCTFail("Canceled visible caller received bytes")
+            } catch is CancellationError {}
+            await prefetch.value
+            let finished = await pipeline.cacheStatistics()
+            XCTAssertEqual(finished.bytes, 0)
+        }
+    }
+
+    func testLatePressureCanceledPrefetchCannotSupersedeNewVisibleFlight() async throws {
+        let firstStarted = expectation(description: "prefetch started")
+        let secondStarted = expectation(description: "visible replacement started")
+        let response = CompatHTTPResponse(finalURL: "https://cdn.example/replacement.jpg", statusCode: 200, body: [8])
+        let transport = GatedImageTransport(fallbackResponse: response, onRequest: {
+            if $0 == 1 { firstStarted.fulfill() }
+            if $0 == 2 { secondStarted.fulfill() }
+        })
+        defer { Task { await transport.finish() } }
+        let pipeline = ReaderImagePipeline(sourceID: "pressure-replacement", transport: transport)
+        let request = ImageRequest(url: response.finalURL)
+        let prefetch = Task { await pipeline.prefetch([request]) }
+        defer { prefetch.cancel() }
+        guard await XCTWaiter.fulfillment(of: [firstStarted], timeout: 5) == .completed else {
+            return XCTFail("Prefetch did not start")
+        }
+        await pipeline.handleMemoryPressure()
+        let visible = Task { try await pipeline.data(for: request) }
+        defer { visible.cancel() }
+        guard await XCTWaiter.fulfillment(of: [secondStarted], timeout: 5) == .completed else {
+            return XCTFail("Visible replacement did not start")
+        }
+        await transport.resumeNext(with: CompatHTTPResponse(finalURL: request.url, statusCode: 200, body: [1]))
+        await prefetch.value
+        let pending = await pipeline.cacheStatistics()
+        XCTAssertEqual(pending.inFlightWaiters, 1); XCTAssertEqual(pending.visibleWaiters, 1)
+        await transport.resumeNext(with: response)
+        let value = try await visible.value
+        XCTAssertEqual(value, Data([8]))
+        let after = await pipeline.cacheStatistics()
+        XCTAssertEqual(after.bytes, 0); XCTAssertEqual(after.inFlightWaiters, 0)
+    }
+
+    private func waitForWaiters(_ pipeline: ReaderImagePipeline, total: Int, visible: Int) async -> Bool {
+        let registered = expectation(description: "waiters total=\(total) visible=\(visible)")
+        let observer = Task {
+            while !Task.isCancelled {
+                let state = await pipeline.cacheStatistics()
+                if state.inFlightWaiters == total && state.visibleWaiters == visible {
+                    registered.fulfill()
+                    return
+                }
+                await Task.yield()
+            }
+        }
+        let result = await XCTWaiter.fulfillment(of: [registered], timeout: 5)
+        observer.cancel()
+        if result != .completed { XCTFail("Waiter ownership did not settle") }
+        return result == .completed
+    }
+}
+
 private actor SourceImageExecutionProbe {
     private let response: CompatHTTPResponse
     private var count = 0

@@ -200,6 +200,7 @@ private struct ReaderSessionView: View {
     @State private var pages: [PageCompat] = []
     @State private var imageRequests: [ImageRequest?] = []
     @State private var currentIndex = 0
+    @State private var visibleWebtoonPages: Set<Int> = []
     @State private var errorText: String?
     @State private var loading = true
     @State private var showingSettings = false
@@ -388,6 +389,10 @@ private struct ReaderSessionView: View {
         .onChange(of: prefetchPages) { _, _ in
             schedulePrefetch(around: currentIndex)
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            imageStore.handleMemoryPressure()
+        }
+        .onChange(of: modeRaw) { _, _ in visibleWebtoonPages = [] }
         .onChange(of: currentIndex) { _, newIndex in
             guard pages.indices.contains(newIndex) else { return }
             schedulePrefetch(around: newIndex)
@@ -461,7 +466,8 @@ private struct ReaderSessionView: View {
     }
 
     private var pagedReader: some View {
-        TabView(selection: $currentIndex) {
+        let resident = residentPageIndexes
+        return TabView(selection: $currentIndex) {
             ForEach(pages.indices, id: \.self) { index in
                 ReaderPageImage(
                     pageNumber: index + 1,
@@ -474,7 +480,7 @@ private struct ReaderSessionView: View {
                     layout: .paged,
                     fit: settings.pageFit, trimBorders: settings.trimBorders,
                     rightToLeft: settings.mode == .rightToLeft,
-                    isActive: abs(index - currentIndex) <= 1,
+                    isActive: resident.contains(index),
                     background: backgroundColor,
                     foreground: foregroundColor,
                     onSingleTap: { handleTap($0) },
@@ -493,7 +499,8 @@ private struct ReaderSessionView: View {
     }
 
     private var webtoonReader: some View {
-        GeometryReader { viewport in
+        let resident = residentPageIndexes
+        return GeometryReader { viewport in
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: settings.webtoonGap) {
@@ -508,7 +515,7 @@ private struct ReaderSessionView: View {
                                 store: imageStore,
                                 layout: .webtoon,
                                 fit: .fitPage, trimBorders: settings.trimBorders, rightToLeft: false,
-                                isActive: true,
+                                isActive: resident.contains(index),
                                 background: backgroundColor,
                                 foreground: foregroundColor,
                                 onSingleTap: { fraction in
@@ -551,6 +558,12 @@ private struct ReaderSessionView: View {
             }
         }
         .ignoresSafeArea(edges: .horizontal)
+    }
+
+    private var residentPageIndexes: Set<Int> {
+        ReaderImageResidency.indexes(pageCount: pages.count, currentIndex: currentIndex,
+                                     mode: settings.mode, visiblePages: visibleWebtoonPages,
+                                     memoryConstrained: imageStore.memoryConstrained)
     }
 
     private func readerFailure(_ message: String) -> some View {
@@ -640,6 +653,7 @@ private struct ReaderSessionView: View {
         loading = true
         pages = []
         imageRequests = []
+        visibleWebtoonPages = []
         pendingStartAtEnd = startAtEnd
         chapter = neighbor
         reloadID &+= 1
@@ -656,11 +670,15 @@ private struct ReaderSessionView: View {
         viewport: CGSize
     ) {
         let visibleBounds = CGRect(origin: .zero, size: viewport)
-        let best = frames.compactMap { index, frame -> (Int, CGFloat)? in
+        let visible = frames.compactMap { index, frame -> (Int, CGFloat)? in
             let intersection = frame.intersection(visibleBounds)
-            guard !intersection.isNull, intersection.height > 0 else { return nil }
-            return (index, intersection.height * max(intersection.width, 1))
-        }.max { lhs, rhs in
+            guard pages.indices.contains(index), !intersection.isNull,
+                  intersection.height > 0, intersection.width > 0 else { return nil }
+            return (index, intersection.height * intersection.width)
+        }
+        let indexes = Set(visible.map { $0.0 })
+        if indexes != visibleWebtoonPages { visibleWebtoonPages = indexes }
+        let best = visible.max { lhs, rhs in
             if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
             return lhs.0 > rhs.0
         }
@@ -746,6 +764,7 @@ private struct ReaderSessionView: View {
         errorText = nil
         pages = []
         imageRequests = []
+        visibleWebtoonPages = []
         let frontier = model.readingStateWriter.captureFrontier()
         await imageStore.reset()
         await frontier.wait()

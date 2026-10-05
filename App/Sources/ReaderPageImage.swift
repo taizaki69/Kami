@@ -5,9 +5,11 @@ import KamiCore
 
 @MainActor
 final class ReaderImageStore: ObservableObject {
+    @Published private(set) var memoryConstrained = false
     private let pipeline: ReaderImagePipeline?
     private var prefetchTask: Task<Void, Never>?
     private var clearTask: Task<Void, Never>?
+    private var pressureTask: Task<Void, Never>?
 
     init(
         sourceID: String,
@@ -24,17 +26,29 @@ final class ReaderImageStore: ObservableObject {
         for request: ImageRequest,
         policy: ReaderImageLoadPolicy = .useCache
     ) async throws -> Data {
+        await pressureTask?.value
+        try Task.checkCancellation()
         guard let pipeline else { throw CancellationError() }
         return try await pipeline.data(for: request, policy: policy)
     }
 
     func data(for lease: OfflineChapterLease, ordinal: Int) async throws -> Data {
-        try await lease.readPage(ordinal: ordinal)
+        await pressureTask?.value
+        try Task.checkCancellation()
+        return try await lease.readPage(ordinal: ordinal)
+    }
+
+    func handleMemoryPressure() {
+        guard !memoryConstrained else { return }
+        memoryConstrained = true
+        prefetchTask?.cancel()
+        prefetchTask = nil
+        pressureTask = Task { [pipeline] in await pipeline?.handleMemoryPressure() }
     }
 
     func prefetch(_ requests: [ImageRequest]) {
         prefetchTask?.cancel()
-        guard !requests.isEmpty, let pipeline else { return }
+        guard !memoryConstrained, !requests.isEmpty, let pipeline else { return }
         prefetchTask = Task {
             await pipeline.prefetch(requests)
         }
@@ -45,6 +59,7 @@ final class ReaderImageStore: ObservableObject {
         clearTask = nil
         prefetchTask?.cancel()
         prefetchTask = nil
+        await pressureTask?.value
         await pipeline?.clear()
     }
 
@@ -56,7 +71,11 @@ final class ReaderImageStore: ObservableObject {
             clearTask = nil
             return
         }
-        clearTask = Task { await pipeline.clear() }
+        let pressure = pressureTask
+        clearTask = Task {
+            await pressure?.value
+            await pipeline.clear()
+        }
     }
 }
 
@@ -85,8 +104,13 @@ struct ReaderPageImage: View {
     let onRequestRefresh: @MainActor (ImageRequest?) -> Bool
     var onReadOnline: (() -> Void)? = nil
 
-    @State private var image: UIImage?
-    @State private var croppedImage: UIImage?
+    @State private var decodedImage: DecodedReaderImage?
+    @State private var imageRevision = UUID()
+    // Releasing pixels must not collapse the scroll position or change page
+    // progress. These tiny measurements survive page deactivation.
+    @State private var originalAspect: CGFloat = 2.0 / 3.0
+    @State private var croppedAspect: CGFloat = 2.0 / 3.0
+    @State private var measuredAspectID: String?
     @State private var loading = true
     @State private var errorText: String?
     @State private var attempt = 0
@@ -96,12 +120,13 @@ struct ReaderPageImage: View {
     var body: some View {
         Group {
             if !isActive {
-                background
+                background.aspectRatio(layout == .webtoon ? presentedAspect : nil, contentMode: .fit)
             } else if let image = presentedImage {
                 switch layout {
                 case .paged:
                     ZoomableReaderImage(
                         image: image,
+                        aspectRatio: presentedAspect,
                         allowsZoom: true,
                         fit: fit, rightToLeft: rightToLeft,
                         onSingleTap: onSingleTap
@@ -110,12 +135,13 @@ struct ReaderPageImage: View {
                 case .webtoon:
                     ZoomableReaderImage(
                         image: image,
+                        aspectRatio: presentedAspect,
                         allowsZoom: false,
                         fit: .fitPage, rightToLeft: false,
                         onSingleTap: onSingleTap
                     )
                     .aspectRatio(
-                        max(image.size.width, 1) / max(image.size.height, 1),
+                        presentedAspect,
                         contentMode: .fit
                     )
                 }
@@ -126,12 +152,39 @@ struct ReaderPageImage: View {
         .frame(maxWidth: .infinity, maxHeight: layout == .paged ? .infinity : nil)
         .background(background)
         .task(id: loadID) { await loadImage() }
+        .task(id: "\(imageRevision):\(store.memoryConstrained):\(isActive)") {
+            await reduceResidentImage()
+        }
         .onDisappear {
-            if layout == .webtoon { image = nil; croppedImage = nil }
+            if layout == .webtoon { releaseImage() }
         }
     }
 
-    private var presentedImage: UIImage? { trimBorders ? croppedImage ?? image : image }
+    private var presentedImage: UIImage? {
+        trimBorders ? decodedImage?.croppedImage ?? decodedImage?.image : decodedImage?.image
+    }
+    private var presentedAspect: CGFloat { trimBorders ? croppedAspect : originalAspect }
+
+    private func releaseImage() {
+        decodedImage = nil
+        imageRevision = UUID()
+    }
+
+    private func reduceResidentImage() async {
+        guard store.memoryConstrained, isActive, let decodedImage,
+              max(decodedImage.native.image.width, decodedImage.native.image.height) > 2_048 else { return }
+        let revision = imageRevision
+        do {
+            let reduced = try await NativeImageValidation.reduced(decodedImage.native)
+            guard !Task.isCancelled, revision == imageRevision else { return }
+            self.decodedImage = DecodedReaderImage(reduced)
+            // Keep the original layout ratio and revision: rounding the new
+            // pixels must not move a webtoon or reset a reader's zoom/pan.
+        } catch {
+            // Retain the readable image if allocation/decoding was interrupted.
+            // A new page will still decode at the reduced limit.
+        }
+    }
 
     @ViewBuilder
     private var placeholder: some View {
@@ -157,7 +210,7 @@ struct ReaderPageImage: View {
                 .padding()
             }
         }
-        .aspectRatio(layout == .webtoon ? 2.0 / 3.0 : nil, contentMode: .fit)
+        .aspectRatio(layout == .webtoon ? presentedAspect : nil, contentMode: .fit)
     }
 
     private var loadID: String {
@@ -167,16 +220,14 @@ struct ReaderPageImage: View {
     private func loadImage() async {
         guard !Task.isCancelled else { return }
         guard isActive else {
-            image = nil
-            croppedImage = nil
+            releaseImage()
             loading = false
             errorText = nil
             return
         }
         loading = true
         errorText = nil
-        image = nil
-        croppedImage = nil
+        releaseImage()
         var resolvedRequest = request
         let requestedAttempt = attempt
         if offlineLease == nil, requestedAttempt != lastResolvedAttempt {
@@ -210,11 +261,18 @@ struct ReaderPageImage: View {
             lastLoadedAttempt = requestedAttempt
             let decoded = try await ReaderImageDecoder.decode(
                 data,
-                maximumPixelDimension: layout == .paged ? 6_144 : 4_096
+                maximumPixelDimension: store.memoryConstrained ? 2_048 : (layout == .paged ? 6_144 : 4_096)
             )
             guard !Task.isCancelled else { return }
-            image = decoded.image
-            croppedImage = decoded.croppedImage
+            decodedImage = decoded
+            let aspectID = "\(requestGeneration):\(requestedAttempt)"
+            if measuredAspectID != aspectID {
+                originalAspect = max(decoded.image.size.width, 1) / max(decoded.image.size.height, 1)
+                let crop = decoded.croppedImage ?? decoded.image
+                croppedAspect = max(crop.size.width, 1) / max(crop.size.height, 1)
+                measuredAspectID = aspectID
+            }
+            imageRevision = UUID()
             loading = false
         } catch is CancellationError {
             return
@@ -230,6 +288,7 @@ struct ReaderPageImage: View {
 
 private struct ZoomableReaderImage: View {
     let image: UIImage
+    let aspectRatio: CGFloat
     let allowsZoom: Bool
     let fit: ReaderPageFit
     let rightToLeft: Bool
@@ -242,7 +301,7 @@ private struct ZoomableReaderImage: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let plan = ReaderPageLayout(imageWidth: Double(image.size.width), imageHeight: Double(image.size.height),
+            let plan = ReaderPageLayout(imageWidth: Double(aspectRatio), imageHeight: 1,
                                         viewportWidth: Double(proxy.size.width), viewportHeight: Double(proxy.size.height),
                                         fit: fit, rightToLeft: rightToLeft)
             imageSurface(plan: plan)
@@ -333,8 +392,15 @@ private struct ZoomableReaderImage: View {
 }
 
 private struct DecodedReaderImage: @unchecked Sendable {
+    let native: NativePageImage
     let image: UIImage
     let croppedImage: UIImage?
+
+    init(_ native: NativePageImage) {
+        self.native = native
+        image = UIImage(cgImage: native.image)
+        croppedImage = native.borderTrimmedImage.map { UIImage(cgImage: $0) }
+    }
 }
 
 private enum ReaderImageDecoder {
@@ -346,7 +412,6 @@ private enum ReaderImageDecoder {
             data: data, maximumPixelDimension: maximumPixelDimension, prepareBorderTrim: true
         )
         try Task.checkCancellation()
-        return DecodedReaderImage(image: UIImage(cgImage: result.image),
-                                 croppedImage: result.borderTrimmedImage.map { UIImage(cgImage: $0) })
+        return DecodedReaderImage(result)
     }
 }

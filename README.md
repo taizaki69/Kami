@@ -4,14 +4,19 @@ A native iOS manga reader with a Swift runtime for measured Mihon/Tachiyomi
 extension APKs. Created and maintained by
 [taizaki69](https://github.com/taizaki69).
 
-## Current scope — 2026-10-04
+## Current scope — 2026-10-05
 
 Kami includes a native MangaDex source, a persistent library, history and
 reading progress, source browsing and filters, and an LTR/RTL/webtoon reader
 with previous/next chapters, zoom, bounded image prefetch and retry. The
 [reader controls](docs/READER.md) include persistent tap actions, page fitting,
 reversible uniform-border cropping and an optional brightness override, with
-shared keep-awake/brightness ownership across active readers. Categories
+shared keep-awake/brightness ownership across active readers. A memory warning
+purges compressed images, stops speculative loading and retains only demanded
+pages at reduced resolution for that reader session. Webtoon placeholders keep
+their measured height when pixels are released. See the
+[memory verification](docs/VERIFICATION-2026-10-05-READER-MEMORY.md) for the
+separate package, Apple-build and device-interaction evidence. Categories
 can be created, renamed, reordered and deleted, assigned individually or in
 bulk, and combined with library search. Deleting a category preserves manga,
 chapter progress and history; bulk changes preserve untouched memberships.

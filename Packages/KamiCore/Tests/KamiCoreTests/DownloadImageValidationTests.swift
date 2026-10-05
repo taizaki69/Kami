@@ -112,6 +112,66 @@ final class DownloadImageValidationTests: XCTestCase, @unchecked Sendable {
         XCTAssertLessThan(rendered[(2 * 26 + 2) * 4], 200)
     }
 
+    func testPressureReductionPreservesPixelsCropAndSourceMetadataWithoutCompressedBytes() async throws {
+        let width = 1_536, height = 1_024
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 200..<800 { for x in 100..<700 {
+            let i = (y * width + x) * 4
+            pixels[i] = 80; pixels[i + 1] = 100; pixels[i + 2] = 120
+        } }
+        let image = try XCTUnwrap(CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
+            provider: try XCTUnwrap(CGDataProvider(data: Data(pixels) as CFData)), decode: nil,
+            shouldInterpolate: false, intent: .defaultIntent))
+        let cropped = try XCTUnwrap(image.cropping(to: CGRect(x: 300, y: 100, width: 1_000, height: 800)))
+        let page = NativePageImage(image: image, borderTrimmedImage: cropped, sourceWidth: 3_072, sourceHeight: 2_048)
+        let reduced = try await NativeImageValidation.reduced(page, maximumPixelDimension: 512)
+        XCTAssertEqual(reduced.image.width, 512); XCTAssertEqual(reduced.image.height, 341)
+        XCTAssertEqual(reduced.sourceWidth, 3_072); XCTAssertEqual(reduced.sourceHeight, 2_048)
+        XCTAssertEqual(image.width, width); XCTAssertEqual(image.height, height)
+        let reducedCrop = try XCTUnwrap(reduced.borderTrimmedImage)
+        XCTAssertEqual(reducedCrop.width, 333); XCTAssertEqual(reducedCrop.height, 266)
+        let originalPixels = try XCTUnwrap(reduced.image.dataProvider?.data) as Data
+        let croppedPixels = try XCTUnwrap(reducedCrop.dataProvider?.data) as Data
+        XCTAssertGreaterThan(originalPixels[10 * reduced.image.bytesPerRow + 10 * 4], 240)
+        XCTAssertEqual(Double(originalPixels[100 * reduced.image.bytesPerRow + 100 * 4]), 80, accuracy: 2)
+        XCTAssertGreaterThan(croppedPixels[10 * reducedCrop.bytesPerRow + 10 * 4], 240)
+        XCTAssertEqual(Double(croppedPixels[70 * reducedCrop.bytesPerRow + 40 * 4]), 80, accuracy: 2)
+    }
+
+    func testPressureReductionClampsLimitWithoutUpscalingOrDuplicatingBlankCrop() async throws {
+        let data = try png(width: 3_072, height: 48)
+        let page = try await NativeImageValidation.thumbnail(data: data, maximumPixelDimension: 4_096, prepareBorderTrim: true)
+        let reduced = try await NativeImageValidation.reduced(page, maximumPixelDimension: Int.max)
+        XCTAssertEqual(reduced.image.width, 2_048); XCTAssertEqual(reduced.image.height, 32)
+        XCTAssertTrue(reduced.image === reduced.borderTrimmedImage)
+        let again = try await NativeImageValidation.reduced(reduced)
+        XCTAssertTrue(again.image === reduced.image)
+        let minimum = try await NativeImageValidation.reduced(page, maximumPixelDimension: Int.min)
+        XCTAssertEqual(minimum.image.width, 512)
+        let tinyData = try png(width: 32, height: 16)
+        let tiny = try await NativeImageValidation.thumbnail(data: tinyData, maximumPixelDimension: 512)
+        let unchanged = try await NativeImageValidation.reduced(tiny)
+        XCTAssertTrue(unchanged.image === tiny.image)
+        XCTAssertNil(unchanged.borderTrimmedImage)
+    }
+
+    func testCanceledPressureReductionDoesNotReplaceVisibleImage() async throws {
+        let data = try png(width: 3_072, height: 48)
+        let page = try await NativeImageValidation.thumbnail(data: data, maximumPixelDimension: 4_096)
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await NativeImageValidation.reduced(page)
+        }
+        do {
+            _ = try await task.value
+            XCTFail("Canceled reduction returned a replacement image")
+        } catch is CancellationError {}
+        XCTAssertEqual(page.image.width, 3_072)
+    }
+
     func testBlankReaderThumbnailKeepsItsFullBoundedDimensions() async throws {
         let data = try png()
         let result = try await NativeImageValidation.thumbnail(data: data, maximumPixelDimension: 512, prepareBorderTrim: true)
