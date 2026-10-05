@@ -181,12 +181,20 @@ private struct ReaderSessionView: View {
 
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @AppStorage("reader.mode") private var modeRaw = ReaderMode.leftToRight.rawValue
     @AppStorage("reader.background") private var backgroundRaw = ReaderBackground.black.rawValue
     @AppStorage("reader.keepScreenAwake") private var keepScreenAwake = true
     @AppStorage("reader.prefetchPages") private var prefetchPages = 3
     @AppStorage("reader.webtoonGap") private var webtoonGap = 0.0
+    @AppStorage("reader.pageFit") private var fitRaw = ReaderPageFit.fitPage.rawValue
+    @AppStorage("reader.trimBorders") private var trimBorders = false
+    @AppStorage("reader.tap.left") private var tapLeftRaw = ReaderTapAction.automatic.rawValue
+    @AppStorage("reader.tap.center") private var tapCenterRaw = ReaderTapAction.automatic.rawValue
+    @AppStorage("reader.tap.right") private var tapRightRaw = ReaderTapAction.automatic.rawValue
+    @AppStorage("reader.overrideBrightness") private var overrideBrightness = false
+    @AppStorage("reader.brightness") private var brightness = 0.5
 
     @StateObject private var imageStore: ReaderImageStore
     @State private var pages: [PageCompat] = []
@@ -196,7 +204,7 @@ private struct ReaderSessionView: View {
     @State private var loading = true
     @State private var showingSettings = false
     @State private var chromeVisible = true
-    @State private var previousIdleTimerDisabled: Bool?
+    @State private var brightnessAvailable = false
     @State private var loadGeneration = 0
     @State private var reloadID = 0
     @State private var pendingStartAtEnd = false
@@ -324,23 +332,31 @@ private struct ReaderSessionView: View {
             }
         }
         .persistentSystemOverlays(.hidden)
+        .background {
+            ReaderDisplayEffects(controller: model.readerDisplay,
+                                 active: isSessionCurrent && scenePhase == .active,
+                                 keepAwake: settings.keepScreenAwake,
+                                 brightness: settings.overrideBrightness ? settings.brightness : nil,
+                                 onBrightnessAvailability: { brightnessAvailable = $0 })
+                .frame(width: 0, height: 0)
+        }
         .sheet(isPresented: $showingSettings) {
             ReaderSettingsSheet(
                 modeRaw: $modeRaw,
                 backgroundRaw: $backgroundRaw,
                 keepScreenAwake: $keepScreenAwake,
                 prefetchPages: $prefetchPages,
-                webtoonGap: $webtoonGap
+                webtoonGap: $webtoonGap,
+                fitRaw: $fitRaw, trimBorders: $trimBorders,
+                tapLeftRaw: $tapLeftRaw, tapCenterRaw: $tapCenterRaw, tapRightRaw: $tapRightRaw,
+                overrideBrightness: $overrideBrightness, brightness: $brightness,
+                brightnessAvailable: brightnessAvailable
             )
         }
         .task(id: reloadID) { await model.runLibraryOperation(expected: presentation) { await load() } }
         .onAppear {
             localSessionActive = true
             normalizeStoredSettings()
-            if previousIdleTimerDisabled == nil {
-                previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
-            }
-            applyIdleTimerSetting()
         }
         .onDisappear {
             capturePendingPageChange()
@@ -349,9 +365,6 @@ private struct ReaderSessionView: View {
             progressTask?.cancel()
             progressTask = nil
             progressGeneration &+= 1
-            if let previousIdleTimerDisabled {
-                UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled
-            }
             imageStore.stop()
             let lease = offlineLease
             offlineLease = nil
@@ -372,9 +385,6 @@ private struct ReaderSessionView: View {
                 Task { await lease?.close() }
             }
         }
-        .onChange(of: keepScreenAwake) { _, _ in
-            applyIdleTimerSetting()
-        }
         .onChange(of: prefetchPages) { _, _ in
             schedulePrefetch(around: currentIndex)
         }
@@ -391,7 +401,13 @@ private struct ReaderSessionView: View {
             background: ReaderBackground(rawValue: backgroundRaw) ?? .black,
             keepScreenAwake: keepScreenAwake,
             prefetchPages: prefetchPages,
-            webtoonGap: webtoonGap
+            webtoonGap: webtoonGap,
+            pageFit: ReaderPageFit(rawValue: fitRaw) ?? .fitPage,
+            trimBorders: trimBorders,
+            taps: .init(left: ReaderTapAction(rawValue: tapLeftRaw) ?? .automatic,
+                        center: ReaderTapAction(rawValue: tapCenterRaw) ?? .automatic,
+                        right: ReaderTapAction(rawValue: tapRightRaw) ?? .automatic),
+            overrideBrightness: overrideBrightness, brightness: brightness
         )
     }
 
@@ -418,13 +434,29 @@ private struct ReaderSessionView: View {
         return "\(currentIndex + 1) / \(pages.count)"
     }
 
-    @ViewBuilder
     private var readerContent: some View {
-        switch settings.mode {
-        case .leftToRight, .rightToLeft:
-            pagedReader
-        case .webtoon:
-            webtoonReader
+        Group {
+            switch settings.mode {
+            case .leftToRight, .rightToLeft: pagedReader
+            case .webtoon: webtoonReader
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if !chromeVisible {
+                Button { chromeVisible = true } label: {
+                    HStack(spacing: 8) {
+                        Text(pageLabel).monospacedDigit()
+                        Image(systemName: "ellipsis")
+                    }.font(.caption)
+                        .padding(.horizontal, 12).frame(minHeight: 44)
+                        .background(.regularMaterial, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(foregroundColor)
+                .padding(.bottom, 8)
+                .accessibilityLabel("Show reader controls")
+                .accessibilityValue(pageLabel)
+            }
         }
     }
 
@@ -440,10 +472,12 @@ private struct ReaderSessionView: View {
                     requestGeneration: loadGeneration,
                     store: imageStore,
                     layout: .paged,
+                    fit: settings.pageFit, trimBorders: settings.trimBorders,
+                    rightToLeft: settings.mode == .rightToLeft,
                     isActive: abs(index - currentIndex) <= 1,
                     background: backgroundColor,
                     foreground: foregroundColor,
-                    onSingleTap: handlePagedTap,
+                    onSingleTap: { handleTap($0) },
                     onRequestRefresh: imageRequestPublisher(at: index),
                     onReadOnline: offlineOnly && model.source(id: sourceID) != nil ? onReadOnline : nil
                 )
@@ -456,18 +490,6 @@ private struct ReaderSessionView: View {
         )
         .tabViewStyle(.page(indexDisplayMode: .never))
         .ignoresSafeArea()
-        .overlay(alignment: .bottom) {
-            if !chromeVisible {
-                Text(pageLabel)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(foregroundColor.opacity(0.8))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .padding(.bottom, 8)
-                    .allowsHitTesting(false)
-            }
-        }
     }
 
     private var webtoonReader: some View {
@@ -485,10 +507,15 @@ private struct ReaderSessionView: View {
                                 requestGeneration: loadGeneration,
                                 store: imageStore,
                                 layout: .webtoon,
+                                fit: .fitPage, trimBorders: settings.trimBorders, rightToLeft: false,
                                 isActive: true,
                                 background: backgroundColor,
                                 foreground: foregroundColor,
-                                onSingleTap: { _ in toggleChrome() },
+                                onSingleTap: { fraction in
+                                    handleTap(fraction) { target in
+                                        withAnimation { proxy.scrollTo(target, anchor: .top) }
+                                    }
+                                },
                                 onRequestRefresh: imageRequestPublisher(at: index),
                                 onReadOnline: offlineOnly && model.source(id: sourceID) != nil ? onReadOnline : nil
                             )
@@ -512,10 +539,12 @@ private struct ReaderSessionView: View {
                 .coordinateSpace(name: "reader-webtoon")
                 .scrollIndicators(.hidden)
                 .onAppear {
+                    let target = currentIndex
                     DispatchQueue.main.async {
-                        proxy.scrollTo(currentIndex, anchor: .top)
+                        proxy.scrollTo(target, anchor: .top)
                     }
                 }
+                .onChange(of: trimBorders) { _, _ in proxy.scrollTo(currentIndex, anchor: .top) }
                 .onPreferenceChange(ReaderPageFramePreferenceKey.self) { frames in
                     updateWebtoonProgress(frames: frames, viewport: viewport.size)
                 }
@@ -557,22 +586,17 @@ private struct ReaderSessionView: View {
         }
     }
 
-    private func handlePagedTap(_ horizontalFraction: CGFloat) {
-        if horizontalFraction < 0.25 {
-            if settings.mode == .rightToLeft {
-                advancePage()
-            } else {
-                retreatPage()
-            }
-        } else if horizontalFraction > 0.75 {
-            if settings.mode == .rightToLeft {
-                retreatPage()
-            } else {
-                advancePage()
-            }
-        } else {
-            toggleChrome()
+    private func handleTap(_ horizontalFraction: CGFloat, scrollTo: ((Int) -> Void)? = nil) {
+        let oldIndex = currentIndex
+        switch settings.taps.action(at: Double(horizontalFraction), mode: settings.mode) {
+        case .previousPage:
+            guard isSessionCurrent else { return }; retreatPage()
+        case .nextPage:
+            guard isSessionCurrent else { return }; advancePage()
+        case .toggleControls: toggleChrome()
+        case .none, .automatic: return
         }
+        if currentIndex != oldIndex { scrollTo?(currentIndex) }
     }
 
     private func advancePage() {
@@ -864,10 +888,11 @@ private struct ReaderSessionView: View {
         backgroundRaw = normalized.background.rawValue
         prefetchPages = normalized.prefetchPages
         webtoonGap = normalized.webtoonGap
-    }
-
-    private func applyIdleTimerSetting() {
-        UIApplication.shared.isIdleTimerDisabled = keepScreenAwake
+        fitRaw = normalized.pageFit.rawValue
+        tapLeftRaw = normalized.taps.left.rawValue
+        tapCenterRaw = normalized.taps.center.rawValue
+        tapRightRaw = normalized.taps.right.rawValue
+        brightness = normalized.brightness
     }
 }
 

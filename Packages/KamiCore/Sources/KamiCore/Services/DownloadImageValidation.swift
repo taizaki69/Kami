@@ -36,6 +36,7 @@ public struct PlatformDownloadImageValidator: DownloadImageValidating {
 #if canImport(ImageIO)
 public struct NativePageImage: @unchecked Sendable {
     public let image: CGImage
+    public let borderTrimmedImage: CGImage?
     public let sourceWidth: Int
     public let sourceHeight: Int
 }
@@ -45,7 +46,7 @@ public struct NativePageImage: @unchecked Sendable {
 /// and creates only a thumbnail off the main actor, not a full-size bitmap.
 public enum NativeImageValidation {
     public static func thumbnail(
-        data: Data, maximumPixelDimension: Int
+        data: Data, maximumPixelDimension: Int, prepareBorderTrim: Bool = false
     ) async throws -> NativePageImage {
         try Task.checkCancellation()
         let decoding = Task.detached(priority: .userInitiated) {
@@ -80,7 +81,10 @@ public enum NativeImageValidation {
                 throw DownloadImageValidationError.invalidImage
             }
             try Task.checkCancellation()
-            return NativePageImage(image: thumbnail, sourceWidth: pixelWidth, sourceHeight: pixelHeight)
+            let trimmed = prepareBorderTrim ? try ReaderBorderCrop.trimming(thumbnail) : nil
+            try Task.checkCancellation()
+            return NativePageImage(image: thumbnail, borderTrimmedImage: trimmed,
+                                   sourceWidth: pixelWidth, sourceHeight: pixelHeight)
         }
         return try await withTaskCancellationHandler {
             let image = try await decoding.value

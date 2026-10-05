@@ -4,7 +4,20 @@ Last updated: 2026-10-04 (America/Lima)
 
 ## Canonical continuation — 2026-10-04
 
-The active branch is `assistant/mihon-library-import-20261004`, based on
+The active branch is `assistant/reader-controls-20261004`, based on
+`2251ffc6034471434dca867e1eced6cbf889d38e` from
+[PR #23](https://github.com/taizaki69/Kami/pull/23), ready and unmerged. Its
+matching-tree CI passed Linux 372 Compat + 368 Core/SQLite, macOS 372 Compat +
+371 Core, simulator/device builds and unsigned IPA packaging. This increment
+adds persistent tap actions, page fitting/bounded pan, reversible uniform-border
+cropping and brightness to the actual online/offline reader. Shared display
+ownership preserves overlapping readers and observed system changes. Hardware
+brightness is main-display-only; physical gesture/window validation remains open.
+See [reader behavior](docs/READER.md) and [verification](docs/VERIFICATION-2026-10-04-READER-CONTROLS.md).
+Checkpoints are in `.git/checkpoints/20261004-reader-controls/`. The broad goal
+remains active; publish and verify automatically, keep PRs unmerged.
+
+The preceding Mihon import continuation was `assistant/mihon-library-import-20261004`, based on
 `cca543fcbc6bedc87d04ed5f2d57af85096cc697` from
 [PR #22](https://github.com/taizaki69/Kami/pull/22), ready and unmerged. That
 base passed Linux 371 Compat + 351 Core/SQLite, macOS 371 Compat + 354 Core,
@@ -49,7 +62,7 @@ Logs and publication evidence are under
 
 The main-branch Markdown audit is separate
 [PR #21](https://github.com/taizaki69/Kami/pull/21), ready and unmerged at
-`806e3f398120a3aaa08eff541c2b5b98968b185f`. All four checks passed. It documents
+`fa869ce614e417720eb31ea1fd8b0e8761bedcab`. All four checks passed. It documents
 main's narrower merged scope; it must be reconciled with this continuation
 when integrating the stacked feature PRs. Do not overwrite either history.
 Earlier checkpoints below describe their own implementation stages and counts.

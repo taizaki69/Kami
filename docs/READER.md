@@ -6,14 +6,26 @@
   modes. Paged mode uses a page-style `TabView`; webtoon mode uses a lazy
   vertical stack and restores the chapter's last-read page.
 - A reader settings sheet persists reading mode, black/gray/white background,
-  keep-screen-awake, a 0–8 page prefetch window, and a 0–32 point webtoon gap.
-- Paged controls use the outer quarter tap zones for direction-aware previous/
-  next navigation and the center half for chrome. Double-tap toggles 2.5x zoom;
-  pinch zooms from 1x to 5x and a zoomed page can be panned. Webtoon taps toggle
-  chrome without installing zoom gestures that compete with scrolling.
+  keep-screen-awake, a 0–8 page prefetch window, a 0–32 point webtoon gap,
+  per-zone tap actions, page fitting, uniform-border cropping and an optional
+  screen-brightness override. Existing preferences retain their defaults.
+- Automatic taps use the outer quarter zones for direction-aware previous/
+  next navigation and the center half for controls. Each physical zone can
+  instead mean previous page, next page, show/hide controls or no action.
+  Explicit actions do not reverse in RTL. In webtoon mode Automatic shows
+  controls; explicit page actions scroll to the adjacent page and retain the
+  existing chapter-boundary navigation. A visible controls button remains
+  available when chrome is hidden, including with every tap zone disabled.
+- Paged fit modes are whole page, width and height. Oversized pages can be
+  dragged at 1×; width starts at the top and height at the reading edge.
+  Double-tap zooms around the tapped point to 2.5×; pinch is bounded to 1–5×.
+  Pan offsets are clamped to the rendered page. Fitting, cropping, direction
+  and viewport changes reset the zoom/pan geometry. Panning an oversized page
+  takes precedence over paging swipes; tap actions still turn pages. Webtoon
+  keeps its width-based layout and has no zoom/pan recognizers.
 - Chapter progress and history persist as the visible page changes. Reaching
-  the final page marks the chapter read. The previous system idle-timer state
-  is restored when the reader closes.
+  the final page marks the chapter read. Display controls use the same reader
+  for online and verified local pages; they do not alter reading-write targets.
 - Each page has an independent loading/error state and retry action. Reader
   chrome shows chapter title and exact page progress; a compact progress badge
   remains when chrome is hidden.
@@ -28,6 +40,44 @@
   uses local files, while online reading is an explicit separate action.
   Disabling a source does not close a local reader. Download deletion waits
   for active leases to close and keeps progress/history. See [Downloads](DOWNLOADS.md).
+
+## Display ownership and border cropping
+
+AppModel owns one `ReaderDisplayCoordinator` through the UIKit display bridge.
+Only readers in active scenes with an attached window participate. Keep-awake
+is the union of their requests; dismissing one window cannot restore the idle
+timer while another still needs it. A disabled preference does not cancel
+another reader's request. Removing the final requester restores the captured
+state without overwriting a distinguishable external change.
+
+Brightness is optional, normalized to 5–100%, and restored after its final
+override ends or the scene becomes inactive. The most recently activated or
+changed override wins on a shared screen; unrelated renders do not steal
+priority. Changes from Control Center/auto-brightness are not repeatedly
+overwritten and become the next restoration baseline. If a system change
+happens just before closing, it is left intact. A later explicit change or
+activation can reapply the stored reader preference.
+
+The bridge resolves the [actual window scene's screen](https://developer.apple.com/documentation/uikit/uiwindowscene/screen).
+Apple supports [`UIScreen.brightness`](https://developer.apple.com/documentation/uikit/uiscreen/brightness)
+only on the main display, so external-screen brightness is disabled in the
+settings UI and filtered again at the bridge. Screen references are released
+after the last reader's restoration. Scene/window lifecycle interaction and
+physical brightness behavior still require Apple-device validation.
+
+Uniform-border cropping is a reversible display heuristic, disabled by default.
+The existing detached ImageIO task also examines an RGBA sample no larger than
+512×512 (1 MiB), with cancellation checks. It accepts only matching white,
+black or transparent corners and removes fully uniform edge rows/columns,
+retaining two sample pixels of padding and at least half of each dimension.
+Blank/mixed-corner pages remain whole. Sampling is conservative but not a
+semantic artwork detector; turn it off to inspect the full page.
+
+The original bounded thumbnail and its [CGImage subregion](https://developer.apple.com/documentation/coregraphics/cgimage/cropping(to:))
+remain available together. Toggling crop switches the rendered image without
+re-reading files, refreshing URLs, sending network requests or modifying
+downloaded bytes. Both images are released with the existing page lifecycle.
+This native reader transform does not implement Android bitmap APIs for APKs.
 
 ## Image request and memory boundary
 

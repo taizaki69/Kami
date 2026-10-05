@@ -46,6 +46,7 @@ struct LibraryRestoreFailure: Identifiable {
 
 @MainActor
 final class AppModel: ObservableObject {
+    let readerDisplay = ReaderDisplayController()
     let store: LibraryStore
     let registry: SourceRegistry
     let storeClient: ExtensionStoreClient
