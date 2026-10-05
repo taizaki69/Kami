@@ -1,8 +1,9 @@
 # Backup compatibility and restoration scope
 
 Reviewed **2026-10-04** against `main` at `a479806`. Main still contains the
-early `TachibkReader`; the corrected decoder and native export are in open
-PRs. See [project status](PROJECT_STATUS.md) for their exact heads.
+early `TachibkReader`; the corrected decoder, native export/restore and measured
+Mihon import are in open PRs. See [project status](PROJECT_STATUS.md) for their
+exact heads.
 
 ## Corrected format evidence
 
@@ -26,21 +27,31 @@ removed; it must not be used to implement import.
 | [PR #14](https://github.com/taizaki69/Kami/pull/14) | Bounded gzip/raw protobuf decoding; typed records, cumulative limits, cancellation, malformed-input rejection and an explicit unsupported-field coverage report |
 | [PR #15](https://github.com/taizaki69/Kami/pull/15) | Native Kami versioned JSON backup, bounded consistent database snapshot and Files export |
 | [PRs #16–20](PROJECT_STATUS.md) | Atomic reading state, durable deployment identity, exact chapter URLs, stale-mutation rejection and shared operation coordination needed before safe restore |
+| [PR #22](https://github.com/taizaki69/Kami/pull/22) | Bounded immutable Files input, preview/review and atomic conservative native restore with stale/foreign-preview rejection |
+| [PR #23](https://github.com/taizaki69/Kami/pull/23) | Reviewed English MangaDex Mihon import; exact source/URL mapping, explicit coverage/exclusions, per-field timestamp conversion and category-order references |
 
 The corrected decoder accepts one complete gzip member with integrity and
 size checks. It does not add zlib/zstd backup support. Kotlin reference
 serializer fixtures and independent gzip fixtures demonstrate deterministic
 format behavior; they are not a user backup exported by a running Android app.
-The pinned [decoder contract](https://github.com/taizaki69/Kami/blob/8b7d98046dd04cd1ba99d2e27ee856629876f64e/docs/BACKUP_COMPATIBILITY.md)
-and [fixture provenance](https://github.com/taizaki69/Kami/blob/8b7d98046dd04cd1ba99d2e27ee856629876f64e/Tests/backups/README.md)
-record the exact supported fields and limits.
+The pinned [decoder contract](https://github.com/taizaki69/Kami/blob/2251ffc6034471434dca867e1eced6cbf889d38e/docs/BACKUP_COMPATIBILITY.md)
+and [fixture provenance](https://github.com/taizaki69/Kami/blob/2251ffc6034471434dca867e1eced6cbf889d38e/Tests/backups/README.md)
+record the supported fields, limits and six reproducible Kotlin fixture pairs.
 
 Native export is a separate format; it does not establish Mihon import or
-`.tachibk` export. Its [format and scope](https://github.com/taizaki69/Kami/blob/7bcbe7cb94c80527dd371a746fe591308f91aa49/docs/NATIVE_BACKUPS.md)
-include history, hidden chapters and discovery state. Neither format has a
-completed product restoration flow at the reviewed continuation head.
+`.tachibk` export. Its [format and scope](https://github.com/taizaki69/Kami/blob/2251ffc6034471434dca867e1eced6cbf889d38e/docs/NATIVE_BACKUPS.md)
+include history, hidden chapters and discovery state. PR #22 completes the
+native product restoration flow.
 
-## Restore requirements
+PR #23 adds Files → coverage review → atomic import for MangaDex English
+source ID `2499283573021220255` and exact `/manga/<UUID>` and `/chapter/<UUID>`
+forms, using the grammar in the [mapping contract](https://github.com/taizaki69/Kami/blob/2251ffc6034471434dca867e1eced6cbf889d38e/docs/MIHON_IMPORT.md).
+Other source/language IDs, URL aliases and unsupported fields remain outside
+that mapping. Every import requires acknowledgement; unsupported data is not
+persisted, so the original backup must be retained. The flow does not install
+extensions, grant trust or make live source requests while mapping.
+
+## Requirements for maintaining and extending restoration
 
 1. Decode one bounded immutable input and retain coverage information.
 2. Produce a reviewable preview bound to the input, target state and policy;

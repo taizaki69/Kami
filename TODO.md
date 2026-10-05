@@ -1,7 +1,7 @@
 # Kami — Task Tracker
 
 Reviewed **2026-10-04** against `main` at `a479806` and the open continuation
-stack through PR #20. Exact heads and CI evidence are in
+stack through PR #23. Exact heads and CI evidence are in
 [project status](docs/PROJECT_STATUS.md).
 
 Legend: `[x]` implemented in reviewed main; `[~]` implemented in an open PR,
@@ -11,8 +11,8 @@ in prose so that a checked box does not imply general compatibility.
 ## P0 — Integrate the verified continuation
 
 These changes exist and should not be reimplemented from the older main
-tracker. PR #10 targets main; subsequent PRs depend on the preceding branch.
-Preserve that order and verify the final integrated tree.
+tracker. Follow the dependency order in the status page; PR #21 is a separate
+documentation change against main. Verify the final integrated tree.
 
 - [~] Category management and exact FoolSlide Customizable support — [#10](https://github.com/taizaki69/Kami/pull/10).
 - [~] Persistent FoolSlide settings and source-session revocation — [#11](https://github.com/taizaki69/Kami/pull/11).
@@ -24,32 +24,40 @@ Preserve that order and verify the final integrated tree.
 - [~] Durable FoolSlide content binding — [#17](https://github.com/taizaki69/Kami/pull/17).
 - [~] Exact chapter URL identity — [#18](https://github.com/taizaki69/Kami/pull/18).
 - [~] Durable mutation contexts and shared operation coordination — [#19](https://github.com/taizaki69/Kami/pull/19), [#20](https://github.com/taizaki69/Kami/pull/20).
+- [~] Reviewed native restore with atomic conservative merge — [#22](https://github.com/taizaki69/Kami/pull/22).
+- [~] Reviewed Mihon import for English MangaDex and exact persisted URL forms — [#23](https://github.com/taizaki69/Kami/pull/23).
 
-## P0 — Complete safe restoration
+## P0 — Restoration guarantees and remaining validation
 
-The decoder and export are implemented in the stack; restoration is not.
-The initial local planner work is not a shipped or verified feature.
+The native flow below is implemented and verified in PR #22; PR #23 adds the
+measured Mihon adapter. Keep these guarantees when extending either path.
+Builds and deterministic tests do not establish physical Files-provider use.
 
-- [ ] Native restore preview and review UI. Read one bounded immutable file;
+- [~] Native restore preview and review UI. Read one bounded immutable file;
   show new/existing records, unresolved sources, deployment conflicts and any
   explicit exclusions. Tie approval to the input bytes, target state and policy.
-- [ ] Transactional native merge. Revalidate the preview after obtaining the
+- [~] Transactional native merge. Revalidate the preview after obtaining the
   exclusive operation scope; reject stale previews and active conflicting work.
   Commit all library changes atomically, rotate the epoch only on success, and
   publish the new presentation generation after commit. Failure must preserve
   the original library and epoch.
-- [ ] Identity and state preservation. Match exact source plus UTF-8 URL bytes;
+- [~] Identity and state preservation. Match exact source plus UTF-8 URL bytes;
   preserve read/bookmark/progress/history monotonically, category membership,
   hidden chapters and discovery state. Do not create Updates from imported
   history or bind existing FoolSlide content to another deployment.
-- [ ] Restore regression coverage. Exercise rollback, cancellation, stale/foreign
+- [~] Restore regression coverage. Exercise rollback, cancellation, stale/foreign
   preview rejection, repeated import, Unicode-distinct URLs, source conflicts,
   limits and active reader/download/scanner lifetimes. Verify Files UI builds
   and record remaining interaction checks.
-- [ ] Mihon-to-Kami mapping and import report. Validate source IDs and URL
-  shapes, especially MangaDex extension URLs versus native UUIDs. Preserve
-  timestamp units and category-order references. Report unavailable sources and
-  unsupported fields; backup metadata must not install/enable APKs or grant trust.
+- [~] Mihon import for English MangaDex source ID `2499283573021220255` and
+  exact `/manga/<UUID>` and `/chapter/<UUID>` forms. The adapter preserves
+  per-field timestamp units and category-order references, reports exclusions
+  and requires acknowledgement. Original backups must be retained.
+- [ ] Expand source/language mapping and supported fields only with producer
+  and native-operation evidence. Other MangaDex language IDs must not be routed
+  through the English source. Never import APK installation or trust authority.
+- [ ] Exercise Files providers, cancellation and multiple windows on Apple
+  hardware; measure bounded memory use and responsiveness with large libraries.
 - [ ] Keep fuzzy title/chapter matching in an explicitly selected source
   migration flow, separate from exact-identity restoration.
 

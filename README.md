@@ -18,14 +18,17 @@ the open continuation PRs and records verification for their exact commits.
 | Browsing | Native MangaDex; admitted exact extension profiles; popular/latest/search, details, chapters and generic filter editing |
 | Extensions | Store indexes, content-addressed installation, signature verification, persisted trust, enable/disable and authenticated startup restoration |
 | Persistence | SQLite schema v2, library membership, chapter state and history; category/download tables exist but their product flows are incomplete |
-| Backups | Early decoder only; the corrected Mihon decoder and native Files export are in open PRs |
+| Backups | Early decoder only; corrected decoding, native export/restore and measured Mihon import are in open PRs |
 | Builds | Swift package tests, iOS simulator compilation, unsigned device compilation and unsigned IPA packaging in GitHub Actions |
 
 Categories, configurable FoolSlide, manual updates, resumable downloads,
 offline reading, native backup export and stronger state consistency are
-implemented in **open PRs #10–20**. They are not yet merged into `main`.
-Native restore preview/commit, Mihon import mapping, source migration and
-several reader improvements remain on the [task tracker](TODO.md).
+implemented in **open PRs #10–20**. [PR #22](https://github.com/taizaki69/Kami/pull/22)
+adds reviewed native restore; [PR #23](https://github.com/taizaki69/Kami/pull/23)
+adds Mihon import for the verified English MangaDex source ID and exact URL
+forms, with explicit exclusions. These changes remain unmerged. Broader import
+mapping, source migration, device validation and reader improvements remain
+on the [task tracker](TODO.md).
 
 ## Extension compatibility
 

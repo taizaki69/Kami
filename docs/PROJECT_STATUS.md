@@ -12,10 +12,11 @@ admission and ten exact interpreted profiles. Its database is schema v2.
 The [README](../README.md), [matrix](EXTENSION_COMPATIBILITY_MATRIX.md) and
 [database guide](DATABASE.md) describe that snapshot.
 
-PR #10 targets `main`; each subsequent PR targets the preceding feature branch.
-Review and integrate in dependency order. The feature stack culminates in
-PR #20, whose tested tree contains the earlier changes. Do not infer that an
-open PR's features are already present in `main`.
+PR #10 targets `main`; PRs #11–20 each target the preceding feature branch.
+PR #22 targets #20, and #23 targets #22. PR #21 maintains documentation directly
+against main and is separate from the feature stack. Review and integrate in
+dependency order. The feature stack culminates in PR #23, whose tested tree
+contains the earlier changes. Open PR features are not yet present in `main`.
 
 | PR | Implemented scope | Reviewed head |
 | --- | --- | --- |
@@ -30,32 +31,38 @@ open PR's features are already present in `main`.
 | [#18](https://github.com/taizaki69/Kami/pull/18) | Exact chapter URL identity during refresh and updates | `1c6b43e2a199171766358e51ab9d8e2c5c93a22f` |
 | [#19](https://github.com/taizaki69/Kami/pull/19) | Reject mutations from expired library snapshots | `32482b1ff5e41a6fa758a1bd550c38171dfbf8c3` |
 | [#20](https://github.com/taizaki69/Kami/pull/20) | Shared operation coordination, reader lifetimes and generation-aware presentation across scenes | `a3c3560489040dd33b4a8412397232b66b48f6ea` |
+| [#22](https://github.com/taizaki69/Kami/pull/22) | Immutable native restore preview, Files review and atomic conservative merge | `cca543fcbc6bedc87d04ed5f2d57af85096cc697` |
+| [#23](https://github.com/taizaki69/Kami/pull/23) | Reviewed Mihon import for the measured English MangaDex ID and exact persisted URL forms | `2251ffc6034471434dca867e1eced6cbf889d38e` |
 
 The continuation reaches schema v7. Its
-[operation contract](https://github.com/taizaki69/Kami/blob/a3c3560489040dd33b4a8412397232b66b48f6ea/docs/LIBRARY_OPERATIONS.md)
-and [native backup contract](https://github.com/taizaki69/Kami/blob/a3c3560489040dd33b4a8412397232b66b48f6ea/docs/NATIVE_BACKUPS.md)
-are pinned to the reviewed head. Native restore is still disabled: export,
-decoder support and exclusive-operation infrastructure do not constitute a
-restore flow. See [TODO.md](../TODO.md) for remaining acceptance criteria.
+[operation contract](https://github.com/taizaki69/Kami/blob/2251ffc6034471434dca867e1eced6cbf889d38e/docs/LIBRARY_OPERATIONS.md),
+[native backup contract](https://github.com/taizaki69/Kami/blob/2251ffc6034471434dca867e1eced6cbf889d38e/docs/NATIVE_BACKUPS.md)
+and [Mihon mapping contract](https://github.com/taizaki69/Kami/blob/2251ffc6034471434dca867e1eced6cbf889d38e/docs/MIHON_IMPORT.md)
+are pinned to the reviewed head. Both import paths have Files acquisition,
+review and atomic commit. Mihon support is restricted to the demonstrated
+English MangaDex subset and requires acknowledgement of its limits; users
+must retain the original file. See [TODO.md](../TODO.md) for remaining work.
 
 ## Verified continuation checkpoint
 
-PR #20 head: `a3c3560489040dd33b4a8412397232b66b48f6ea`.
-CI checkout: `e45141d12341dcf68b876ceacaf471b08597f702`.
-Both have tree `fbd4005691d399e643a99901f3966307d88f7d28`.
+PR #23 head: `2251ffc6034471434dca867e1eced6cbf889d38e`.
+CI checkout: `67f7b00c6a95da3c6d6d0c30b0da5d2814d026fb`.
+Both have tree `3706fa7129f86e53a0fe692abd0ce78f76804bf7`.
 
 | Evidence | Result |
 | --- | --- |
-| [Swift CI 37245346593](https://github.com/taizaki69/Kami/actions/runs/37245346593) | Passed: 371 MihonCompatKit tests on each host; 330 KamiCore tests on macOS and 327 with SQLite on Linux; release CLI built/uploaded |
-| [iOS Build 37245346585](https://github.com/taizaki69/Kami/actions/runs/37245346585) | Passed: simulator and unsigned generic-device compilation |
-| [IPA Package 37245346596](https://github.com/taizaki69/Kami/actions/runs/37245346596) | Passed: unsigned device app packaged and uploaded as artifact `11318574371` |
+| [Swift CI 37252922877](https://github.com/taizaki69/Kami/actions/runs/37252922877) | Passed: 372 MihonCompatKit tests on each host; 371 KamiCore tests on macOS and 368 with SQLite on Linux; release CLI and locked corpus audit passed |
+| [iOS Build 37252922866](https://github.com/taizaki69/Kami/actions/runs/37252922866) | Passed: simulator and unsigned generic-device compilation |
+| [IPA Package 37252922859](https://github.com/taizaki69/Kami/actions/runs/37252922859) | Passed: unsigned device app packaged and uploaded as artifact `11321951216` |
 
 The IPA artifact digest is
-`sha256:04bbfdb833d4034dc28ce8d8c2edfd83b00274a9043461abc2839b87ddcde036`;
-its recorded expiry is 2027-01-02 23:52:57 UTC. Artifacts can expire or be
+`sha256:5e76f366dc53aee7c35508f2e7dc536d69ef9fa5c7266896d4fe881d396ebc56`;
+its recorded expiry is 2027-01-03 01:49:11 UTC. Artifacts can expire or be
 removed. Compilation and deterministic tests do not establish physical-device
 interaction, live-site availability or interactive multiwindow behavior.
-These runs validate PR #20's tree, not the reviewed `main` tree.
+These runs validate PR #23's tree, not the reviewed `main` tree. Local checks
+also passed 126 portable Core tests and reproduced all six Kotlin backup
+fixture pairs; the previous five retained their locked bytes.
 
 ## Documentation audit
 

@@ -3,17 +3,18 @@
 ## Current entry point — 2026-10-04
 
 The reviewed GitHub `main` is `a479806ba81c71845ba0a154a096bf47736b7393`.
-It is behind the open continuation stack: PRs #10–20 are implemented and
-unmerged. Start with [project status](docs/PROJECT_STATUS.md) for exact heads,
+It is behind the open continuation stack: PRs #10–20, #22 and #23 are implemented
+and unmerged. Start with [project status](docs/PROJECT_STATUS.md) for exact heads,
 dependency order, topic documents and CI evidence, then [TODO.md](TODO.md).
 
 The latest verified continuation head is
-`a3c3560489040dd33b4a8412397232b66b48f6ea` in
-[PR #20](https://github.com/taizaki69/Kami/pull/20). Its matching-tree CI passes
-371 compatibility tests on Linux/macOS, 327 Linux SQLite core tests, 330 macOS
-core tests, both iOS build targets and unsigned IPA packaging. Native restore
-remains disabled; the next feature requires preview, atomic merge and review
-UI. Local planner work is incomplete and is not part of this verified head.
+`2251ffc6034471434dca867e1eced6cbf889d38e` in
+[PR #23](https://github.com/taizaki69/Kami/pull/23). Its matching-tree CI passes
+372 compatibility tests on Linux/macOS, 368 Linux SQLite core tests, 371 macOS
+core tests, both iOS build targets and unsigned IPA packaging. PR #22 completes
+reviewed native restore; PR #23 adds reviewed Mihon import for the demonstrated
+English MangaDex ID and exact URL forms. Broader source mapping, additional
+fields, reader controls and physical-device interaction remain open.
 
 When continuing, inspect the checkout and uncommitted work before changing
 branches. Preserve work in progress. The documentation maintenance branch is
