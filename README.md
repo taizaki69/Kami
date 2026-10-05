@@ -14,8 +14,10 @@ reversible uniform-border cropping and an optional brightness override, with
 shared keep-awake/brightness ownership across active readers. A memory warning
 purges compressed images, stops speculative loading and retains only demanded
 pages at reduced resolution for that reader session. Webtoon placeholders keep
-their measured height when pixels are released. See the
-[memory verification](docs/VERIFICATION-2026-10-05-READER-MEMORY.md) for the
+their measured height when pixels are released. The reader draws image tiles
+and gives long pages a separate pixel budget to preserve more reading detail.
+The bounded source bitmap is still decoded as a whole. See the
+[rendering verification](docs/VERIFICATION-2026-10-05-READER-TILES.md) for the
 separate package, Apple-build and device-interaction evidence. Categories
 can be created, renamed, reordered and deleted, assigned individually or in
 bulk, and combined with library search. Deleting a category preserves manga,

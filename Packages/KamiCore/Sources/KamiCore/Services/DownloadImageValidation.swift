@@ -43,22 +43,36 @@ public struct NativePageImage: @unchecked Sendable {
 
 /// Shared by downloaded-page validation and the reader. Compressed-byte
 /// budgets belong to their callers; this boundary bounds decoded dimensions
-/// and creates only a thumbnail off the main actor, not a full-size bitmap.
+/// and creates bounded bitmaps off the main actor. Long reader pages may keep
+/// their full dimensions when they fit the separate reader pixel budget.
 public enum NativeImageValidation {
+    public static func reducedReaderPage(_ page: NativePageImage) async throws -> NativePageImage {
+        guard let plan = ReaderImageDecodePlan(width: page.image.width, height: page.image.height,
+                                              ordinaryMaximumDimension: 2_048, memoryConstrained: true) else {
+            throw DownloadImageValidationError.dimensionsTooLarge
+        }
+        return try await reduce(page, maximumPixelDimension: plan.maximumPixelDimension)
+    }
+
     /// Reduce an already decoded page without retaining or reloading its
     /// compressed source. Preserve the existing crop and source metadata;
     /// recomputing the crop at a different resolution could change the artwork.
     public static func reduced(
         _ page: NativePageImage, maximumPixelDimension: Int = 2_048
     ) async throws -> NativePageImage {
+        try await reduce(page, maximumPixelDimension: max(512, min(maximumPixelDimension, 2_048)))
+    }
+
+    private static func reduce(_ page: NativePageImage, maximumPixelDimension: Int) async throws -> NativePageImage {
         try Task.checkCancellation()
         let reducing = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
-            let maximum = max(512, min(maximumPixelDimension, 2_048))
             let largest = max(page.image.width, page.image.height)
-            guard largest <= 8_192 else { throw DownloadImageValidationError.dimensionsTooLarge }
-            guard largest > maximum else { return page }
-            let factor = Double(maximum) / Double(largest)
+            guard largest <= ReaderImageDecodePlan.maximumLongDimension else {
+                throw DownloadImageValidationError.dimensionsTooLarge
+            }
+            guard largest > maximumPixelDimension else { return page }
+            let factor = Double(maximumPixelDimension) / Double(largest)
             func resize(_ source: CGImage) throws -> CGImage {
                 try Task.checkCancellation()
                 let width = max(1, Int((Double(source.width) * factor).rounded(.down)))
@@ -99,6 +113,24 @@ public enum NativeImageValidation {
     public static func thumbnail(
         data: Data, maximumPixelDimension: Int, prepareBorderTrim: Bool = false
     ) async throws -> NativePageImage {
+        try await decode(data: data, sizing: .thumbnail(maximumPixelDimension), prepareBorderTrim: prepareBorderTrim)
+    }
+
+    /// The display path may use a tall bounded bitmap and draw it as tiles.
+    /// Download validation retains its small fixed-size thumbnail boundary.
+    public static func readerPage(
+        data: Data, ordinaryMaximumDimension: Int, memoryConstrained: Bool, prepareBorderTrim: Bool = false
+    ) async throws -> NativePageImage {
+        try await decode(data: data, sizing: .reader(ordinaryMaximumDimension, memoryConstrained),
+                         prepareBorderTrim: prepareBorderTrim)
+    }
+
+    private enum Sizing: Sendable {
+        case thumbnail(Int)
+        case reader(Int, Bool)
+    }
+
+    private static func decode(data: Data, sizing: Sizing, prepareBorderTrim: Bool) async throws -> NativePageImage {
         try Task.checkCancellation()
         let decoding = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
@@ -120,11 +152,26 @@ public enum NativeImageValidation {
                   Int64(pixelWidth) * Int64(pixelHeight) <= 250_000_000 else {
                 throw DownloadImageValidationError.dimensionsTooLarge
             }
+            let maximumDimension: Int
+            let maximumPixels: Int
+            switch sizing {
+            case let .thumbnail(limit):
+                maximumDimension = max(512, min(limit, 8_192))
+                maximumPixels = maximumDimension * maximumDimension
+            case let .reader(limit, constrained):
+                guard let plan = ReaderImageDecodePlan(width: pixelWidth, height: pixelHeight,
+                                                      ordinaryMaximumDimension: limit, memoryConstrained: constrained) else {
+                    throw DownloadImageValidationError.dimensionsTooLarge
+                }
+                maximumDimension = plan.maximumPixelDimension
+                maximumPixels = plan.maximumDecodedPixels
+            }
             let options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
                 kCGImageSourceShouldCacheImmediately: true,
-                kCGImageSourceThumbnailMaxPixelSize: max(512, min(maximumPixelDimension, 8_192))
+                kCGImageSourceShouldAllowFloat: false,
+                kCGImageSourceThumbnailMaxPixelSize: maximumDimension
             ]
             try Task.checkCancellation()
             guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary),
@@ -132,6 +179,10 @@ public enum NativeImageValidation {
                 throw DownloadImageValidationError.invalidImage
             }
             try Task.checkCancellation()
+            guard thumbnail.width <= maximumDimension, thumbnail.height <= maximumDimension,
+                  Int64(thumbnail.width) * Int64(thumbnail.height) <= Int64(maximumPixels) else {
+                throw DownloadImageValidationError.dimensionsTooLarge
+            }
             let trimmed = prepareBorderTrim ? try ReaderBorderCrop.trimming(thumbnail) : nil
             try Task.checkCancellation()
             return NativePageImage(image: thumbnail, borderTrimmedImage: trimmed,

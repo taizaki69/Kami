@@ -110,8 +110,13 @@ This native reader transform does not implement Android bitmap APIs for APKs.
   continue through ImageIO's format and decoding checks.
 - Image metadata is checked before decode. Inputs with dimensions above 100,000
   pixels on either axis or 250 million source pixels are rejected. ImageIO
-  downsamples off the main actor to at most 6,144 pixels in paged mode and
-  4,096 pixels in webtoon mode.
+  downsamples off the main actor. Ordinary pages retain the 6,144-pixel paged
+  and 4,096-pixel webtoon limits. A page with an aspect ratio of at least 4:1
+  uses a separate 16,777,216-pixel budget and a 65,536-pixel longest-axis cap.
+  This preserves more reading width than reducing every tall page to 4,096
+  pixels high. The plan accounts for shorter-axis rounding and validates the
+  actual ImageIO result before publishing it. Download validation keeps its
+  separate 512-pixel thumbnail; source dimension/format limits still apply.
 - Paged mode normally retains decoded images for the current page and its
   immediate neighbors. Webtoon mode uses actual viewport intersections plus
   immediate neighbors, rather than the larger lazy realization window. Inactive
@@ -129,8 +134,11 @@ demanded caller continues, while losing the final demanded caller under pressure
 cancels it. Late canceled results cannot replace a newer flight or refill cache.
 Demanded loads still validate the source's URL, headers and revocable capability.
 
-Already decoded visible pages are reduced off the main actor to a maximum of
-2,048 pixels per axis, using their existing pixels and crop. The original remains
+Already decoded visible pages are reduced off the main actor using their
+existing pixels and crop. Ordinary pages use a maximum of 2,048 pixels per axis;
+long pages use 4,194,304 pixels with the same 65,536-pixel longest-axis cap, so
+pressure does not unnecessarily discard most of a tall page's reading width.
+The original remains
 readable until its replacement is ready; revision/cancellation guards reject a
 replacement for an obsolete page or Retry. This conversion does not reload local
 files, refresh source requests or use the network. New decodes use the same
@@ -146,6 +154,33 @@ new visible bitmap, and several short pages can be visible together. Offline
 files, leases, progress and persistent settings remain governed by their normal
 lifetimes. See [memory verification](VERIFICATION-2026-10-05-READER-MEMORY.md)
 for tested boundaries and remaining device/profiling work.
+
+## Tiled drawing and remaining decode boundary
+
+The online and offline reader surface uses
+[`CATiledLayer`](https://developer.apple.com/documentation/quartzcore/catiledlayer)
+with 512×512 pixel tiles and detail levels covering the reader's existing 1–5×
+zoom. The layer is a child of a UIKit view, leaving UIKit's backing-layer
+delegate intact. Tile callbacks use a locked immutable image/size snapshot;
+they never read SwiftUI or mutable UI state on the background drawing thread.
+Each tile maps its clipped surface region to integral source pixels with a
+one-pixel interpolation overlap. Output remains clipped to the requested region.
+Cropping, page fitting, RTL, taps and zoom/pan still use the same reader controls.
+
+Pressure or image replacement recreates the tiled surface to release its
+rendered caches while preserving the parent's logical geometry and zoom state.
+The attached window supplies display scale. Dismissal clears the layer's image.
+The simulator workflow now runs hosted rendering tests against a UIImageView
+reference, including tile boundaries, replacement, tall-page displacement and
+resizing; the PR records their actual result, separately from compilation.
+
+This is tiled **drawing**, with a bounded whole source bitmap still resident.
+Apple documents that a [CGImage crop retains the original](https://developer.apple.com/documentation/coregraphics/cgimage/cropping(to:)).
+It does not provide region decoding or a process-wide memory bound. Decoder
+temporaries, pixel formats, tile caches and simultaneous pages still need device
+profiling. Very large pages can still lose detail to the pixel budget. A region
+decoder or bounded tile-file pipeline remains necessary for that case. See
+[rendering verification](VERIFICATION-2026-10-05-READER-TILES.md).
 
 Plain native requests use the image pipeline's own source-scoped cookie jar.
 An interpreted request with a supported execution capability instead reuses the
@@ -201,7 +236,7 @@ unverified.
 
 ## Tracked next
 
-1. Long-image tiling and device profiling under memory pressure. Persistent
+1. Long-image region decoding and device profiling under memory pressure. Persistent
    chapter downloads have a separate bounded store and local read leases.
 2. Dual-page spreads on iPad and landscape, including cover-page separation.
 3. Add Baozi image-transform regressions only after a portable bounded
