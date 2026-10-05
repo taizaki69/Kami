@@ -1,5 +1,8 @@
 # Networking
 
+Reviewed **2026-10-04** against `main` at `a479806`. Continuation features
+are listed separately in [project status](PROJECT_STATUS.md).
+
 ## Today
 
 Native sources (`MangaDexSource`) use `URLSession` directly with a Kami
@@ -114,9 +117,10 @@ general OkHttp retry, POST-redirect, or intermediate-response parity. Baozi
 banner cropping remains unsupported until a bounded portable pixel/JPEG
 implementation exists; the production factory explicitly defaults
 `BAOZI_BANNER=0`, and a metadata-only Bitmap shim would not be compatibility.
-Reader retry must also regenerate and revalidate the source `ImageRequest` and
-define expiry/credential-refresh behavior; the current per-page retry reuses the
-request resolved during page loading.
+Explicit per-page Retry already regenerates and revalidates the source
+`ImageRequest`, replaces the page snapshot and bypasses cached bytes or ordinary
+prefetch for that request. There is no generic TTL or automatic credential
+renewal. See [Reader](READER.md) for generation and cancellation behavior.
 
 ## Remaining extension-facing stack
 
@@ -153,3 +157,13 @@ report with no filenames or request data, while `compat-audit promote-gap`
 strictly converts a canonical redacted runtime report into a focused XCTest
 assertion seed. The app Diagnostics screen and user-selected file export remain
 open; they must preserve the same local-only redaction boundary.
+
+## Open continuation work
+
+[PR #11](https://github.com/taizaki69/Kami/pull/11) adds persistent FoolSlide
+settings and revokes obsolete source sessions; it does not provide general
+cookie persistence or preference UI for every profile.
+[PR #13](https://github.com/taizaki69/Kami/pull/13) adds bounded persistent
+downloads and offline page access. These features remain outside the reviewed
+main snapshot. General challenge handling and non-GET follow-up parity remain
+on the [tracker](../TODO.md).

@@ -1,412 +1,83 @@
 # Kami
 
-A native iOS manga reader built around **real Mihon/Tachiyomi extension
-ecosystem compatibility** — not a lookalike. Kami treats the ability to work
-with actual, current extension APKs and extension stores as its core
-engineering problem. See `docs/EXTENSION_COMPATIBILITY_ANALYSIS.md` for the
-verified ecosystem research and `docs/EXTENSION_COMPATIBILITY_MATRIX.md` for
-measured status.
+A native iOS manga reader with a bounded Swift interpreter for measured
+Mihon/Tachiyomi extension APKs and a native MangaDex source.
 
 Created and maintained by [taizaki69](https://github.com/taizaki69).
 
-**Honest status (2026-09-18):** the pure-Swift extension pipeline now covers
-store indexes, APK download, bounded ZIP/DEFLATE and binary-manifest parsing,
-validated DEX parsing, compatibility analysis, and an initial interpreter with
-a bounded pre-execution geometry/control-flow, exception-table, register-bounds,
-and typed register-dataflow verifier. The verifier now covers exact primitive
-and constructor state, resolved reference assignability and joins, and resolved
-catch types. Runtime dispatch resolves virtual overrides, lexical
-`invoke-super`, and maximally specific interface defaults across the parsed DEX
-class graph while leaving incomplete external graphs explicitly unresolved.
-Pinned real-APK tests execute the Akuma, MangaDex, BatCave, Kawii Manga,
-MangaMelon, Baozi Manhua, TuttoAnimeManga, Mangas-Origines.fr,
-Komikcast/VoraToon, and Yomu Comics entry
-constructors plus BatCave's `getBaseUrl`,
-`getLang`, `getName`, and `getId`
-methods. BatCave's real popular-manga path now runs through Kotlin class
-initialization, filters, collections, iteration, coroutine setup, and a bounded
-OkHttp model. It constructs the exact BatCave popular POST request, crosses an
-injected source-scoped async transport, resumes nested DEX frames, and exposes
-bounded `Response`, `ResponseBody`, and `BufferedSource` values. A bounded
-SwiftSoup-backed Jsoup bridge now runs BatCave's production CSS selectors and
-the real APK returns an exact `MangasPage` from deterministic response HTML,
-including relative-URL resolution and pagination. Its real text-search branch
-also trims and Java-form-encodes a page-2 query, preserves the source's cache
-policy, and returns the parsed result. The public latest-updates path likewise
-builds its cached page GET and returns a parsed page. The real manga-details
-worker now returns URL, title, thumbnail, publisher/year description, author,
-artist, genres, and status using modern Jsoup direct-child selector semantics.
-Its combined manga-update worker also extracts `window.__DATA__`, drives the
-APK's generated kotlinx serializers through a bounded generic JSON decoder,
-and returns exact `SChapter` values plus `SMangaUpdate`, including fractional
-chapter numbers, source-local dates, invalid-date fallback, and xhash URLs.
-Its real page-list worker now executes generated JSON request encoding, sends
-the exact reader POST, decodes the generated response DTOs from a bounded Okio
-source, normalizes image URLs, and returns exact `PageCompat` values. Malformed
-page JSON, invalid UTF-8, and wrong response types are typed failures.
-A separate real-APK regression proves non-2xx responses become Mihon's
-`HttpException`. `PinnedInterpretedSource` now verifies the exact BatCave APK's
-SHA-256, cryptographic APK v2 signer identity, manifest identity, and entry
-class before exposing all of those proven operations plus default reader image
-requests through the same `KamiSource` contract as native sources. One actor
-owns and serializes each mutable VM and transport across suspension, and
-KamiCore can register it without source-kind branches.
+## Project status
 
-The runtime now routes app-facing calls through stable public `KeiSource`
-wrappers whether R8 leaves them on a local superclass or vertically merges them
-into the generated entry class. A second current profile, Kawii Manga 1.6.1,
-uses that path end to end: its exact popular/latest/search/detail+chapter/page
-JSON operations run from the locked unmodified APK, its dynamic `HttpUrl`
-queries are encoded and bounded, its custom `x-app-key` header reaches every
-request, and nullable/boolean serialization, `distinct`, character-delimiter
-substring helpers, and Kotlin `Instant` conversion execute through the
-deny-by-default host bridge.
+Documentation reviewed on **2026-10-04** against `main` at
+[`a479806`](https://github.com/taizaki69/Kami/commit/a479806ba81c71845ba0a154a096bf47736b7393).
+The [project status](docs/PROJECT_STATUS.md) distinguishes that snapshot from
+the open continuation PRs and records verification for their exact commits.
 
-A third current profile, MangaMelon 1.6.1, adds the first measured app-facing
-filter round trip. Kami derives its `Sort` and `Select` schema from the exact
-authenticated APK, validates app-edited state against that immutable shape,
-and passes the original DEX filter instances back through the stable search
-wrapper. Its full popular/latest/filtered-search/details/chapters/pages path
-proves default-inclusive generated JSON encoding, bounded UTF-8/Okio/Base64
-form bodies, structured coroutine lambdas, long decoding, stable comparator
-sorting, string-valued chapter memo JSON, and deterministic page ordering.
+| Area | Available in the reviewed `main` snapshot |
+| --- | --- |
+| Reading | LTR, RTL and webtoon modes; zoom/pan; saved progress/history; reader settings; bounded image loading, prefetch and explicit retry |
+| Browsing | Native MangaDex; admitted exact extension profiles; popular/latest/search, details, chapters and generic filter editing |
+| Extensions | Store indexes, content-addressed installation, signature verification, persisted trust, enable/disable and authenticated startup restoration |
+| Persistence | SQLite schema v2, library membership, chapter state and history; category/download tables exist but their product flows are incomplete |
+| Backups | Early decoder only; corrected decoding, native export/restore and measured Mihon import are in open PRs |
+| Builds | Swift package tests, iOS simulator compilation, unsigned device compilation and unsigned IPA packaging in GitHub Actions |
 
-The fourth exact profile is Baozi Manhua 1.6.29
-(`eu.kanade.tachiyomi.extension.zh.baozimanhua`, version code 29). Admission
-is pinned to SHA-256
-`7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec`, signer
-fingerprint
-`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, the
-authenticated manifest, and source ID `5724751873601868259`. Its deterministic
-fake-transport regression covers construction, popular/latest/text search,
-combined details and chapters, pages, and the exact static filter schema (one
-header plus four `Select` filters), including a valid non-default tag selection
-that reaches a distinct filtered request. The bounded scalar preference bridge accepts
-`BAOZI_BANNER`/`CHAPTER_ORDER` values `0`–`2` and
-`QUICK_PAGES`/`REMOVE_DUPLICATE_IMAGES` booleans. Its DEX `imageRequest(Page)`
-rewrite is proven to change the fixture's `static.baozicdn.com` host to
-`static.baozimh.com` without network I/O. Reader requests can now retain the
-exact DEX `Request`, tags, configured OkHttp client, and source cookie jar
-behind an opaque bounded execution capability. The real Baozi fixture proves
-its redirect-domain tag reaches the configured network interceptor, rewrites a
-raw 302 `Location`, and drives the next bounded exchange to final image bytes.
-The direct-response regression still checks preservation of response body and
-unrelated headers.
+Categories, configurable FoolSlide, manual updates, resumable downloads,
+offline reading, native backup export and stronger state consistency are
+implemented in **open PRs #10–20**. [PR #22](https://github.com/taizaki69/Kami/pull/22)
+adds reviewed native restore; [PR #23](https://github.com/taizaki69/Kami/pull/23)
+adds Mihon import for the verified English MangaDex source ID and exact URL
+forms, with explicit exclusions. These changes remain unmerged. Broader import
+mapping, source migration, device validation and reader improvements remain
+on the [task tracker](TODO.md).
 
-The fifth exact app-facing profile is TuttoAnimeManga 1.6.10
-(`eu.kanade.tachiyomi.extension.it.tuttoanimemanga`, version code 10). Admission
-is pinned to SHA-256
-`e50f1bac6e30121b6eb3461e2ce7297de431d98fc0ed1bab510a30ce784edae3`, signer
-fingerprint
-`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, the
-authenticated manifest, and source ID `2102507871480604746`. Its deterministic
-real-APK regressions execute metadata, popular/latest/text search, combined
-details/chapters, pages, and default image requests through `KamiSource`; they
-assert an empty filter list, inherited `Referer`/`Origin` headers, cache policy,
-latest sorting with a ten-result cap, and rejection of unsupported
-filters/preferences before transport. This proves the exact locked APK, not
-arbitrary PizzaReader-family or live-site compatibility.
+## Extension compatibility
 
-The sixth exact app-facing profile is Mangas-Origines.fr 1.6.58
-(`eu.kanade.tachiyomi.extension.fr.mangasoriginesfr`, version code 58).
-Admission is pinned to SHA-256
-`b6922bbc5ddc376b50cdcd71123410af96cfddb0d0d6a493a1b50a9363cc718b`, signer
-fingerprint
-`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, the
-authenticated manifest, and source ID `4803238581797687746`. Its deterministic
-real-APK regressions execute metadata, seven static filters, popular/latest/
-text and filtered search through the source's ordered POST form, details,
-chapters, pages, and page-URL image requests with `Referer`/`Origin` headers.
-It has no source-executed image-interceptor capability, so this proves only the
-exact locked APK and its page-URL image path.
+The reviewed `main` catalog contains **10 exact current lib 1.6 profiles**:
+BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, Baozi Manhua 1.6.29,
+TuttoAnimeManga 1.6.10, Mangas-Origines.fr 1.6.58, Komikcast/VoraToon 1.6.83,
+Yomu Comics/SSSCanlator 1.6.59, EternalMangas 1.6.28 and DocTruyen3Q 1.6.38.
+FoolSlide Customizable is an additional exact profile in
+[PR #10](https://github.com/taizaki69/Kami/pull/10).
 
-The seventh exact app-facing profile is Komikcast/VoraToon 1.6.83
-(`eu.kanade.tachiyomi.extension.id.komikcast`, version code 83). Admission is
-pinned to SHA-256
-`9420cd59844854ccad0a95353749b0ab41c9ddb797a6f43025fb1ddb4652c3ac`, v2 signer
-fingerprint
-`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, the
-authenticated manifest, and source ID `972717448578983812`. Its deterministic
-real-APK fixtures prove metadata, popular/latest/text and filtered search,
-details, chapters, pages, and the exact custom image headers for the
-`https://v1.voratoon.com` site and `https://api.voratoon.com` JSON API. The
-image projection preserves `Referer: https://v1.voratoon.com/`,
-`Origin: https://v1.voratoon.com`,
-`Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8`, and
-`Accept-language: en-US,en;q=0.9,id;q=0.8`. The exact series URL
-`https://v1.voratoon.com/series/demo` is also proven to route through the
-bounded API detail path via `CollectionsKt.getOrNull`.
-The filter schema contains static `Sort`, `Sort Order`, `Status`, `Format`, and
-`Type` filters plus a dynamic `Genre` group fetched from `/genres`; bounded
-fixtures prove transient retry, in-memory cache reuse, concurrent refresh
-coalescing, and ordinary search queued behind publication. Tampered bytes,
-altered filter schemas, and unexpected preferences fail closed before
-transport. The dynamic result uses a bounded source-private in-memory virtual
-cache whose zstd stream is a logical source-internal identity only; this is
-not native zstd decompression or persistent cross-launch storage. These are
-offline assertions and do not claim live-site, Cloudflare/challenge,
-source-scoped image-interceptor, image-transform, or arbitrary dynamic-filter
-compatibility.
+Each profile requires matching APK bytes, signature, manifest and source IDs.
+Deterministic fixtures exercise the real APK through injected transport. They
+do not establish live-site availability, arbitrary APK compatibility,
+Cloudflare handling or Android bitmap support. The two legacy lib 1.4 APKs
+have constructor coverage, not full source-operation coverage.
 
-The eighth exact app-facing profile is Yomu Comics/SSSCanlator 1.6.59
-(`eu.kanade.tachiyomi.extension.pt.sssscanlator`, version code 59). Admission
-is pinned to SHA-256
-`2d7dfad2d4d293c58414b8905c6bcf454bcfb1a2bb6650a50d7480b0b9597883`, v2
-signer fingerprint
-`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`, the
-authenticated manifest, and source ID `1497838059713668619`. Deterministic
-real-APK fixtures prove `pt-BR` metadata, popular/latest/text and edited-filter
-search, combined details and chapters, direct page images, inherited
-`Referer`/`Origin` headers, and the dynamic `Gênero` list from `/api/genres`.
-They also cover `/obra`/`/ler` URL-search normalization, the exact 30-result
-pagination boundary, and the source's strict-majority filtering of decoy list
-entries. The profile preserves JSON property order when selecting the first
-matching nested RSC result. It uses bounded descriptor traversal and a
-page-URL image projection; it does not claim a custom image transform,
-source-specific image interceptor, or live-site/Cloudflare success.
+The [compatibility matrix](docs/EXTENSION_COMPATIBILITY_MATRIX.md) lists
+profile evidence and limits. The [corpus guide](Tests/corpus/README.md)
+explains the difference between manifest roles and executable catalog
+membership, including the two stale role labels on `main`.
 
-The corpus now also locks 11 current lib 1.6 Keiyoushi APKs under
-`Tests/corpus/measurement/` for measurement only. Together with the ten
-execution fixtures (two legacy lib 1.4 and eight current lib 1.6),
-and six AOSP apksig conformance fixtures, the lock contains 27 artifacts; 19 are
-current lib 1.6 artifacts (eight execution fixtures plus the 11 measurement
-fixtures). The measurement set is behavior-stratified, not a statistical sample.
-The former pre-promotion 16-artifact set occupied 1.24 MB (1,242,086 bytes); its
-static run analyzed all 16 measurement APKs with zero errors, found 12
-structural candidates and four stable-wrapper blockers (Komga, MangaPlus,
-NHentai.xxx, and XCOMIC), and reported 626 unique unregistered external method
-surfaces with zero unsupported opcodes. That aggregate is historical to the
-former 16-artifact measurement role and is not a compatibility rate. The current
-deterministic measurement run analyzed 11/11 artifacts, with 7 structural
-candidates, four stable-wrapper blockers, 432 unique unregistered external
-method surfaces, zero omitted invocations, and zero unsupported opcodes. These
-are static prioritization results, not a compatibility percentage or runtime
-proof. The current 11 measurement artifacts continue to be parsed and statically
-audited only;
-membership never grants signer trust, admission, installation, execution, or
-compatibility proof.
+## Build and test
 
-A bounded APK verifier now authenticates v2, v3/v3.1, and a conservative v1
-fallback, including signed content digests, X.509 signer keys, v3 certificate
-rotation, and signature-stripping protection. KamiCore binds the verified
-package/version/APK hash and signer history to persisted repository or explicit
-user trust; downgrades, same-version byte replacement, unrelated signers, and
-unadmitted source IDs are rejected before downloaded-source registration.
-The signer regression includes all ten real Keiyoushi execution APKs (Akuma,
-MangaDex, BatCave, Kawii Manga, MangaMelon, Baozi Manhua, TuttoAnimeManga,
-Mangas-Origines.fr, Komikcast, and Yomu Comics);
-the tiny AOSP fixtures are separate signature-conformance inputs.
-
-The app now completes that trust path: it persists extension repositories and
-content-addressed APKs, automatically uses a repository's pinned signing key,
-asks the user to confirm a verified certificate fingerprint for legacy stores,
-supports install/update and enable/disable controls, and restores enabled
-extensions after rechecking the stored hash, signature, signer continuity, and
-manifest. The only APK-to-`KamiSource` factory consumes that restored admission,
-re-authenticates the exact immutable buffer it executes, and refuses undeclared
-source IDs or unsupported profiles. Enabled downloaded sources appear beside
-the native MangaDex source in Browse.
-For a downloaded profile, the factory compares the admission's exact source-ID
-set with the catalog before DEX construction and postvalidates the IDs returned
-by the constructed source. `SourceRegistry` removes downloaded IDs only when
-their recorded package owner matches the disabling package, and never removes
-protected native IDs. The exact raw-byte profile constructors are a deliberate
-built-in/test seam: they still reverify the profile's exact hash and signer, but
-the downloaded app path requires persisted admission and this factory.
-
-The compatibility host bounds source-model outputs before they cross the
-app-facing seam: manga-page and page-list collections are capped at 2,048
-entries, a manga update at 20,000 chapters, and `Page` URL/image-URL fields at
-8 KiB. Metadata and source inputs have their own field limits; these are bounds,
-not a claim of unrestricted model fidelity.
-
-The first reusable profile-discovery seam is now shared by that exact runtime
-and `compat-audit plan`. Without executing DEX or granting trust, the bounded
-inspector either produces a deterministic lib 1.6 structural plan or explicit
-blockers for manifest identity, factories, DEX layout, native `.so` entries,
-entry-class placement, and stable public wrappers. The eight current profiles
-produce the same plans on repeated inspection; the two legacy lib 1.4 corpus
-artifacts are reported unsupported instead of guessed. The remaining 11
-measurement APKs produce 7 structural candidates and four stable-wrapper
-blockers, with 432 unique unregistered external method surfaces, zero omitted
-invocations, and zero unsupported opcodes. A structural plan is
-only a description: it is not signer authentication, catalog admission, or
-proof that an extension's operations will execute.
-
-Compatibility failures now have a privacy-safe measurement seam. Exact pinned
-sources retain the first typed unresolved class/method/field or unsupported-
-opcode error at the VM throw boundary, even when a nested host bridge
-catches or replaces it, and deduplicate it by app-facing operation stage.
-Unknown external fields fail closed unless the host models the exact field;
-arbitrary error strings, HTTP failures, request values, and parser data never
-enter the report.
-`compat-audit gaps` separately performs a bounded, non-executing scan of one APK
-or a directory, ranks external method invocations that are not exactly
-registered on the current host bridge, aggregates unsupported opcodes and plan
-blockers, and emits deterministic artifact ordinals instead of local paths or
-filenames. Those static method findings are prioritization signals—not proof
-that a virtual/interface call will fail, signer trust, admission, or execution
-compatibility. After a runtime gap is fixed, `compat-audit promote-gap` turns a
-canonical redacted report into a deterministic, paste-ready XCTest assertion
-seed without admitting request or response data.
-
-Browse now renders the complete app-facing Mihon filter hierarchy: headers,
-separators, selects, text fields, checkboxes, tri-state controls, nested groups,
-and sortable fields. Editing is transactional, Apply can run a filter-only
-search with a blank query, and Clear exits filter-only mode. Every text search
-passes the source's full filter schema with either default or user-edited
-state. Result resets and pagination also ignore stale responses instead of
-mixing results from superseded requests.
-
-The native reader now has persistent LTR, RTL, and continuous webtoon modes,
-direction-aware tap zones, paged pinch/double-tap zoom, configurable background,
-keep-screen-awake, retry, progress/history persistence, and bounded prefetch.
-Page bytes no longer use `AsyncImage`: a source-scoped actor forwards the exact
-`ImageRequest` headers through the hardened streaming transport, deduplicates
-loads, keeps a bounded compressed LRU, and feeds off-main ImageIO downsampling.
-Decoded paged images are limited to the current page and its neighbors, while
-webtoon pages release decoded images outside the lazy viewport. Interpreted
-requests with a supported source-scoped executor now retain runtime-to-reader
-cookie continuity; dual-page spreads and physical-device performance profiling
-remain open; see `docs/READER.md`.
-
-Chapter retry is driven by a structured `.task(id: reloadID)`; changing the
-reload ID restarts the chapter load. Dismissing the reader runs its disappearance
-cleanup, increments the load generation, and prevents an in-flight page list or
-image-request resolution from publishing stale state. Per-page image retry
-regenerates the source request under the same generation and cancellation guards.
-
-For Baozi, `ReaderView` resolves each page's exact DEX-backed `ImageRequest`
-asynchronously. An opaque source-owned capability keeps the mutable DEX
-Request/client graph actor-isolated while the pipeline invokes the same bounded
-OkHttp chain used by source operations. Its UUID participates in cache and
-in-flight identity, so requests with the same public URL/headers but different
-hidden tags cannot collide. The pipeline validates the public projection before
-invocation and still applies its 2xx, non-empty, and compressed-size checks.
-
-Source operations execute each configured OkHttp application interceptor
-followed by each network interceptor before reaching transport, then unwind in
-reverse response order. Supported GET-only reader images additionally run
-application interceptors once around a bounded follow-up loop and network
-interceptors once per observable exchange. The chain preserves exact DEX
-`Request` identity/tags and one shared VM instruction budget, permits at most 32
-interceptors, 64 interceptor/terminal steps, depth 32, and one `proceed` per
-chain object, and revalidates replacement bodies/headers against the transport
-policy. Baozi's real core-operation regressions traverse that chain and its
-finite rate limiter; its reader regressions prove both the tagged direct-302
-rewrite and the production-shaped rewrite/follow-up path to final bytes.
-
-Reader image fetching now inherits the source's admitted transport policy. It
-is HTTPS-only by default, validates the initial URL and headers before even an
-injected transport sees them, and permits plain HTTP only when that source was
-explicitly configured for it; the same policy continues to govern redirects.
-For ordinary page-URL profiles, source-derived credentials remain bound to the
-source origin while safe CDN headers such as `Referer` and `Origin` can follow
-cross-origin image URLs.
-
-Explicit page-image Retry asks the source for a fresh URL/header snapshot and
-reloads that image instead of reusing cached bytes, including a previously
-cached 200 response that failed image decoding. Concurrent retries for the same
-request share a load, while a superseded prefetch cannot overwrite the refreshed
-cache entry. The refreshed request replaces only that page's request; chapter
-position and history are retained. Requests have no generic expiry timestamp,
-and this does not imply automatic login or credential renewal.
-
-This is still not a claim of broad extension execution: the runtime profile
-catalog recognizes only the exact measured BatCave 1.6.9, Kawii Manga 1.6.1,
-MangaMelon 1.6.1, Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10,
-Mangas-Origines.fr 1.6.58, Komikcast/VoraToon 1.6.83, and Yomu Comics 1.6.59
-builds. The remaining 11 current-lib-1.6 artifacts are
-a non-executing measurement set, not
-an admitted profile catalog.
-Automatic profile admission beyond that exact catalog, arbitrary
-dynamic/network-backed filter lists, and much of the Kotlin/Java surface remain
-open; bounded dynamic genre publication is supported only for the exact
-Komikcast and Yomu Comics profiles
-(`docs/EXTENSION_RUNTIME.md`). Baozi's bounded preferences are accepted by the
-profile, but production preference UI/persistence is not wired. Because its
-default banner remover requires unavailable Android Bitmap/pixel/JPEG APIs,
-the downloaded-source factory explicitly defaults `BAOZI_BANNER` to disabled;
-explicit preferences still win. Banner cropping remains unsupported, and the
-new observable-redirect path is deliberately limited to supported
-source-scoped GET reader images. It is not a claim of general OkHttp retry,
-POST-redirect, or source-operation response-sequence parity. Kami starts with
-native MangaDex and can additionally restore a supported, authenticated
-downloaded source.
-
-## Layout
-
-```
-App/                    SwiftUI app (iOS 17+)
-Packages/
-  MihonCompatKit/       Extension compatibility: APK/ZIP, AXML, DEX,
-                        store index (index.pb/index.min.json), backup reader,
-                        analyzer + compat-audit CLI
-  KamiCore/             Domain models, SQLite store, native sources, services
-scripts/                bootstrap / build / test / package_ipa / fetch_corpus
-docs/                   analysis, matrix, runtime plan, per-area docs
-```
-
-## Quick start (macOS)
+From the repository root, with a compatible Swift toolchain:
 
 ```bash
-bash scripts/bootstrap.sh        # xcodegen + project + optional corpus
-bash scripts/build.sh            # simulator build
-bash scripts/test.sh             # package tests + app tests
-bash scripts/package_ipa.sh      # dist/Kami.ipa (unsigned; sign at install)
+bash scripts/fetch_corpus.sh
+swift test --package-path Packages/MihonCompatKit
+swift test --package-path Packages/KamiCore
 ```
 
-Requirements: Xcode 15+, xcodegen. Details: `BUILDING.md`, `docs/IPA_BUILD.md`.
+Portable KamiCore tests do not exercise SQLite or ImageIO when those modules
+are unavailable. App compilation requires macOS and Xcode. See
+[Building Kami](BUILDING.md) for platform details and
+[IPA builds](docs/IPA_BUILD.md) for the unsigned artifact and signing boundary.
 
-Moving development to another computer? Start with [HANDOFF.md](HANDOFF.md);
-it records the known-good SHA, restore commands, verification evidence,
-security boundaries, and the recommended next implementation sequence.
+## Development documentation
 
-## Verified on Windows too
+- [Current status and open PRs](docs/PROJECT_STATUS.md)
+- [Priorities and acceptance criteria](TODO.md)
+- [Architecture](ARCHITECTURE.md) and [contributing](CONTRIBUTING.md)
+- [Extension runtime](docs/EXTENSION_RUNTIME.md) and
+  [dated ecosystem research](docs/EXTENSION_COMPATIBILITY_ANALYSIS.md)
+- [Reader](docs/READER.md), [networking](docs/NETWORKING.md),
+  [database](docs/DATABASE.md) and [backups](docs/BACKUP_COMPATIBILITY.md)
+- [Continuation handoff and historical evidence](HANDOFF.md)
 
-The compatibility kit runs locally on Windows with Swift 6.3 through
-`scripts/windows_dev_test.bat`, including the Baozi, TuttoAnimeManga,
-Mangas-Origines.fr, Komikcast, and Yomu real-APK regressions and portable
-KamiCore coverage. The current local suites pass 262/262 MihonCompatKit tests
-and 19/19 portable KamiCore tests. Exact reader-retry checkpoint `fd15d76`
-passes [Swift CI](https://github.com/taizaki69/Kami/actions/runs/35416577528)
-with 262/262 MihonCompatKit and 30/30 macOS KamiCore tests, all 27 fixtures,
-actual ImageIO decode-recovery coverage, and the optimized CLI upload;
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/35416577530) for
-simulator and unsigned device; and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/35416577529) with
-the uploaded unsigned IPA. Historical local and CI checkpoints, with their test
-counts, remain listed below. The historical Mangas-Origines.fr implementation
-head `0abc7f8` passed
-[Swift CI](https://github.com/taizaki69/Kami/actions/runs/33817169918) with all
-27 fixtures, 254 MihonCompatKit tests, 28 macOS KamiCore tests, the optimized
-CLI, and artifact upload;
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/33817169894) for both
-simulator and unsigned device targets; and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/33817169856) with
-the uploaded unsigned IPA. The historical first-gap diagnostics head
-`b1cd246` passes [Swift CI](https://github.com/taizaki69/Kami/actions/runs/33289953550)
-with all 27 fixtures, 223 MihonCompatKit tests, 26 KamiCore tests, and the
-optimized CLI;
-[iOS Build](https://github.com/taizaki69/Kami/actions/runs/33289953526) for both
-simulator and unsigned device; and
-[IPA Package](https://github.com/taizaki69/Kami/actions/runs/33289953529) with
-the uploaded unsigned IPA.
-The `compat-audit` CLI produces the measured compatibility matrix,
-deterministic per-APK structural-plan blockers, and a redacted static
-gap/corpus report from the locked corpus; it can also promote the first exact
-runtime finding into a focused regression assertion seed.
+## License and test inputs
 
-## Non-goals / legality
-
-Kami's iOS app target bundles no manga content or third-party extension code.
-Extensions are user-installed from third-party repositories at the user's
-direction. The repository separately vendors hash-pinned third-party APKs under
-`Tests/corpus/` solely as test fixtures; they are not app resources or shipped
-with the app.
-
-Kami's original code is currently public but unlicensed: copyright is retained
-by its creator and all rights are reserved while the long-term distribution
-model is being decided. Public visibility does not make the project open
-source. See [LICENSES.md](LICENSES.md) for the controlling notice and
-third-party attributions.
+See [LICENSES.md](LICENSES.md) for the existing rights and dependency notices.
+Vendored APKs are test inputs and are not shipped in the iOS app; their
+attribution is in the [corpus notice](Tests/corpus/KEIYOUSHI-EXTENSIONS-NOTICE.md).

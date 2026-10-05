@@ -1,5 +1,8 @@
 # Reader
 
+Reviewed **2026-10-04** against `main` at `a479806`. “Implemented” below
+refers to that snapshot. Open PR features are distinguished at the end.
+
 ## Implemented
 
 - Persistent left-to-right, right-to-left, and continuous webtoon reading
@@ -100,7 +103,8 @@ execution UUIDs remain part of request identity. Requests have no generic TTL;
 explicit Retry is the refresh trigger and does not imply automatic login,
 OAuth, challenge, or credential renewal.
 
-All six reader regressions pass locally on Windows. At exact checkpoint
+Historical evidence: all six reader regressions passed on Windows at the
+reader-retry checkpoint. At that exact checkpoint
 `fd15d76`, [Swift CI](https://github.com/taizaki69/Kami/actions/runs/35416577528)
 passes them on macOS and proves ImageIO rejects the invalid cached body and decodes the replacement
 PNG. [iOS Build](https://github.com/taizaki69/Kami/actions/runs/35416577530)
@@ -109,7 +113,18 @@ passes simulator and unsigned-device compilation, and
 uploads the unsigned app. Physical-device interaction and performance remain
 unverified.
 
-## Tracked next
+## Open continuation and remaining work
+
+[PR #12](https://github.com/taizaki69/Kami/pull/12) adds History resume;
+[PR #13](https://github.com/taizaki69/Kami/pull/13) adds persistent downloads
+and offline reading; [PR #16](https://github.com/taizaki69/Kami/pull/16) makes
+reading state atomic through navigation and dismissal. PRs #19–20 protect
+reading/mutation lifetimes from expired library state. These are unmerged;
+see [project status](PROJECT_STATUS.md) for exact heads and verification.
+
+The following older main gaps must be assessed against those implementations
+before adding new work. The current priorities are in [TODO.md](../TODO.md).
+
 
 1. Previous/next chapter navigation, end-of-chapter behavior, and configurable
    tap-zone actions.

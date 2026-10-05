@@ -1,5 +1,36 @@
 # Kami Continuation Handoff
 
+## Current entry point — 2026-10-04
+
+The reviewed GitHub `main` is `a479806ba81c71845ba0a154a096bf47736b7393`.
+It is behind the open continuation stack: PRs #10–20, #22 and #23 are implemented
+and unmerged. Start with [project status](docs/PROJECT_STATUS.md) for exact heads,
+dependency order, topic documents and CI evidence, then [TODO.md](TODO.md).
+
+The latest verified continuation head is
+`2251ffc6034471434dca867e1eced6cbf889d38e` in
+[PR #23](https://github.com/taizaki69/Kami/pull/23). Its matching-tree CI passes
+372 compatibility tests on Linux/macOS, 368 Linux SQLite core tests, 371 macOS
+core tests, both iOS build targets and unsigned IPA packaging. PR #22 completes
+reviewed native restore; PR #23 adds reviewed Mihon import for the demonstrated
+English MangaDex ID and exact URL forms. Broader source mapping, additional
+fields, reader controls and physical-device interaction remain open.
+
+When continuing, inspect the checkout and uncommitted work before changing
+branches. Preserve work in progress. The documentation maintenance branch is
+based on main and does not contain the continuation's runtime changes.
+
+Push changes and create/update PRs autonomously under the standing project
+instruction; verify the current PR commit/tree and correct failed checks.
+Keep PRs unmerged until merging is explicitly authorized.
+
+## Historical checkpoint log — through 2026-09-18
+
+The remainder is retained historical evidence. Its “current”, “next”, machine
+paths, counts and branch instructions describe their original checkpoints and
+must not override the entry point above. In particular, older backup-format
+claims are superseded by [the corrected scope](docs/BACKUP_COMPATIBILITY.md).
+
 Last updated: 2026-09-18 (America/Lima)
 
 This is the durable continuation point for moving Kami development to another
@@ -34,7 +65,7 @@ Reader-image request regeneration, cache-bypassing Retry, and shared reload
 coverage are implemented through `fd15d76505220a5e9f267a7f97efc6e50194c04c`;
 local verification and all three exact-head workflows pass as recorded below.
 
-## Start here
+## Historical start point
 
 - Repository: <https://github.com/taizaki69/Kami>
 - Visibility: public (changed 2026-08-23 so standard GitHub-hosted Actions

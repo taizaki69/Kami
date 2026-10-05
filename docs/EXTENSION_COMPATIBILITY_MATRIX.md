@@ -1,6 +1,8 @@
 # Extension Compatibility Matrix
 
-**Last updated:** 2026-09-18
+**Reviewed:** 2026-10-04 against `main` at `a479806`.
+The [project status](PROJECT_STATUS.md) records the unmerged continuation.
+Counts in the historical test-evidence section belong to their named commits.
 
 **Corpus:** Keiyoushi release assets vendored from recorded release URLs and
 pinned by SHA-256 via `scripts/fetch_corpus.sh`, then verified against
@@ -23,13 +25,13 @@ is no compatibility claim.
 | ZIP + DEFLATE | Working | STORE/DEFLATE real APK entries parse with size limits, exact decoded size, and CRC-32 verification |
 | Binary Android manifest | Working | Package, entry class, flags, and string/float `extensionLib` values extracted from real APKs |
 | DEX structural parse | Working on 21 locked real-extension APKs | Real corpus DEX files pass header/table/index/range checks plus Adler-32; the parser accepts the shared 035 and 037–040 header contract and rejects the different 041 container format |
-| Structural execution-plan inspection | Working for the bounded single-source lib 1.6 shape | Non-executing inspection deterministically finds the entry and stable public wrapper for the eight exact current profiles and seven of 11 remaining measurement APKs; the four measurement blockers are Komga, MangaPlus, NHentai.xxx, and XCOMIC. Legacy lib 1.4, factories, multidex, native `.so`, ambiguous/missing DEX, invalid identity, and missing wrapper shapes are explicit blockers. A plan establishes no signer trust, catalog admission, or execution proof |
+| Structural execution-plan inspection | Working for the bounded single-source lib 1.6 shape | Non-executing inspection deterministically finds the entry and stable public wrapper for the ten exact current profiles and seven of the 11 measurement-labelled APKs (including EternalMangas and DocTruyen3Q); the four measurement blockers are Komga, MangaPlus, NHentai.xxx, and XCOMIC. Legacy lib 1.4, factories, multidex, native `.so`, ambiguous/missing DEX, invalid identity, and missing wrapper shapes are explicit blockers. A plan establishes no signer trust, catalog admission, or execution proof |
 | External-reference audit | Working heuristic | Cross-DEX definitions are reconciled before missing-class classification; class coverage is a priority signal, not method-level runtime proof |
-| Static measurement corpus | Working, non-executing | Eleven current lib 1.6 measurement-only APKs under `Tests/corpus/measurement/` are SHA/URL locked and analyzed 11/11 with 0 errors; seven are structural candidates and four have stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, XCOMIC). The report contains 432 unique unregistered external method surfaces, 0 omitted invocations, and 0 unsupported opcodes. The behavior-stratified set is prioritization evidence, not a statistical sample or execution/admission proof |
-| Compatibility diagnostics | Partial product surface; privacy-safe runtime/static/promotion seams working | Pinned sources retain the first typed VM gap by operation stage at the public VM boundary even when a nested host bridge catches or transforms it; unknown external fields fail closed unless explicitly modeled, and arbitrary errors remain ignored. `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths; `compat-audit promote-gap` strictly turns the first canonical redacted runtime finding into a deterministic XCTest assertion seed. The current measurement run reports 11/11 analyzed, 0 errors, 432 unique surfaces, 0 omitted invocations, and 0 unsupported opcodes. Static invocations are prioritization only, not runtime failure or admission proof. App-facing export/share UI remains open |
-| DEX execution | Partial M1/M2 working | Pinned regressions exercise exact source/execution paths against ten execution fixtures; verified dispatch/dataflow semantics plus receiver-directed virtual entry under a shared async instruction budget, nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded source-operation interceptor execution, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, scalar preferences, interpreted image requests, and serialized adapter ownership are checked |
+| Static measurement corpus | Working, non-executing | Eleven current lib 1.6 measurement-labelled APKs under `Tests/corpus/measurement/` are SHA/URL locked and analyzed 11/11 with 0 errors; seven are structural candidates and four have stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, XCOMIC). The report contains 387 unique unregistered external method surfaces, 0 omitted invocations, and 0 unsupported opcodes. The behavior-stratified set is prioritization evidence, not a statistical sample or execution/admission proof |
+| Compatibility diagnostics | Partial product surface; privacy-safe runtime/static/promotion seams working | Pinned sources retain the first typed VM gap by operation stage at the public VM boundary even when a nested host bridge catches or transforms it; unknown external fields fail closed unless explicitly modeled, and arbitrary errors remain ignored. `compat-audit gaps` non-executingly ranks unregistered external method invocations, unsupported opcodes, and plan blockers with artifact ordinals rather than paths; `compat-audit promote-gap` strictly turns the first canonical redacted runtime finding into a deterministic XCTest assertion seed. The current measurement run reports 11/11 analyzed, 0 errors, 387 unique surfaces, 0 omitted invocations, and 0 unsupported opcodes. Static invocations are prioritization only, not runtime failure or admission proof. App-facing export/share UI remains open |
+| DEX execution | Partial M1/M2 working | Pinned regressions exercise exact source/execution paths against ten execution-labelled fixtures and the two catalogued measurement-labelled fixtures; verified dispatch/dataflow semantics plus receiver-directed virtual entry under a shared async instruction budget, nested-frame suspension, cancellation, typed handler re-entry, stable public-wrapper routing, bounded source-operation interceptor execution, bounded HTML/CSS, generated-serializer JSON encode/decode, filter-state round trips, page construction, scalar preferences, interpreted image requests, and serialized adapter ownership are checked |
 | Admission restoration and source factory | Working for exact measured profiles | Startup re-reads the enabled installed APK, rechecks hash/signature/signer history/user trust/manifest, and gives the sole factory a fresh capability; before DEX construction the factory preflights the exact profile source-ID set, then postvalidates every constructed ID against that set and the admission, rejects undeclared IDs, and refuses unmeasured profiles; registry removal is scoped to the recorded package owner |
-| End-to-end source operations | Working for eight exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10, Mangas-Origines.fr 1.6.58, Komikcast/VoraToon 1.6.83, and Yomu Comics 1.6.59 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon, Baozi, and Mangas-Origines.fr add exact static filter paths, while Komikcast and Yomu add bounded dynamic genre paths. Yomu also proves Next.js RSC extraction, URL-shaped search normalization, strict-majority decoy filtering, and its 30-result pagination boundary. Source-operation `await`/`awaitSuccess` execute a bounded application/network interceptor chain, and Baozi's core regressions traverse its finite rate limiter. Baozi additionally proves bounded scalar preferences, an interpreted `imageRequest` rewrite, and source-scoped reader-image interceptor execution with bounded observable GET redirects. BatCave, Tutto, Mangas-Origines.fr, Komikcast, and Yomu prove their inherited/custom request-header behavior; ordinary page-URL paths do not claim source-scoped reader-interceptor execution. The 11 measurement APKs remain outside the executable catalog. Automatic catalog expansion, arbitrary dynamic filters, production preference UI/persistence, Android bitmap banner transforms, Cloudflare/challenge handling, and live-site availability remain open |
+| End-to-end source operations | Working for ten exact profiles | BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1, Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10, Mangas-Origines.fr 1.6.58, Komikcast/VoraToon 1.6.83, Yomu Comics 1.6.59, EternalMangas 1.6.28 and DocTruyen3Q 1.6.38 expose metadata, popular/latest/search, details, chapters, and pages through `KamiSource`; MangaMelon, Baozi, and Mangas-Origines.fr add exact static filter paths, while Komikcast and Yomu add bounded dynamic genre paths. Yomu also proves Next.js RSC extraction, URL-shaped search normalization, strict-majority decoy filtering, and its 30-result pagination boundary. Source-operation `await`/`awaitSuccess` execute a bounded application/network interceptor chain, and Baozi's core regressions traverse its finite rate limiter. Baozi additionally proves bounded scalar preferences, an interpreted `imageRequest` rewrite, and source-scoped reader-image interceptor execution with bounded observable GET redirects. BatCave, Tutto, Mangas-Origines.fr, Komikcast, and Yomu prove their inherited/custom request-header behavior; ordinary page-URL paths do not claim source-scoped reader-interceptor execution. EternalMangas and DocTruyen3Q are already in the catalog although their fixture role labels still say measurement; the other nine are outside it. Automatic catalog expansion, arbitrary dynamic filters, production preference UI/persistence, Android bitmap banner transforms, Cloudflare/challenge handling, and live-site availability remain open |
 
 ## Per-extension execution
 
@@ -45,16 +47,18 @@ is no compatibility claim.
 | Mangas-Origines.fr (`fr.mangasoriginesfr`) | 1.6.58 | `b6922bbc…c718b` | candidate | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ text + exact static filters | ✅ core fields | ✅ combined update | ✅ HTML image URLs + inherited image headers |
 | Komikcast/VoraToon (`id.komikcast`) | 1.6.83 | `9420cd59…c3ac` | candidate | ✅ | ✅ | ✅ base URL, lang, name, ID | ✅ popular + latest | ✅ text + static filters + dynamic `Genre` | ✅ core fields | ✅ chapters | ✅ pages + exact custom image headers |
 | Yomu Comics (`pt.sssscanlator`) | 1.6.59 | `2d7dfad2…7883` | candidate | ✅ | ✅ | ✅ base URL, `pt-BR`, name, ID | ✅ popular + latest | ✅ text + selects + dynamic `Gênero` + URL lookup | ✅ core fields | ✅ combined update | ✅ RSC image URLs + inherited headers |
+| EternalMangas (`es.eternalmangas`) | 1.6.28 | `6325059f…b78be6` | candidate | ✅ | ✅ | ✅ exact metadata | ✅ popular + latest | ✅ text query | ✅ core fields | ✅ chapter list | ✅ page list |
+| DocTruyen3Q (`vi.doctruyen3q`) | 1.6.38 | `3fe67ce3…d4c0a0` | candidate | ✅ | ✅ | ✅ exact metadata | ✅ popular + latest | ✅ text + genre/status filters | ✅ core fields | ✅ filtered rows/dates | ✅ fallback + deduplicated URLs |
 
 “Candidate” in this table is intentionally weaker than every execution column.
-For the eight exact rows it means bounded inspection found the supported lib 1.6
+For the ten exact rows it means bounded inspection found the supported lib 1.6
 single-source structure before the independent hash/signer/admission checks;
 the execution columns are backed by deterministic real-APK regressions. The
-legacy constructors below remain useful shallow VM fixtures, but the plan
+legacy constructors above remain useful shallow VM fixtures, but the plan
 builder does not pretend their lib 1.4 API shape is the current stable-wrapper
 contract.
 
-## Measurement-only current lib 1.6 corpus
+## Measurement-labelled current lib 1.6 corpus
 
 The lock has 11 SHA/URL-locked current lib 1.6 Keiyoushi APKs under
 `Tests/corpus/measurement/`. They are separate from the ten execution fixtures
@@ -63,16 +67,17 @@ fixtures: 27 artifacts total, including 19 current lib 1.6 artifacts. This is a
 behavior-stratified, not statistical, selection covering distinct extension
 families and shapes.
 
-The measurement APKs are parsed, signature-verified for parser conformance, and
-statically audited only. Membership never grants signer trust, admission,
+The static audit parses and inspects these APKs without execution. Signature
+checks cover parser conformance; the two catalogued profiles have separate
+runtime tests. Membership never grants signer trust, admission,
 installation, or execution. The deterministic `compat-audit gaps
 Tests/corpus/measurement` baseline analyzed 11/11 artifacts with 0 errors,
 found seven structural candidates and four stable-wrapper blockers (Komga,
-MangaPlus, NHentai.xxx, and XCOMIC), and reported 432 unique unregistered
+MangaPlus, NHentai.xxx, and XCOMIC), and reported 387 unique unregistered
 external method surfaces with 0 omitted invocations and 0 unsupported opcodes. These results are
 prioritization signals, not a compatibility percentage or runtime proof.
 
-The seven remaining structural candidates are Doctruyen3q, EternalMangas,
+The seven structural candidates in this role are Doctruyen3q, EternalMangas,
 FoolSlide Customizable, Hayalistic, MangaPandaOnl, PixivComic, and ReadManga.
 Baozi Manhua 1.6.29 is no longer
 in this measurement role: it is the fourth exact execution profile, and
@@ -82,10 +87,16 @@ has now moved from measurement into the seventh exact execution role. Yomu
 Comics/SSSCanlator 1.6.59 has moved into the eighth; all five are independently
 authenticated and tested below.
 
+The manifest's role counts remain 10 execution / 11 measurement / 6 conformance.
+EternalMangas and DocTruyen3Q already have exact runtime profiles despite their
+`measurement/` paths. The other nine measurement-labelled APKs are not in the
+main catalog. [PR #10](https://github.com/taizaki69/Kami/pull/10) reconciles the
+roles and adds FoolSlide; it remains outside this main snapshot.
+
 ## Exact execution-profile evidence
 
-All ten constructors execute their real no-argument DEX paths and return
-objects of the declared entry type. BatCave's popular path additionally proves
+The ten current profiles and two legacy constructor fixtures execute real
+no-argument DEX construction and return objects of the declared entry type. BatCave's popular path additionally proves
 class initialization, filter construction and iteration, its Kotlin ABI, and
 bounded OkHttp request construction. It asserts the exact POST URL and ordered
 form fields, crosses a deterministic source-scoped transport, resumes nested
@@ -240,7 +251,7 @@ factory. It owns one
 source-scoped interpreter and transport behind a bounded cancellation-aware
 queue, maps every operation above into `KamiSource`, reuses the combined update
 for one-request library refreshes, validates default HTTP(S) page image
-requests, and registers in KamiCore without source-kind branches. The eight
+requests, and registers in KamiCore without source-kind branches. The ten
 profile suites prove their respective deterministic contracts; Baozi additionally
 proves preference admission, exact filter-schema rejection before transport,
 and interpreted image-request conversion, while Tutto proves its no-filter/
@@ -259,10 +270,31 @@ The source-model host bridge bounds app-facing outputs before conversion:
 Metadata and source inputs have separate field bounds; these limits are
 resource hardening, not full tachiyomix model fidelity.
 
+EternalMangas 1.6.28 is the ninth exact current profile, pinned to package
+`eu.kanade.tachiyomi.extension.es.eternalmangas`, version code 28, source ID
+`1533901034425595323` and SHA-256
+`6325059f3d45e2b727268cdae936f7bcb08f914c5852b40c9e7bd736e0b78be6`.
+Its [source suite](../Packages/MihonCompatKit/Tests/MihonCompatKitTests/EternalMangasInterpretedSourceTests.swift)
+checks metadata/initial static filters, popular/latest/search, details,
+chapters and pages using deterministic transport.
+
+DocTruyen3Q 1.6.38 is the tenth, pinned to package
+`eu.kanade.tachiyomi.extension.vi.doctruyen3q`, version code 38, source ID
+`6168143505244976507` and SHA-256
+`3fe67ce34b42c4cb7b193a9536a27ae1b3f41805a866489e82797f56aad4c0a0`.
+Its [source suite](../Packages/MihonCompatKit/Tests/MihonCompatKitTests/Doctruyen3QInterpretedSourceTests.swift)
+checks metadata, dynamic genre refresh, popular/latest, query and genre/status
+search, detail fields, chapter row/date handling and page fallback/deduplication.
+Both profiles require signer fingerprint
+`9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2`
+and authenticated manifest identity. Both configure the ordinary page-URL image
+path; this is not evidence of source-executed reader interceptors, generic
+family compatibility or live-site behavior.
+
 ## Current measured API workload
 
 The current `compat-audit gaps Tests/corpus/measurement` baseline is the
-authoritative workload snapshot for the 11 remaining current lib 1.6 measurement APKs.
+authoritative workload snapshot for the 11 current lib 1.6 measurement-labelled APKs.
 It analyzes every artifact without executing DEX, reconciles classes defined
 across the APK's DEX entries, compares exact external method
 prototypes/staticness with the current host registry, and ranks each surface by
@@ -274,15 +306,16 @@ extension and invocation count:
 | Artifact analysis errors | 0 |
 | Structural candidates | 7 |
 | Stable-wrapper blockers | 4 |
-| Unique unregistered external method surfaces | 432 |
+| Unique unregistered external method surfaces | 387 |
 | Omitted external invocations | 0 |
 | Unsupported opcodes | 0 |
 
 The four stable-wrapper blockers are Komga, MangaPlus, NHentai.xxx, and XCOMIC.
-The 432-surface list is a prioritization signal, not a compatibility rate:
+The 387-surface list is a prioritization signal, not a compatibility rate:
 virtual/interface dispatch may resolve through a different receiver class, and
-dead code may never execute. The measurement artifacts are not admitted or
-executed, and their membership does not establish signer trust.
+dead code may never execute. This audit does not admit or execute artifacts,
+and corpus membership does not establish signer trust. EternalMangas and
+DocTruyen3Q have separate exact-profile execution tests.
 
 The deterministic baseline is checked against a fresh static analysis in
 `CorpusLockTests`. Privacy regressions require reports to contain no local or
@@ -294,9 +327,13 @@ The older class-only workload snapshot from the original execution fixtures is
 no longer the corpus aggregate; use the locked baseline and deterministic gaps
 report above for current prioritization.
 
-## Test evidence
+## Historical test evidence
 
-- The current local Windows/Swift 6.3.3 suites pass 262/262 MihonCompatKit tests
+These entries retain their original checkpoint scope. Newer main profiles are
+backed by the linked suites above; continuation CI is in
+[project status](PROJECT_STATUS.md).
+
+- The historical pre-EternalMangas/DocTruyen3Q Windows/Swift 6.3.3 suites passed 262/262 MihonCompatKit tests
   and 19/19 portable KamiCore tests with all 27 corpus fixtures present. The
   ten deleted tests were duplicate metadata/construction smokes or helper-only
   checks already covered by stronger raw-DEX, app-facing, transport, and signer
@@ -465,14 +502,14 @@ report above for current prioritization.
 - Parser hardening covers checksum/size/count limits and every truncated prefix
   of generated valid DEX and ZIP fixtures.
 - Exact implementation-head Swift CI built `compat-audit` in release mode and
-  uploaded it; the current checkout also builds it locally in release mode.
+  uploaded it; that checkpoint also built it locally in release mode.
 
 ## Honest frontier
 
-Kami can download, validate structurally, inspect, classify, and execute eight
+Kami can download, validate structurally, inspect, classify, and execute ten
 controlled real-extension profiles through bounded async response delivery.
 BatCave, Kawii, MangaMelon, Baozi, TuttoAnimeManga, Mangas-Origines.fr,
-Komikcast/VoraToon, and Yomu Comics
+Komikcast/VoraToon, Yomu Comics, EternalMangas and DocTruyen3Q
 produce exact popular/search/latest/details/chapters/pages compatibility
 models; MangaMelon, Baozi, and Mangas-Origines.fr additionally prove static
 filtered search, while BatCave reaches the
@@ -485,7 +522,7 @@ headers. Komikcast additionally proves its static five-filter schema and bounded
 dynamic Genre fetch/retry/cache/concurrency path, exact custom image headers, and
 fail-closed tamper/schema/preferences boundaries. Yomu additionally proves its
 dynamic Portuguese genre filter, Next.js RSC detail/page parsing, URL-shaped
-search, decoy filtering, and exact pagination boundary. These are eight exact
+search, decoy filtering, and exact pagination boundary. These are ten exact
 measured profiles, not a claim that downloaded
 extensions are generally compatible. Signer trust,
 durable install/update, exact-byte startup restoration, selection UI,
@@ -495,7 +532,7 @@ preserves the full source filter shape for text search, and supports
 blank-query static filtered search. Typed runtime compatibility reports and a
 non-executing static gap/corpus audit are working without changing admission;
 the broader 11-artifact current-lib-1.6 measurement corpus is now locked and
-fully analyzed, so corpus expansion is no longer open. App export/share UX
+fully analyzed, while promotion of further exact profiles remains open. App export/share UX
 remains open; first-gap/field capture and deterministic promotion are working. Automatic
 catalog expansion, arbitrary dynamic filter sources, production preference UI/persistence,
 and arbitrary custom image-request overrides remain open. Supported interpreted
