@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import KamiCore
+import MihonCompatKit
 
 extension UTType {
     static let kamiLibraryBackup = UTType(exportedAs: "app.kami.library-backup", conformingTo: .json)
@@ -82,6 +83,9 @@ struct LibraryBackupsView: View {
     @State private var restoreFilename: String?
     @State private var excludeConflicts = false
     @State private var preparingRestore = false
+    @State private var choosingMihon = false
+    @State private var inputIsMihon = false
+    @State private var acknowledgeMihon = false
 
     var body: some View {
         let presentation = model.libraryPresentation.generation
@@ -89,7 +93,7 @@ struct LibraryBackupsView: View {
             List {
                 Section {
                     Text("Save your library, categories, chapter progress and reading history to a Kami backup file.")
-                    Text("Restore a Kami backup after reviewing its contents. Mihon backup import is not available yet.")
+                    Text("Restore a Kami backup, or review supported data from a Mihon backup before importing it.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -185,8 +189,8 @@ struct LibraryBackupsView: View {
             }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.kamiLibraryBackup, .json, .data]) { result in
                 switch result {
-                case let .success(url): readRestore(url, expected: presentation)
-                case .failure: errorMessage = "The file could not be opened. Choose a downloaded Kami backup in Files."
+                case let .success(url): readRestore(url, mihon: choosingMihon, expected: presentation)
+                case .failure: errorMessage = "The file could not be opened. Choose a downloaded backup in Files."
                 }
             }
             .onDisappear { cancelPreparation() }
@@ -202,12 +206,20 @@ struct LibraryBackupsView: View {
     private func restoreSection(presentation: LibraryPresentationGeneration) -> some View {
         Section {
             Button {
+                choosingMihon = false
                 showingImporter = true
             } label: {
                 Label("Choose a Kami backup", systemImage: "square.and.arrow.down")
             }.disabled(operationID != nil)
+            Button {
+                choosingMihon = true
+                showingImporter = true
+            } label: {
+                Label("Choose a Mihon backup", systemImage: "square.and.arrow.down")
+            }.disabled(operationID != nil)
             if let restoreFilename { Text(restoreFilename).font(.subheadline) }
             if let preview = restorePreview {
+                if let report = preview.mihonReport { mihonReview(report, expected: presentation) }
                 LabeledContent("New manga", value: "\(preview.summary.newManga)")
                 LabeledContent("Existing manga to merge", value: "\(preview.summary.existingManga)")
                 LabeledContent("New chapters", value: "\(preview.summary.newChapters)")
@@ -249,7 +261,8 @@ struct LibraryBackupsView: View {
                         }
                     )).disabled(operationID != nil)
                 }
-                Button(preview.excludesConflictedSources && !preview.conflicts.isEmpty
+                Button(preview.mihonReport != nil ? "Import reviewed supported data"
+                       : preview.excludesConflictedSources && !preview.conflicts.isEmpty
                        ? "Restore with these exclusions" : "Restore this backup") {
                     do { try model.beginLibraryRestore(preview, expected: presentation) }
                     catch { errorMessage = error.localizedDescription }
@@ -266,7 +279,88 @@ struct LibraryBackupsView: View {
         }
     }
 
-    private func readRestore(_ url: URL, expected: LibraryPresentationGeneration) {
+    @ViewBuilder
+    private func mihonReview(_ report: MihonLibraryImportReport, expected: LibraryPresentationGeneration) -> some View {
+        Text("Mihon import: MangaDex in English").font(.headline)
+        Text("Only the verified MangaDex English source ID and manga/chapter paths are mapped. Other sources and unsupported records are excluded. This does not recreate Mihon's full chapter list or reader settings.")
+            .font(.footnote)
+        LabeledContent("Manga in file", value: "\(report.inputManga)")
+        LabeledContent("Supported manga", value: "\(report.mappedManga)")
+        if report.reusedStoredChapters > 0 {
+            LabeledContent("Saved chapters matched for history", value: "\(report.reusedStoredChapters)")
+        }
+        LabeledContent("Excluded manga / chapters / history", value: "\(report.excludedManga) / \(report.excludedChapters) / \(report.excludedHistory)")
+        LabeledContent("Unsupported field occurrences", value: "\(report.coverage.unsupportedOccurrences)")
+        if !report.issues.isEmpty {
+            DisclosureGroup("Exclusion details") {
+                ForEach(report.issues) { issue in
+                    LabeledContent(exclusionLabel(issue.reason), value: "\(issue.count)")
+                }
+            }
+        }
+        if !report.unsupportedSourceIDs.isEmpty {
+            DisclosureGroup("Unmapped source IDs (\(report.unsupportedSourceIDs.count))") {
+                ForEach(Array(report.unsupportedSourceIDs.prefix(20)), id: \.self) { id in Text(String(id)) }
+                if report.unsupportedSourceIDs.count > 20 { Text("Showing the first 20 IDs.") }
+            }
+        }
+        if !report.coverage.unsupported.isEmpty {
+            DisclosureGroup("Unsupported fields") {
+                ForEach(Array(report.coverage.unsupported.enumerated()), id: \.offset) { _, item in
+                    Text("\(coverageLabel(item.feature)) (\(String(describing: item.scope))): \(item.occurrences)")
+                        .font(.footnote)
+                }
+            }
+        }
+        if report.duplicateManga + report.duplicateChapters + report.duplicateHistory > 0 {
+            Text("Duplicate manga/chapter/history records merged: \(report.duplicateManga) / \(report.duplicateChapters) / \(report.duplicateHistory). First metadata is kept; read/bookmark flags are combined and greater progress/history values are retained.")
+                .font(.footnote)
+        }
+        if report.roundedTimestamps > 0 || report.normalizedCategories > 0 {
+            Text("\(report.roundedTimestamps) timestamps rounded down to whole seconds; \(report.normalizedCategories) category names trimmed.").font(.footnote)
+        }
+        Text("Keep your original backup. Excluded records and unsupported fields are not saved in Kami. Native MangaDex refreshes may hide alternate chapter editions while preserving their progress and history.")
+            .font(.footnote).foregroundStyle(.secondary)
+        Toggle("Import only the supported data reviewed above", isOn: Binding(
+            get: { acknowledgeMihon },
+            set: { acknowledgeMihon = $0; reviewRestore(expected: expected) }
+        )).disabled(operationID != nil || !report.hasImportableData)
+        if !report.hasImportableData { Text("This file has no supported manga to import.").font(.footnote) }
+    }
+
+    private func exclusionLabel(_ reason: MihonLibraryImportReport.Exclusion) -> String {
+        switch reason {
+        case .unsupportedSource: "Manga from unmapped sources"
+        case .mangaURL: "Manga with unsupported URLs"
+        case .chapterURL: "Chapters with unsupported URLs"
+        case .chapterParent: "Chapters claimed by multiple manga"
+        case .historyReference: "History without an unambiguous chapter"
+        case .removedHistory: "History already removed in Mihon"
+        case .categoryReference: "Missing category references"
+        case .nonLibraryMembership: "Category links on nonlibrary manga"
+        }
+    }
+
+    private func coverageLabel(_ feature: TachibkReader.UnsupportedFeature) -> String {
+        switch feature {
+        case .appPreferences: "App preferences"
+        case .sourcePreferences: "Source preferences"
+        case .extensionStores: "Extension repositories"
+        case .tracking: "Tracking services"
+        case .readerSettings: "Reader settings"
+        case .chapterSettings: "Chapter settings"
+        case .excludedScanlators: "Excluded scanlators"
+        case .notes: "Notes"
+        case .mangaMemo: "Manga annotations"
+        case .chapterMemo: "Chapter annotations"
+        case .synchronizationMetadata: "Synchronization metadata"
+        case .legacySources: "Legacy source records"
+        case .legacyHistory: "Legacy history"
+        case .unknownField: "Unrecognized fields"
+        }
+    }
+
+    private func readRestore(_ url: URL, mihon: Bool, expected: LibraryPresentationGeneration) {
         guard operationID == nil else { return }
         let id = UUID()
         operationID = id
@@ -275,13 +369,15 @@ struct LibraryBackupsView: View {
         restoreInput = nil
         restoreFilename = nil
         excludeConflicts = false
+        acknowledgeMihon = false
         errorMessage = nil
         preparation = model.performLibraryOperation(expected: expected) {
             do {
-                let bytes = try await model.readLibraryRestoreFile(url)
-                let preview = try await model.previewLibraryRestore(bytes, excludeConflicts: false)
+                let bytes = try await model.readLibraryRestoreFile(url, mihon: mihon)
+                let preview = try await model.previewLibraryRestore(bytes, excludeConflicts: false, mihon: mihon)
                 guard operationID == id, !Task.isCancelled else { return }
                 restoreInput = bytes
+                inputIsMihon = mihon
                 restoreFilename = url.lastPathComponent
                 restorePreview = preview
             } catch is CancellationError {} catch {
@@ -303,9 +399,11 @@ struct LibraryBackupsView: View {
         restorePreview = nil
         errorMessage = nil
         let excluded = excludeConflicts
+        let mihon = inputIsMihon, acknowledged = acknowledgeMihon
         preparation = model.performLibraryOperation(expected: expected) {
             do {
-                let preview = try await model.previewLibraryRestore(data, excludeConflicts: excluded)
+                let preview = try await model.previewLibraryRestore(data, excludeConflicts: excluded,
+                    mihon: mihon, acknowledgesLimitations: acknowledged)
                 guard operationID == id, !Task.isCancelled else { return }
                 restorePreview = preview
             } catch is CancellationError {} catch {

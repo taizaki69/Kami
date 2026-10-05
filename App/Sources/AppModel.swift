@@ -321,12 +321,13 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func readLibraryRestoreFile(_ url: URL) async throws -> Data {
+    func readLibraryRestoreFile(_ url: URL, mihon: Bool = false) async throws -> Data {
         try requireLibraryOperation()
         let worker = Task.detached(priority: .userInitiated) {
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-            return try LibraryBackupFileReader.read(url)
+            let limit = mihon ? TachibkReader.Policy.default.maximumInputBytes : LibraryBackupPolicy.default.maximumInputBytes
+            return try LibraryBackupFileReader.read(url, policy: LibraryBackupPolicy(maximumInputBytes: limit))
         }
         return try await withTaskCancellationHandler {
             let data = try await worker.value
@@ -335,12 +336,16 @@ final class AppModel: ObservableObject {
         } onCancel: { worker.cancel() }
     }
 
-    func previewLibraryRestore(_ data: Data, excludeConflicts: Bool) async throws -> LibraryRestorePreview {
+    func previewLibraryRestore(_ data: Data, excludeConflicts: Bool, mihon: Bool = false,
+                               acknowledgesLimitations: Bool = false) async throws -> LibraryRestorePreview {
         try requireLibraryOperation()
         guard durableDatabaseAvailable else { throw LibraryRestoreError.storageUnavailable }
         let store = self.store
         let worker = Task.detached(priority: .userInitiated) {
-            try await store.previewLibraryRestore(from: data, excludingConflictedSources: excludeConflicts)
+            if mihon {
+                return try await store.previewMihonRestore(from: data, acknowledgingLimitations: acknowledgesLimitations)
+            }
+            return try await store.previewLibraryRestore(from: data, excludingConflictedSources: excludeConflicts)
         }
         return try await withTaskCancellationHandler {
             let preview = try await worker.value
@@ -363,6 +368,9 @@ final class AppModel: ObservableObject {
                 let completion = try await operation.value
                 let report = completion.report
                 libraryRestoreNotice = "Backup restored: \(report.summary.newManga) new manga, \(report.summary.existingManga) existing manga merged."
+                if let mapped = preview.mihonReport {
+                    libraryRestoreNotice = "Mihon import saved: \(report.summary.restoredManga) supported manga. Excluded: \(mapped.excludedManga) manga, \(mapped.excludedChapters) chapters and \(mapped.excludedHistory) history entries. Keep your original file for data not imported."
+                }
                 if !completion.presentationPublished {
                     libraryOperationError = "The backup was restored. Reopen the library to refresh its display."
                 }

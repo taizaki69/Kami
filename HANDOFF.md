@@ -4,7 +4,24 @@ Last updated: 2026-10-04 (America/Lima)
 
 ## Canonical continuation — 2026-10-04
 
-The active continuation is `assistant/native-library-restore-20261004`, based
+The active branch is `assistant/mihon-library-import-20261004`, based on
+`cca543fcbc6bedc87d04ed5f2d57af85096cc697` from
+[PR #22](https://github.com/taizaki69/Kami/pull/22), ready and unmerged. That
+base passed Linux 371 Compat + 351 Core/SQLite, macOS 371 Compat + 354 Core,
+simulator/device and unsigned IPA. Its CI merge tree matched its published head.
+The current increment connects Files, bounded Mihon decode, measured English
+MangaDex source/path mapping, coverage/exclusion acknowledgement and the existing
+native transaction. It preserves exact chapter identities, handles duplicate
+reading state and existing-target parent conflicts, and converts only the fields
+whose unit mapping is demonstrated. Unsupported records are explicitly excluded
+and never routed to native sources. See [Mihon import](docs/MIHON_IMPORT.md) and
+[verification](docs/VERIFICATION-2026-10-04-MIHON-IMPORT.md). Checkpoint evidence
+is in `.git/checkpoints/20261004-mihon-library-import/`. The broader goal remains
+active; publish/verify automatically, keep PRs unmerged.
+
+The preceding native-restore checkpoint follows.
+
+The native-restore continuation was `assistant/native-library-restore-20261004`, based
 on `a3c3560489040dd33b4a8412397232b66b48f6ea` from
 [PR #20](https://github.com/taizaki69/Kami/pull/20), ready and unmerged. That
 base passed Linux 371 Compat + 327 Core/SQLite, macOS 371 Compat + 330 Core,

@@ -49,8 +49,10 @@ reading progress is never reduced. Changed libraries require a new preview.
 The [Mihon backup decoder](docs/BACKUP_COMPATIBILITY.md) reads bounded gzip/raw
 protobuf into typed library records and reports unsupported fields. Kotlin
 reference fixtures check producer defaults, exact 64-bit identities, category
-orders, chapters and history. Native preview and merge are implemented; Mihon
-source/URL mapping, coverage review and import UI remain pending.
+orders, chapters and history. [Mihon import](docs/MIHON_IMPORT.md) now maps the
+verified English MangaDex ID and exact persisted paths into native records,
+with explicit coverage/exclusion review before atomic merge. Other source
+identities and unsupported fields remain excluded; keep the original backup.
 
 Extension installation authenticates the exact APK hash, package/version,
 signer and declared source IDs. Repository trust or explicit certificate
@@ -112,7 +114,7 @@ conformance fixtures. Historical paths under `measurement/` are retained; the
 manifest's `role` field determines measurement membership. Source acquisition
 provenance, fixture hashes and separate third-party notices are preserved.
 
-Background downloads, scheduled background updates, Mihon import and source migration, further
+Background downloads, scheduled background updates, broader Mihon import and source migration, further
 source settings, Cloudflare cookie bridging, iPad spreads and physical-device performance verification
 remain on the [task tracker](TODO.md). The broader daily-reader and extension
 compatibility objective is still in progress.

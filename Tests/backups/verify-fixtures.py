@@ -127,7 +127,7 @@ def main():
     assert empty_expected == {"manga": [], "categories": [], "sources": []}
     assert (directory / "kotlin-categories-only.pb").read_bytes()[0] == 0x12
     assert (directory / "kotlin-sources-only.pb").read_bytes()[:2] == bytes.fromhex("aa06")
-    print("Verified five Kotlin fixture pairs, hashes, gzip containers, default omissions, Long values, and wire observations.")
+    print(f"Verified {len(manifest['fixtures'])} Kotlin fixture pairs, hashes, gzip containers, default omissions, Long values, and wire observations.")
 
 
 if __name__ == "__main__":

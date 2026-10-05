@@ -13,7 +13,7 @@ extension LibraryOperationCoordinator {
         store: LibraryStore, preview: LibraryRestorePreview,
         expected: LibraryPresentationGeneration
     ) throws -> Task<LibraryRestoreCompletion, Error> {
-        guard preview.canRestore else { throw LibraryRestoreError.sourceConflicts }
+        if let reason = preview.restoreBlockReason { throw reason }
         let exclusive = try beginExclusive(expected: expected)
         return Task { @MainActor in
             defer { try? self.finishExclusive(exclusive) }

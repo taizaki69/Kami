@@ -2,7 +2,9 @@
 
 Native Kami library export and reviewed restore are implemented separately as
 versioned JSON through Files; see [native backup scope and format](NATIVE_BACKUPS.md).
-Mihon decoding remains a library API without a product import flow.
+A [reviewed Mihon import](MIHON_IMPORT.md) now maps the demonstrated English
+MangaDex identity and paths into that merge. Other identities and unsupported
+fields remain explicitly excluded.
 
 ## Verified upstream format — 2026-10-04
 
@@ -110,9 +112,9 @@ The implementation PR records the final suite/build evidence for its exact
 commit. A passing decoder suite does not establish restoration or Files UI.
 Native Kami export includes all history, hidden chapters, duration and durable
 discovery state. Native restore now has immutable preview, atomic merge and
-unavailable/conflicting source reporting. Mihon still needs explicit source/URL
-adapters and a review of unsupported-field coverage before using that merge
-path. Native restore does not establish Mihon import interoperability.
+unavailable/conflicting source reporting. The product now provides a measured English MangaDex adapter and explicit
+unsupported-field/exclusion review before using that merge path. This limited
+contract does not establish general Mihon import interoperability.
 
 Restoration must match exact source/URL identities and preserve reading state.
 Fuzzy title or chapter-number matching belongs to a separately chosen source

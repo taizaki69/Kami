@@ -66,6 +66,14 @@ final class TachibkReferenceFixtureTests: XCTestCase {
         XCTAssertTrue(backup.sources.isEmpty)
     }
 
+    func testKotlinMangaDexImportFixtureRetainsProducerPathsAndDefaults() throws {
+        let backup = try checkFixture("kotlin-mangadex-import")
+        XCTAssertEqual(backup.manga.first?.sourceId, 2_499_283_573_021_220_255)
+        XCTAssertEqual(backup.manga.first?.url, "/manga/11111111-1111-4111-8111-111111111111")
+        XCTAssertEqual(backup.manga.first?.chapters.count, 2)
+        XCTAssertEqual(backup.manga.first?.favorite, true)
+    }
+
     @discardableResult
     private func checkFixture(_ name: String, file: StaticString = #filePath,
                               line: UInt = #line) throws -> TachibkReader.DecodedBackup {
@@ -74,9 +82,9 @@ final class TachibkReferenceFixtureTests: XCTestCase {
         XCTAssertEqual(manifest.formatVersion, 1, file: file, line: line)
         XCTAssertEqual(Set(manifest.fixtures.map(\.name)), [
             "kotlin-defaults", "kotlin-categories-only", "kotlin-sources-only",
-            "kotlin-negative-source", "kotlin-empty-root",
+            "kotlin-negative-source", "kotlin-empty-root", "kotlin-mangadex-import",
         ], file: file, line: line)
-        XCTAssertEqual(manifest.fixtures.count, 5, file: file, line: line)
+        XCTAssertEqual(manifest.fixtures.count, 6, file: file, line: line)
         let fixture = try XCTUnwrap(manifest.fixtures.first { $0.name == name }, file: file, line: line)
         let raw = try checkedBytes(fixture.rawPath, fixture.rawSHA256, file: file, line: line)
         let gzip = try checkedBytes(fixture.gzipPath, fixture.gzipSHA256, file: file, line: line)
