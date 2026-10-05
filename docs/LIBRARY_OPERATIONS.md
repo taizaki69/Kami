@@ -27,7 +27,7 @@ Exclusive acquisition fails while any ordinary operation is registered. While
 exclusive, new operations fail before their bodies execute. An exclusive token
 belongs to one coordinator and is consumed by finish; foreign/repeated tokens
 cannot release another operation. Abort keeps the presentation generation.
-After a future successful database commit, `publishCommittedChange` changes it
+After a successful database commit, `publishCommittedChange` changes it
 once while exclusion is still held, then `finishExclusive` releases exclusion.
 Cancellation after publication never restores the previous generation. These
 methods do not implement a database commit or prove that one occurred.
@@ -46,7 +46,8 @@ methods do not implement a database commit or prove that one occurred.
 | Downloads | Enqueue/retry/control work is scoped; the queue has its own lifetime until its stream and final refreshes finish. Pause/cancel borrow the run lifetime, including scene backgrounding. ID-only controls carry the displayed generation. |
 | Extension changes | Repository writes, install/enable/settings, detached source construction and failure cleanup remain owned. The detached construction is awaited. |
 | Signer confirmation | A lifetime spans preparation through explicit confirmation or cancellation. A second preparation is cancelled without replacing the pending prompt. Confirmation/cancellation borrow the existing lifetime. |
-| Backup export | Snapshot/encoding are awaited by an owned operation, including cancellation and view disappearance. The system exporter consumes already prepared immutable bytes. |
+| Backup export and preview | Snapshot/encoding and bounded Files acquisition are awaited by an owned operation, including cancellation and view disappearance. Export and review consume immutable bytes. |
+| Native restore | `startLibraryRestore` reserves exclusion synchronously and owns the detached database worker through cancellation/drain. Only committed success publishes a generation; dropping a UI observer does not cancel the operation. |
 
 AppModel checks current scope before its asynchronous persistence/presentation
 entry points. Direct Store reads in views execute inside lifecycle scopes.
@@ -67,14 +68,20 @@ callbacks still fail generation checks; root identity is not the sole guard.
 Retained reading failures preserve their original database targets rather than
 silently discarding unsaved intent or renewing it against a replaced library.
 
-## Remaining restore work
+## Native restore integration
 
-Restore remains disabled. No schema/epoch rotation, immutable preview or merge
-API is introduced here. The future transaction must independently reject live
-durable scans/jobs, validate all plan dependencies under BEGIN IMMEDIATE,
-conservatively merge exact identities and rotate the durable epoch only inside
-a successful commit. It must preserve downloads/files, configuration and trust.
-A process-local coordinator is not a substitute for those database checks.
+`startLibraryRestore` uses the shared exclusion boundary around the complete
+[native restore](NATIVE_BACKUPS.md). Its Store transaction independently rejects
+active durable scans/jobs, revalidates preview dependencies under BEGIN IMMEDIATE,
+merges exact identities and rotates the durable epoch before COMMIT. Failed or
+cancelled transactions release exclusion without publishing. Successful COMMIT
+is never reclassified as cancellation; publication occurs while still exclusive.
+AppModel keeps the operation handle across sheet dismissal and shows a finite
+completion/failure notice. A failed preview must be reviewed again.
+
+Actual SQLite/coordinator integration tests cover idle readers, queued work,
+rollback, queued cancellation, observer cancellation and cancellation during
+committed publication. See the [restore verification record](VERIFICATION-2026-10-04-NATIVE-RESTORE.md).
 
 Portable continuation-based tests verify the coordinator and writer boundary;
 Apple builds verify integration compilation. They do not prove physical-device

@@ -6,12 +6,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-04
 
 The full native-reader and compatibility objective remains active. The current
-continuation integrates shared operation ownership and scene invalidation,
-building on snapshot-issued contexts for category, membership and source writes.
+continuation implements reviewed native backup restore and atomic conservative
+merge, using shared operation ownership, scene invalidation and store-issued
+contexts for category, membership and source writes.
 It builds on durable FoolSlide website identity, atomic reader state with database-issued reading targets, bounded
 native export to Files, Mihon gzip/raw backup decoding, offline downloads,
-updates, History resume and revocable source registrations. Restoration remains
-pending.
+updates, History resume and revocable source registrations. Native restore is
+available; Mihon import and source migration remain pending.
 See [native backup verification](docs/VERIFICATION-2026-10-04-NATIVE-BACKUPS.md),
 [reading-state design](docs/READING_STATE.md),
 [Mihon decoder verification](docs/VERIFICATION-2026-10-04.md) and
@@ -75,8 +76,15 @@ must not be used as evidence for the current commit.
       write transactions; retain strict rollback and cancellation behavior.
       Local checks pass 310 Core/SQLite, 97 portable Core and 371 Compat tests.
       The implementation PR records exact-head Apple checks separately.
-- [ ] Add immutable restore preview and atomic
-      merge with stale-plan rejection, exact identities and source conflict reports.
+- [x] Add immutable native restore preview and atomic conservative merge, with
+      stale-plan rejection, exact identities, source conflicts and Files review.
+      Preserve downloads, metadata, trust and settings; publish a fresh epoch
+      and scene generation only after commit. See [native restore](docs/NATIVE_BACKUPS.md).
+- [ ] Adapt the measured Mihon MangaDex English ID and exact URL forms to native
+      identities; show unsupported-field and source-mapping coverage before
+      commit. Keep unsupported identities inert or explicitly excluded.
+- [ ] Verify Files providers, cancellation, large-library memory use and
+      restored-reader navigation on an Apple device; compilation is separate evidence.
 
 ## P0 — Extension research & foundation
 
@@ -342,7 +350,8 @@ must not be used as evidence for the current commit.
       Scheduled updates and system notifications remain open.
 - [x] Categories UI + management (PR #10); device interaction remains unverified.
 - [ ] Migration flow (multi-source search + chapter matching)
-- [ ] Backup/restore UI + import report
+- [x] Native backup export and reviewed restore UI with counts/conflicts.
+- [ ] Mihon import UI with source mapping and unsupported-field report.
 - [x] Reader foundation: persistent LTR/RTL/webtoon modes, direction-aware tap
       zones, paged zoom/pan, settings, keep-awake, bounded header-aware image
       loading/prefetch, off-main downsampling, retry, and progress/history

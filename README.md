@@ -41,14 +41,16 @@ Library → Library options → Library backups prepares a native
 [Kami backup](docs/NATIVE_BACKUPS.md) and saves it through Files. It includes all
 saved manga, categories, chapter state, full history and discovery records,
 including manga outside the library and hidden chapters. Downloaded pages,
-extension installations and settings are excluded. Restoration is not available
-in this version; the export screen states that limitation.
+extension installations and settings are excluded. The same screen can open a
+Kami backup, preview its counts and source conflicts, and restore it with an
+atomic conservative merge. Existing metadata and downloaded pages are preserved;
+reading progress is never reduced. Changed libraries require a new preview.
 
 The [Mihon backup decoder](docs/BACKUP_COMPATIBILITY.md) reads bounded gzip/raw
 protobuf into typed library records and reports unsupported fields. Kotlin
 reference fixtures check producer defaults, exact 64-bit identities, category
-orders, chapters and history. Immutable restore preview, atomic database merge,
-source mapping and import UI remain pending for native and Mihon archives.
+orders, chapters and history. Native preview and merge are implemented; Mihon
+source/URL mapping, coverage review and import UI remain pending.
 
 Extension installation authenticates the exact APK hash, package/version,
 signer and declared source IDs. Repository trust or explicit certificate
@@ -110,7 +112,7 @@ conformance fixtures. Historical paths under `measurement/` are retained; the
 manifest's `role` field determines measurement membership. Source acquisition
 provenance, fixture hashes and separate third-party notices are preserved.
 
-Background downloads, scheduled background updates, backup restore and migration, further
+Background downloads, scheduled background updates, Mihon import and source migration, further
 source settings, Cloudflare cookie bridging, iPad spreads and physical-device performance verification
 remain on the [task tracker](TODO.md). The broader daily-reader and extension
 compatibility objective is still in progress.

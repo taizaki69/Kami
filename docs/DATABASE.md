@@ -4,7 +4,7 @@ SQLite via a thin system-library wrapper (`KamiCore/Database/SQLiteDatabase.swif
 no third-party dependency). Single database at
 `~/Library/Application Support/Kami/kami.sqlite` (WAL mode, foreign keys on).
 
-## Schema (v5 — `Database.swift` migrations)
+## Schema (v7 — `Database.swift` migrations)
 
 | Table | Purpose |
 |---|---|
@@ -20,6 +20,8 @@ no third-party dependency). Single database at
 | `library_update_scan` / `library_update_target` | manual scan lifetime and finite per-manga outcomes |
 | `download_job` / `download_page` | durable queue, fresh attempt revisions, ordered page receipts and prepared/complete publication |
 | `download_cleanup` | generation-specific cleanup retained until file removal is acknowledged |
+| `library_data_state` | durable epoch for database-issued reading and mutation targets (schema 6) |
+| `source_content_binding` | durable configurable-source content namespace, independent of executable settings (schema 7) |
 
 Migrations are versioned (`PRAGMA user_version`); every schema change ships
 as a new numbered step in a transaction. Tests cover migration idempotence
@@ -43,3 +45,18 @@ trust root. Startup restoration reads only enabled records and issues a fresh
 admission capability after the exact persisted APK file is rehashed,
 cryptographically re-verified, and matched against all persisted identity
 fields; a failed restore is disabled by the app.
+
+## Native backup restoration
+
+A restore preview binds immutable validated bytes to its issuing store, durable
+epoch, exact domain/identity/configuration fingerprint and SQLite change stamp.
+Commit starts `BEGIN IMMEDIATE`, rejects active durable scans/download workers
+and revalidates those dependencies before writing. One transaction merges
+categories, manga, chapter state, history and discovery knowledge, then rotates
+the epoch. Errors and pre-commit cancellation roll everything back. Successful
+COMMIT remains success if cancellation arrives while the UI awaits the result.
+
+Existing metadata/current chapter lists, downloads/files, runtime settings,
+repositories and signing trust survive unchanged. Archive source descriptions
+are not installation or request authority. See [merge and source-conflict
+rules](NATIVE_BACKUPS.md). Restore uses schema 7 without a new migration.

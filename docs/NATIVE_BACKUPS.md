@@ -9,10 +9,11 @@ replacing the screen state. Success is shown only after the system exporter
 reports a saved file. The export is unavailable if the persistent database
 could not be opened; the app's temporary fallback library cannot be exported.
 
-The screen explicitly states that **restoration is unavailable in this
-version**. This increment supplies native export and a validating codec.
-It does not supply restore preview, merging, source migration or `.tachibk`
-export. Mihon decoding has a separate [compatibility contract](BACKUP_COMPATIBILITY.md).
+The same screen provides **Choose a Kami backup**, an immutable preview with
+counts and source conflicts, and explicit restore. Both export and restore
+require durable storage. This flow accepts native JSON v1; Mihon decoding has a
+separate [compatibility contract](BACKUP_COMPATIBILITY.md). Mihon import, source
+migration and `.tachibk` export remain pending.
 
 The `.kamibackup` file is uncompressed UTF-8 JSON. It contains reading history
 and descriptive source URLs. It includes all saved domain rows, not just the
@@ -80,8 +81,8 @@ disablement, re-admission or missing APK bytes cannot downgrade a known binding.
 A missing/malformed binding with Foo manga fails export rather than guessing.
 Source descriptions accompany archived manga; configuring an otherwise empty
 source does not add its settings to a library backup. Other source IDs cannot
-claim this measured Foo contract. Restore must separately establish operational
-source availability and handle conflicts.
+claim this measured Foo contract. Restore reports unavailable sources separately
+from content conflicts; neither a label nor a numeric source ID enables execution.
 
 ## Bounds and consistent reads
 
@@ -118,6 +119,56 @@ download work. The database actor serializes the snapshot with normal writes;
 the codec runs away from the main actor. Native export itself adds no schema
 migration; the separate reader-state foundation introduces its own data epoch.
 
+## Review and atomic restore
+
+Files input is opened once with security-scoped access, checked as a regular
+file on the opened descriptor, and read in cancellable bounded chunks. Links,
+folders and oversized files fail. Review-again uses those immutable bytes; it
+does not reopen a provider URL. The preview reports new/existing manga and
+chapters, new categories, history entries, unavailable sources and content
+conflicts. Excluding conflicting sources requires an explicit toggle and a new
+preview before the restore button can proceed.
+
+The preview is non-Codable and issued only by its LibraryStore. It retains the
+validated merge plan, input SHA-256, store owner, durable epoch, policy, bounded
+domain/identity/configuration digest and SQLite change stamp. Another store,
+changed settings/identities, remove/re-add, save/revert and concurrent database
+writes invalidate it. Cancellation checks span decoding, planning and writes.
+The target and final union must satisfy the same domain limits; oversized
+unions fail rather than truncate. Dependency records additionally have row,
+column and cumulative byte bounds and strict SQLite storage-type validation.
+
+The app reserves its shared exclusive operation synchronously. Open readers,
+pending writes and active source operations must finish first. Commit also
+rejects running durable scans and working/prepared downloads without recovering
+or cancelling their owners. Under `BEGIN IMMEDIATE`, the Store revalidates the
+approved state, writes the plan and rotates its durable epoch atomically. A
+failure or pre-commit cancellation rolls back all effects. Successful COMMIT
+causes shared scene invalidation while exclusion is still held, even if a late
+cancellation arrives; an old preview cannot be reused.
+
+| Data | Conservative merge rule |
+| --- | --- |
+| Manga | Match exact source ID and UTF-8 URL; keep existing metadata, dates and initialization; OR library membership. New rows retain archive scalars. |
+| Categories | Match existing domain name rules, retain saved order/flags, append new names after the largest saved order; reject overflow. |
+| Membership | Union mapped category references. |
+| Chapters | Match exact UTF-8 URL under the manga; preserve saved metadata/currentness, OR read/bookmark, take the greater page position. Archive-only chapters under an established catalog remain hidden. |
+| History | Greater last-read timestamp and duration independently; durations are never added. |
+| Discovery | Keep saved baseline/known records. New imported knowledge has no detected timestamp and creates no new Updates. |
+| Downloads and authority | Preserve local jobs/files/receipts, repository trust, installations and executable settings. Never import them. |
+
+Repeated imports are idempotent for domain data; each successful restore still
+rotates the epoch to invalidate retained targets. Native archive source labels
+are descriptive and are not persisted as runtime configuration.
+
+FoolSlide manga require the same exact deployment URL as the saved content
+binding. Different or unresolvable populated namespaces conflict and are either
+blocked or explicitly excluded. An empty target may adopt a known deployment
+as content provenance only; an unresolved Foo namespace stays inert. An
+unknown non-Foo source with unresolved provenance cannot establish an inert
+namespace and is reported as a conflict. These rules do not enable a source
+or grant new request/signing authority.
+
 ## Verification and remaining work
 
 The [dated verification record](VERIFICATION-2026-10-04-NATIVE-BACKUPS.md) and
@@ -127,8 +178,8 @@ fidelity, precision, hidden rows, history beyond the UI limit, cancellation,
 malformed storage and budget boundaries. They are not backups from an installed
 iOS app and do not establish Files interaction or device memory/performance.
 
-Restoration still requires an immutable preview tied to input/store state, an
-atomic conservative merge, content-binding conflict handling and protection
-against stale readers/source operations. Mihon import additionally needs explicit
-URL/source adapters and coverage reporting. None of these operations is enabled
-by merely decoding a native document.
+The [native restore verification](VERIFICATION-2026-10-04-NATIVE-RESTORE.md)
+records persistence, file and operation-lifetime regressions. Files-provider
+interaction, physical multiwindow behavior and large-library device memory
+remain unmeasured. Mihon import still needs explicit URL/source adapters and
+coverage reporting; decoding a Mihon DTO does not authorize native restoration.

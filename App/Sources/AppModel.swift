@@ -38,6 +38,12 @@ struct LibraryPresentationState: Equatable {
     let isExclusive: Bool
 }
 
+struct LibraryRestoreFailure: Identifiable {
+    let id = UUID()
+    let previewID: UUID
+    let message: String
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     let store: LibraryStore
@@ -52,6 +58,9 @@ final class AppModel: ObservableObject {
     let libraryOperations: LibraryOperationCoordinator
     @Published private(set) var libraryPresentation: LibraryPresentationState
     @Published var libraryOperationError: String?
+    @Published var libraryRestoreNotice: String?
+    @Published private(set) var libraryRestoreFailure: LibraryRestoreFailure?
+    private var libraryRestoreTask: Task<LibraryRestoreCompletion, Error>?
     private let durableDatabaseAvailable: Bool
     private let downloadContentStore: DownloadContentStore?
     private var downloadService: LibraryDownloadService?
@@ -311,6 +320,66 @@ final class AppModel: ObservableObject {
             worker.cancel()
         }
     }
+
+    func readLibraryRestoreFile(_ url: URL) async throws -> Data {
+        try requireLibraryOperation()
+        let worker = Task.detached(priority: .userInitiated) {
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            return try LibraryBackupFileReader.read(url)
+        }
+        return try await withTaskCancellationHandler {
+            let data = try await worker.value
+            try Task.checkCancellation()
+            return data
+        } onCancel: { worker.cancel() }
+    }
+
+    func previewLibraryRestore(_ data: Data, excludeConflicts: Bool) async throws -> LibraryRestorePreview {
+        try requireLibraryOperation()
+        guard durableDatabaseAvailable else { throw LibraryRestoreError.storageUnavailable }
+        let store = self.store
+        let worker = Task.detached(priority: .userInitiated) {
+            try await store.previewLibraryRestore(from: data, excludingConflictedSources: excludeConflicts)
+        }
+        return try await withTaskCancellationHandler {
+            let preview = try await worker.value
+            try Task.checkCancellation()
+            return preview
+        } onCancel: { worker.cancel() }
+    }
+
+    /// Reserve exclusion synchronously, outside an ordinary operation. AppModel
+    /// owns the worker through commit/publication even when the old sheet closes.
+    func beginLibraryRestore(_ preview: LibraryRestorePreview, expected: LibraryPresentationGeneration) throws {
+        guard durableDatabaseAvailable else { throw LibraryRestoreError.storageUnavailable }
+        guard libraryRestoreTask == nil else { throw LibraryOperationError.exclusiveInProgress }
+        let operation = try libraryOperations.startLibraryRestore(store: store, preview: preview, expected: expected)
+        libraryRestoreTask = operation
+        libraryRestoreNotice = nil
+        libraryRestoreFailure = nil
+        Task { @MainActor in
+            do {
+                let completion = try await operation.value
+                let report = completion.report
+                libraryRestoreNotice = "Backup restored: \(report.summary.newManga) new manga, \(report.summary.existingManga) existing manga merged."
+                if !completion.presentationPublished {
+                    libraryOperationError = "The backup was restored. Reopen the library to refresh its display."
+                }
+            } catch is CancellationError {
+                libraryRestoreNotice = "Restore cancelled. Your library was kept unchanged."
+                libraryRestoreFailure = .init(previewID: preview.id, message: "Restore cancelled. Review the backup again before restoring.")
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription
+                    ?? "The backup could not be restored. Your library was kept unchanged."
+                libraryRestoreFailure = .init(previewID: preview.id, message: message)
+                libraryRestoreNotice = message
+            }
+            libraryRestoreTask = nil
+        }
+    }
+
+    func cancelLibraryRestore() { libraryRestoreTask?.cancel() }
 
     func refreshLibrary() async {
         guard acceptsLibraryOperation() else { return }
