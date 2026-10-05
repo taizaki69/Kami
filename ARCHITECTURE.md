@@ -1,5 +1,9 @@
 # Architecture
 
+Reviewed **2026-10-04** against `main` at `a479806`. This document describes
+that snapshot. The [open continuation stack](docs/PROJECT_STATUS.md) adds
+operation coordination, stronger persistence and daily-use features.
+
 Kami is three layers with hard boundaries. Compatibility hacks live in
 MihonCompatKit, never in the app.
 
@@ -40,11 +44,13 @@ MihonCompatKit, never in the app.
 ## Key decisions
 
 - **`KamiSource` is the seam.** Native sources and the pinned BatCave, Kawii,
-  MangaMelon, Baozi Manhua, TuttoAnimeManga, and Mangas-Origines.fr DEX-backed
+  MangaMelon, Baozi Manhua, TuttoAnimeManga, Mangas-Origines.fr, Komikcast,
+  Yomu, EternalMangas and DocTruyen3Q DEX-backed
   sources implement the same protocol; the registry hides which is which.
   Future profiles must preserve this boundary.
   The protocol mirrors tachiyomix semantics (popular/latest/search/details/
-  chapters/pages + image requests with headers) so the bridge is 1:1.
+  chapters/pages + image requests with headers); the implemented bridge is
+  limited to the measured profiles and bounded model surfaces.
 - **Compat kit stays host-portable.** No UIKit/Combine/URLSession-only APIs
   without `#if canImport` guards. This is what allowed real verification on
   Windows during development and keeps the parsers unit-testable anywhere.
@@ -133,7 +139,8 @@ MihonCompatKit, never in the app.
 The executable catalog is deliberately exact rather than heuristic. It
 currently contains BatCave 1.6.9, Kawii Manga 1.6.1, MangaMelon 1.6.1,
 Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10, Mangas-Origines.fr 1.6.58,
-Komikcast/VoraToon 1.6.83, and Yomu Comics/SSSCanlator 1.6.59.
+Komikcast/VoraToon 1.6.83, Yomu Comics/SSSCanlator 1.6.59, EternalMangas
+1.6.28 and DocTruyen3Q 1.6.38 (ten profiles).
 Baozi is admitted only when
 the APK's SHA-256
 (`7e8c99fb75fd5e25775c2870bd687f284d3b3ef5fcbd219350b5ce35bd79cbec`), signer
@@ -165,8 +172,10 @@ Komikcast and Yomu add exact dynamic genre filter paths. Yomu also proves
 its `pt-BR` metadata, Next.js RSC extraction, URL-shaped search, decoy-list
 rejection, and 30-result pagination. Both preserve the same exact hash, signer,
 manifest, and source-ID gates; Yomu uses the ordinary page-URL image path.
-The remaining 11 current lib 1.6 measurement artifacts are measurement
-evidence, not automatic admission or a compatibility percentage. For the
+The 11 artifacts labelled `measurement` include EternalMangas and DocTruyen3Q,
+which already have exact profiles and offline runtime tests. The role labels
+lag the executable catalog; neither a label nor the static audit grants
+admission or establishes a compatibility percentage. For the
 downloaded path, the exact source-ID set is checked before DEX construction
 and again after
 profile construction; `SourceRegistry` removal is package-owner scoped, so
@@ -175,11 +184,12 @@ disabling one extension cannot remove another package's source ID.
 The locked corpus currently contains 27 artifacts: 10 execution, 11 measurement,
 and 6 AOSP conformance fixtures; 19 are current lib 1.6 artifacts. The current
 measurement audit covers 11/11 artifacts and reports 7 structural candidates,
-4 stable-wrapper blockers, 432 unique unregistered external method surfaces,
+4 stable-wrapper blockers, 387 unique unregistered external method surfaces,
 0 omitted invocations, and 0 unsupported opcodes. Static ranking guides the
-next probe without granting admission. Current Windows verification is
-262/262 MihonCompatKit tests and 19/19 portable KamiCore tests; exact-head
-macOS/iOS evidence is recorded in HANDOFF.md.
+next probe without granting admission. The 262 compatibility / 19 portable
+core test totals belong to the historical reader-retry checkpoint; see
+[project status](docs/PROJECT_STATUS.md) for dated continuation evidence and
+[BUILDING.md](BUILDING.md) for verification commands.
 
 ## Concurrency model
 - UI: SwiftUI + `@MainActor` observable models.

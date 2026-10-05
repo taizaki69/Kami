@@ -1,11 +1,15 @@
 # Extension Compatibility Analysis
 
-**Date:** Ecosystem research verified 2026-08-21; local corpus measurement updated 2026-09-18
-**Scope:** Current (2025–2026) Mihon extension ecosystem, verified against primary sources.
+**Research date:** 2026-08-21. External ecosystem statements below describe
+that historical review, not a fresh survey of moving upstream branches.
+**Local review:** 2026-10-04 against Kami main `a479806`; backup claims corrected
+from pinned producer evidence. See [project status](PROJECT_STATUS.md) for the
+unmerged continuation.
 
 The ecosystem research was verified on 2026-08-21 against the repositories
-listed in [Sources](#sources); the local corpus evidence in section 6.1 was
-remeasured on 2026-09-03. Where a claim could not be verified, it is marked
+listed in [Sources](#sources); section 6.1 now reflects the checked-in main
+catalog and static baseline. Recheck upstream before using historical version
+or dependency statements to make a new compatibility decision. Where a claim could not be verified, it is marked
 **unverified**.
 
 ---
@@ -183,16 +187,13 @@ Mihon's settings UI is now "Extension stores"; terminology renamed in 0.20.0
 
 ## 5. Backup format (`.tachibk`)
 
-Mihon backups are a **zstd-compressed protobuf** stream. Protobuf messages are
-generated with kotlinx.serialization.protobuf annotations
-(`data/backup/models/Backup*.kt`, `@ProtoNumber` field tags): `Backup` (backupManga,
-backupCategories, backupSources, backupPreferences, backupExtensionStores, …),
-`BackupManga` (url, title, artist, author, description, genre, status, chapters,
-categories, history, tracking, …), `BackupChapter` (url, name, scanlator,
-read, bookmark, lastPageRead, …), `BackupSource` (sourceId, name), `BackupHistory`.
-Full schema is codified in `Backup.kt` and per-model files. Import compatibility
-requires: protobuf wire decoding + zstd decompression + source-ID → installed
-extension mapping.
+The earlier zstd claim was incorrect. The pinned Mihon producer reviewed for
+[PR #14](https://github.com/taizaki69/Kami/pull/14) writes gzip-wrapped protobuf;
+its decoder accepts gzip or raw protobuf. Main's early parser and field table
+do not establish interoperability. The [backup guide](BACKUP_COMPATIBILITY.md)
+links the exact producer/decoder revisions, corrected contract and reference
+fixtures. Import additionally needs explicit source/URL mapping, coverage
+reporting and a transactional restoration flow; it is not just decompression.
 
 ## 6. Strategies assessed for iOS
 
@@ -249,24 +250,26 @@ simplest `ParsedHttpSource` shapes; cannot be the general strategy.
    opcode, and host-API coverage remain driven by the audit corpus.
    This is the long-running engineering track; see
    `EXTENSION_RUNTIME.md` for the staged plan and honest status.
-5. **Backup import** (.tachibk protobuf+zstd) independent of the runtime, so users
+5. **Backup import** (.tachibk gzip/raw protobuf) independent of the runtime, so users
    can migrate libraries before extension compat reaches their sources.
 
-### 6.1 Current local corpus measurement (2026-09-18)
+### 6.1 Reviewed main corpus and catalog (2026-10-04)
 
 The local Kami corpus now locks 27 APK artifacts: ten real Keiyoushi execution
-fixtures, 11 current lib 1.6 Keiyoushi measurement-only fixtures under
+fixtures, 11 current lib 1.6 Keiyoushi measurement-labelled fixtures under
 `Tests/corpus/measurement/`, and six AOSP apksig conformance fixtures. The
 current lib 1.6 total is 19 (eight execution fixtures plus the 11 measurement
 fixtures). The artifacts were selected by behavior family and shape, not as a
 statistical sample.
 
-The measurement artifacts are parsed, signature-verified for parser
-conformance, and statically audited only. Corpus membership never grants signer
-trust, admission, installation, or execution. The deterministic audit analyzed
-11/11 remaining measurement APKs with zero errors, found seven structural candidates and
+The static audit parses artifacts without executing them. Two fixtures still
+labelled measurement, EternalMangas and DocTruyen3Q, already have exact profiles
+and deterministic runtime suites; main therefore has ten current profiles.
+Corpus membership never grants signer trust, admission, installation or
+execution. See the [corpus guide](../Tests/corpus/README.md) for the role mismatch. The deterministic audit analyzed
+11/11 measurement-labelled APKs with zero errors, found seven structural candidates and
 four stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), and
-reported 432 unique unregistered external method surfaces with zero omitted
+reported 387 unique unregistered external method surfaces with zero omitted
 invocations and zero unsupported
 opcodes. These are prioritization results, not runtime compatibility proof.
 
@@ -373,7 +376,7 @@ remaining injected Baozi preference values.
 - No known iOS app executes Mihon APK extensions. Kami's differentiator (and risk)
   is committing to Strategy A/E.
 
-## 8. Bottom line
+## 8. Reviewed implementation boundary
 
 Unmodified-APK compatibility on iOS is **an effort-bounded problem, not a
 feasibility problem**. The blockers, honestly categorized:
@@ -383,11 +386,11 @@ feasibility problem**. The blockers, honestly categorized:
 | DEX parsing/analysis | **Done** (this repo, pure Swift) |
 | APK/manifest parsing | **Done** (pure Swift, incl. binary AXML) |
 | Repo index compatibility | **Done** (JSON + proto) |
-| Compatibility diagnostics | **Partial product surface**: exact sources capture the first typed stage-counted VM gap at the public VM boundary even when a nested host bridge catches/replaces it; unknown external fields fail closed unless explicitly modeled. `compat-audit gaps` emits a deterministic non-executing static/corpus priority report without paths or request data, and `compat-audit promote-gap` strictly converts the first canonical redacted runtime finding into a deterministic XCTest assertion seed. The current 11-artifact measurement run analyzed 11/11 with 0 errors, seven structural candidates, four stable-wrapper blockers, 432 unique unregistered external method surfaces, 0 omitted invocations, and 0 unsupported opcodes; app-facing export/share UX remains open |
-| DEX execution | **Partial M1/M2 plus eight pinned app-facing profiles work**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual entry and nested async selection under one instruction budget, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, stable public source-wrapper routing across measured R8 layouts, pinned constructors/getters, and BatCave, Kawii Manga, MangaMelon, Baozi, TuttoAnimeManga, Mangas-Origines.fr, Komikcast/VoraToon, and Yomu Comics popular/search/latest/details/chapters/pages execute through bounded async response delivery and exact compatibility models; MangaMelon, Baozi, and Mangas-Origines.fr additionally prove exact static filters, while Komikcast and Yomu prove bounded exact dynamic genre paths and their respective image headers; arbitrary dynamic filters and general downloaded-extension compatibility remain open |
+| Compatibility diagnostics | **Partial product surface**: exact sources capture the first typed stage-counted VM gap at the public VM boundary even when a nested host bridge catches/replaces it; unknown external fields fail closed unless explicitly modeled. `compat-audit gaps` emits a deterministic non-executing static/corpus priority report without paths or request data, and `compat-audit promote-gap` strictly converts the first canonical redacted runtime finding into a deterministic XCTest assertion seed. The current 11-artifact measurement run analyzed 11/11 with 0 errors, seven structural candidates, four stable-wrapper blockers, 387 unique unregistered external method surfaces, 0 omitted invocations, and 0 unsupported opcodes; app-facing export/share UX remains open |
+| DEX execution | **Partial M1/M2 plus ten pinned app-facing profiles work**: exact prototype dispatch, resolved reference/catch verification and runtime type checks, receiver-directed virtual entry and nested async selection under one instruction budget, maximally specific interface defaults, lexical class/interface super dispatch across parsed DEX graphs, class initialization, stable public source-wrapper routing across measured R8 layouts, pinned constructors/getters, and BatCave, Kawii Manga, MangaMelon, Baozi, TuttoAnimeManga, Mangas-Origines.fr, Komikcast/VoraToon, Yomu Comics, EternalMangas and DocTruyen3Q popular/search/latest/details/chapters/pages execute through bounded async response delivery and exact compatibility models; MangaMelon, Baozi, and Mangas-Origines.fr additionally prove exact static filters, while Komikcast and Yomu prove bounded exact dynamic genre paths and their respective image headers; arbitrary dynamic filters and general downloaded-extension compatibility remain open |
 | Kotlin/Java class library | **Measured tested subset**: core objects/strings, Kotlin ABI including query trimming/form encoding and bounded string/collection helpers, bounded lists/sets/maps and comparator sorting, structured coroutine lambdas, atomics/reflection, source filters with validated app-state reapplication, source-base constructors, bounded scalar preferences for Baozi, bounded OkHttp requests, a bounded application/network interceptor chain for source operations and source-scoped reader images, source-scoped async transport, response/body/Okio values including UTF-8/ByteString/Base64 request encoding, bounded Jsoup HTML/CSS including direct-child, sibling, attribute, `eachText`, and `:containsData` semantics, generated-serializer JSON encoding/decoding including defaults/longs/string memo objects, a measured locale/time-zone/Java-time subset, and reached `SManga`/`MangasPage`/`SChapter`/`SMangaUpdate`/`Page` models; bounded dynamic genre support is proven for the exact Komikcast and Yomu profiles; Komikcast uses a source-private in-memory virtual cache with logical zstd identity, while arbitrary dynamic filters, persistent preference UI/storage, native zstd semantics, Android bitmap banner transforms, additional DOM APIs, and the long tail remain open |
 | Cloudflare/WebView | Native WKWebView bridge design (see NETWORKING.md) |
-| Backup import | Proto decoding done; zstd decompression pending |
+| Backup import | Main has an early, incomplete decoder. Correct gzip/raw decoding is in open PR #14; native export is in #15. Source mapping and transactional restore remain open; see the backup guide |
 
 ## Sources
 

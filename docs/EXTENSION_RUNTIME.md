@@ -1,17 +1,21 @@
 # Extension Runtime — Measured Status and Staged Plan
 
-**Last updated:** 2026-09-18
+**Reviewed:** 2026-10-04 against `main` at `a479806`.
+The [project status](PROJECT_STATUS.md) records the separate unmerged
+continuation. Verification totals below are tied to historical checkpoints.
 
 ## Where we are
 
 Kami has crossed from DEX analysis into controlled execution. The partial M1
 interpreter runs synthetic conformance fixtures and progressively deeper paths
-from ten pinned execution-fixture APKs. Exact BatCave, Kawii Manga, MangaMelon,
+from ten execution-labelled APKs and two additional exact profiles whose
+fixtures remain labelled measurement. Exact BatCave, Kawii Manga, MangaMelon,
 Baozi Manhua, TuttoAnimeManga, Mangas-Origines.fr, Komikcast/VoraToon, and
-Yomu Comics profiles
+Yomu Comics, EternalMangas and DocTruyen3Q profiles
 now cross the app-facing `KamiSource` boundary end to end under deterministic
 offline fixtures. A separate set of 11 current lib 1.6
-APKs is locked for non-executing measurement only. This is not yet a complete verifier,
+APKs is also statically audited; it overlaps the exact catalog in
+EternalMangas and DocTruyen3Q because their role labels are stale. This is not yet a complete verifier,
 Java or Kotlin runtime, general tachiyomix source bridge, or arbitrary-extension
 implementation.
 
@@ -33,8 +37,8 @@ set before DEX construction, selects an exact measured profile, and
 postvalidates every source ID returned by construction against that set and the
 persisted admission. The current catalog contains exact BatCave 1.6.9, Kawii
 Manga 1.6.1, MangaMelon 1.6.1, Baozi Manhua 1.6.29, TuttoAnimeManga 1.6.10,
-Mangas-Origines.fr 1.6.58, Komikcast/VoraToon 1.6.83, and Yomu Comics 1.6.59
-profiles; an
+Mangas-Origines.fr 1.6.58, Komikcast/VoraToon 1.6.83, Yomu Comics 1.6.59,
+EternalMangas 1.6.28 and DocTruyen3Q 1.6.38 profiles; an
 authenticated but unmeasured extension is stored securely and left disabled
 rather than executed heuristically. `SourceRegistry` removal is package-owner
 scoped, so disabling one downloaded package cannot remove another package's
@@ -51,9 +55,11 @@ apksig conformance fixtures, this is 27 artifacts total, including 19 current
 lib 1.6 artifacts (eight execution plus 11 measurement). The measurement set is
 behavior-stratified, not statistical. The earlier 16-artifact measurement run
 occupied 1.24 MB (1,242,086 bytes) before Baozi moved into the execution role.
-Its artifacts are parsed, signature-verified for parser conformance, and
-statically audited only: membership never grants signer trust, admission,
-installation, or execution.
+The static audit parses artifacts without executing them; membership never
+grants signer trust, admission, installation or execution. The two catalogued
+profiles in that directory have separate deterministic runtime suites.
+[PR #10](https://github.com/taizaki69/Kami/pull/10) reconciles the roles and adds
+FoolSlide, but remains outside this main snapshot.
 
 `InterpretedExtensionPlanInspector` is now the reusable, non-executing discovery
 step shared by those exact profiles and `compat-audit plan`. It parses bounded
@@ -200,13 +206,13 @@ Measured real-APK behavior today:
   values can be injected into the exact profile, but the app UI/storage path is
   not wired. The pinned suite never performs live network I/O.
 
-The measurement-only static audit covers all 11/11 remaining current lib 1.6
+The non-executing static audit covers all 11/11 measurement-labelled lib 1.6
 artifacts with zero errors. It finds 7 structural candidates and four
-stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), plus 432
+stable-wrapper blockers (Komga, MangaPlus, NHentai.xxx, and XCOMIC), plus 387
 unique unregistered external method surfaces, zero omitted invocations, and zero
 unsupported opcodes. These are prioritization results, not a compatibility rate
-and not runtime evidence; the measurement APKs remain outside the exact profile
-catalog and are never admitted or executed by this path.
+and not runtime evidence. This audit never admits or executes APKs; exact
+EternalMangas and DocTruyen3Q execution is proven by separate tests.
 
 The iOS Browse screen now consumes that filter contract directly. A generic,
 transactional sheet renders every `SourceFilter` case, including nested groups;
@@ -222,7 +228,7 @@ stale results, and failed next-page requests no longer advance the page counter.
 Extension APK                       (untrusted)
    ↓ install + signature trust      durable, capability-gated
 content-addressed APK               persisted; re-authenticated on restore
-   ↓ exact profile catalog          BatCave + Kawii + MangaMelon + Baozi + TuttoAnimeManga + Mangas-Origines.fr + Komikcast + Yomu; measurement APKs fail closed
+   ↓ exact profile catalog          10 authenticated profiles; unmeasured profiles fail closed
    ↓ bounded ZIP/DEFLATE + CRC      working
 AndroidManifest.xml (AXML)          working
 classes*.dex                        validated structural parse
@@ -230,8 +236,8 @@ classes*.dex                        validated structural parse
    ↓ DexInterpreter                 partial M1; async frame resume works
    ↓ Java/Kotlin HostBridge         partial exact-signature M2 surface
    ↓ source-scoped HTTP transport   bounded async request/response slice works
-   ↓ bounded HTML/JSON bridges      all eight measured core source paths work
-   ↓ tachiyomix API bridge          eight exact pinned profiles work
+   ↓ bounded HTML/JSON bridges      ten measured core source paths work
+   ↓ tachiyomix API bridge          ten exact pinned profiles work
 KamiSource (Swift protocol)         native + admitted measured adapters work
    ↓ SourceRegistry / app / DB      restore, enable/disable, filtered Browse work
 ```
@@ -445,7 +451,7 @@ Signer-authenticated admission, durable installation/selection, exact-byte
 restoration, and capability-consuming source construction are now measured.
 Stable public `KeiSource` wrapper routing now works whether a wrapper remains on
 a local superclass or is vertically merged by R8 into the generated entry, and
-the second through eighth current extensions are proven end to end. Bounded
+the second through tenth current extensions are proven end to end. Bounded
 shared plan generation now replaces duplicated structural discovery, but it does not
 expand admission. A privacy-safe diagnostics layer now records the first typed
 VM linkage/opcode failure at the public VM boundary by app-facing stage, before
@@ -457,8 +463,8 @@ non-executing static corpus audit ranks unregistered external invocations,
 unsupported opcodes, and plan blockers. The static method list is deliberately a priority signal,
 not runtime proof: virtual/interface dispatch may resolve through a different
 receiver class. The broader current corpus is now locked and measured: all 11
-remaining measurement APKs analyzed without errors, with 7 structural
-candidates, four stable-wrapper blockers, 432 unique unregistered external
+measurement-labelled APKs analyzed without errors, with 7 structural
+candidates, four stable-wrapper blockers, 387 unique unregistered external
 method surfaces, zero omitted invocations, and zero unsupported opcodes.
 App-facing local report export remains open; the next compatibility step is
 evidence-driven promotion of the next locked structural candidate.
@@ -480,18 +486,26 @@ does not mean every method on that class is callable.
 The target is a signature-aware bridge from `HttpSource`, `SManga`, `SChapter`,
 `MangasPage`, filters, network helpers, and Jsoup helpers onto `KamiSource`.
 The exact BatCave, Kawii Manga, MangaMelon, Baozi Manhua, TuttoAnimeManga,
-Mangas-Origines.fr, Komikcast/VoraToon, and Yomu Comics profiles implement
+Mangas-Origines.fr, Komikcast/VoraToon, Yomu Comics, EternalMangas and
+DocTruyen3Q profiles implement
 their respective measured subsets with one actor per source owning its mutable
-interpreter and source-scoped transport. The app can construct any of the eight
+interpreter and source-scoped transport. The app can construct any of the ten
 profiles from a restored admission. Their shared structural plan is derived
-from the authenticated APK instead of copied into each profile. The 11
-measurement APKs remain non-executing. Automatic profile admission beyond the
+from the authenticated APK instead of copied into each profile. The static audit of the 11 measurement-labelled APKs is non-executing;
+the two catalogued fixtures in that directory also have separate runtime tests. Automatic profile admission beyond the
 exact catalog and the remaining APIs are still M3 work. Per-source network
 clients must own rate limits, cookies, and redacted tracing. The first pinned
 end-to-end adapter is tracked in
 [GitHub issue #2](https://github.com/taizaki69/Kami/issues/2).
 
 ### Current profile-specific boundary
+
+EternalMangas and DocTruyen3Q now also have exact core-operation suites.
+EternalMangas exposes an initial static filter list; DocTruyen3Q additionally
+proves dynamic genre refresh and edited genre/status search. Both use ordinary
+page-URL image requests. See the [matrix](EXTENSION_COMPATIBILITY_MATRIX.md)
+for their exact identities, suite links and limits. Main does not yet include
+FoolSlide or production persistent settings from the continuation.
 
 Baozi's scalar preferences and DEX `imageRequest(Page)` rewrite are measured
 capabilities of that exact APK profile. Production preference UI/persistence is
@@ -617,7 +631,11 @@ The factory refuses authenticated extensions outside its measured catalog, so
 this completed trust path still does not claim arbitrary extension
 compatibility.
 
-## Verification
+## Historical verification
+
+The runs below validate their named commits. For the open continuation, use
+[project status](PROJECT_STATUS.md); do not reuse older counts as current results.
+
 
 Exact reader-retry checkpoint `fd15d76` passes
 [Swift CI 35416577528](https://github.com/taizaki69/Kami/actions/runs/35416577528)
@@ -630,7 +648,7 @@ passes simulator and unsigned device, and
 [IPA Package 35416577529](https://github.com/taizaki69/Kami/actions/runs/35416577529)
 uploads the unsigned IPA. Physical-device interaction remains unverified.
 
-The current local Windows/Swift 6.3.3 suites pass 262/262 MihonCompatKit tests
+The historical pre-EternalMangas/DocTruyen3Q Windows/Swift 6.3.3 suites passed 262/262 MihonCompatKit tests
 and 19/19 portable KamiCore tests with the complete corpus present. The three
 `CorpusLockTests` regressions cover separated corpus roles, SHA/URL/fetcher and
 manifest/signature checks, and the deterministic static measurement baseline.
@@ -644,7 +662,7 @@ request models, transport and interceptor bounds, bytecode verification,
 repository parsing, compression, and the claimed operations of each profile.
 Yomu's five real-APK scenarios cover admission inputs, dynamic filters,
 listing boundaries, the full core-operation path, and page-image headers.
-The current portable KamiCore suite includes exact Baozi, TuttoAnimeManga,
+That portable KamiCore checkpoint includes exact Baozi, TuttoAnimeManga,
 Mangas-Origines.fr, Komikcast, and Yomu factory admission. Exact Mangas-Origines.fr
 implementation head `0abc7f8` historically passed all 28 macOS KamiCore
 tests, including

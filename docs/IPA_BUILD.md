@@ -1,41 +1,56 @@
 # Building the IPA
 
-Kami targets sideloading first (mission §33). Two paths:
+Reviewed **2026-10-04** against `main` at `a479806`. An unsigned IPA is a
+packaged device app; simulator compilation and a signed installation are
+separate steps. No physical-device installation is established by CI.
 
-## Prerequisites (macOS)
+## GitHub Actions
 
-- Xcode 15+ with an iOS SDK (`xcodebuild -version`)
-- xcodegen (`brew install xcodegen`)
-- For device signing: an Apple ID with a Development certificate and a
-  provisioning profile that includes `app.kami.reader` (free personal teams
-  work; app-signing-capable paid teams avoid the 7-day re-sign dance)
+The [IPA Package workflow](../.github/workflows/ipa.yml) builds Release for
+`generic/platform=iOS` with signing disabled, packages `Payload/Kami.app`, and
+uploads `Kami-unsigned-ipa`. Select the run for the intended PR head, check
+that the packaging/upload job passed, and download that run's artifact.
+See [project status](PROJECT_STATUS.md) for the verified continuation artifact.
 
-## Unsigned IPA (sign at install time)
+## Equivalent local unsigned build
 
-```bash
-bash scripts/bootstrap.sh          # generates Kami.xcodeproj via xcodegen
-bash scripts/package_ipa.sh        # → dist/Kami.ipa (unsigned)
-```
-
-Install with Sideloadly / AltStore / SideStore / TrollStore — they apply
-their own signing during installation.
-
-## Signed IPA (development team)
+On macOS with Xcode and XcodeGen, from the repository root:
 
 ```bash
-bash scripts/package_ipa.sh <TEAM_ID>
-# or: DEVELOPMENT_TEAM=<TEAM_ID> bash scripts/package_ipa.sh
+bash scripts/bootstrap.sh
+xcodebuild -project Kami.xcodeproj -scheme Kami \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -derivedDataPath derived CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
 ```
 
-`CODE_SIGN_STYLE=Automatic` + `DEVELOPMENT_TEAM` lets Xcode select the
-identity/profile. No credentials are embedded in the repository; they live
-in your keychain.
+Package the produced app without relying on the older helper:
 
-## Notes
+```bash
+(
+  set -euo pipefail
+  test -d derived/Build/Products/Release-iphoneos/Kami.app
+  mkdir -p dist
+  ipa_output="$(pwd)/dist/Kami-unsigned.ipa"
+  ipa_stage="$(mktemp -d)"
+  trap 'rm -rf "$ipa_stage"' EXIT
+  mkdir "$ipa_stage/Payload"
+  cp -R derived/Build/Products/Release-iphoneos/Kami.app "$ipa_stage/Payload/"
+  rm -f "$ipa_output"
+  cd "$ipa_stage"
+  zip -qry "$ipa_output" Payload
+)
+```
 
-- The simulator route (`bash scripts/build.sh simulator`) produces a `.app` for
-  simulator use, not an installable IPA.
-- No placeholder IPAs: `package_ipa.sh` fails loudly if the `.app` was not
-  produced. GitHub Actions has exercised the unsigned generic-device build and
-  uploaded the resulting `Kami-unsigned-ipa` artifact. A signed physical-device
-  install remains intentionally user-owned.
+`scripts/package_ipa.sh` in the reviewed main has unsigned-suffix and relative
+output-path failures, plus an obsolete `PackageApplication` path. Its repair
+is tracked in [TODO.md](../TODO.md); the independent CI workflow does not call
+that helper. `scripts/build.sh simulator` produces a simulator `.app`, not a
+device IPA.
+
+## Signing and device validation
+
+Use your own signing identity and provisioning through Xcode or a signing
+workflow you control. The app bundle ID is `app.kami.reader`. Signing does not
+prove a successful installation or reader interaction; record those checks
+separately. Keep certificates, profiles, passwords and account secrets out of
+the repository.
