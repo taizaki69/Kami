@@ -944,6 +944,16 @@ final class AppModel: ObservableObject {
         return registry.revision(for: sourceID)
     }
 
+    /// Capture only ready published registrations. Busy or unauthenticated
+    /// configurations are not an invitation to reconstruct/enable a source.
+    func searchRegistrations() -> [SourceRegistrationSnapshot] {
+        sources.compactMap { source in
+            guard case let .available(registration, _) = downloadSourceContext(sourceID: source.id)
+            else { return nil }
+            return registration
+        }
+    }
+
     func isSourceCurrent(id: Int64, revision: UInt64) -> Bool {
         sourceRevision(for: id) == revision && source(id: id) != nil
     }
