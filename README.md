@@ -124,6 +124,15 @@ more source operations execute. Regex worst-case execution time, the broader
 Kotlin/Java/Android API surface, arbitrary dynamic filters and general Android
 image transforms remain open.
 
+Extensions → Compatibility diagnostics displays local reports from enabled
+extension instances. It lists typed runtime gaps and occurrence counts, then
+lets the user save a bounded, deterministic report through Files. The report
+contains package/version and sanitized runtime symbols; browsing queries,
+requests, credentials and library contents are not inputs to the exporter.
+Reports disclose omitted findings and expire with their source instance.
+No report is sent automatically; no findings is not proof of full compatibility.
+See [diagnostics and export](docs/COMPATIBILITY_DIAGNOSTICS.md).
+
 The lock contains 27 artifacts: eleven exact current execution profiles, two
 legacy constructor fixtures, eight measurement-only APKs, and six AOSP signing
 conformance fixtures. Historical paths under `measurement/` are retained; the

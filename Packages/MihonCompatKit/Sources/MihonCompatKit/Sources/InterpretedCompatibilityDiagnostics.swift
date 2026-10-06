@@ -173,16 +173,16 @@ public final class InterpretedCompatibilityRecorder: @unchecked Sendable {
         guard let error = error as? VMError else { return nil }
         switch error {
         case let .unresolvedClass(descriptor):
-            return .unresolvedClass(InterpretedCompatibilityRedaction.safeDEXSymbol(descriptor))
+            return .unresolvedClass(InterpretedCompatibilityRedaction.safeType(descriptor))
         case let .unresolvedMethod(classDescriptor, signature):
             return .unresolvedMethod(
-                classDescriptor: InterpretedCompatibilityRedaction.safeDEXSymbol(classDescriptor),
-                signature: InterpretedCompatibilityRedaction.safeDEXSymbol(signature)
+                classDescriptor: InterpretedCompatibilityRedaction.safeType(classDescriptor),
+                signature: InterpretedCompatibilityRedaction.safeMethod(signature)
             )
         case let .unresolvedField(classDescriptor, name):
             return .unresolvedField(
-                classDescriptor: InterpretedCompatibilityRedaction.safeDEXSymbol(classDescriptor),
-                name: InterpretedCompatibilityRedaction.safeDEXSymbol(name)
+                classDescriptor: InterpretedCompatibilityRedaction.safeType(classDescriptor),
+                name: InterpretedCompatibilityRedaction.safeMember(name)
             )
         case let .unsupportedOpcode(opcode):
             return .unsupportedOpcode(opcode)
@@ -390,7 +390,7 @@ public enum InterpretedCompatibilityRegressionPromotion {
     ) throws -> InterpretedCompatibilitySurface {
         switch kind {
         case "class":
-            guard summary == InterpretedCompatibilityRedaction.safeDEXSymbol(summary) else {
+            guard summary == InterpretedCompatibilityRedaction.safeType(summary) else {
                 throw InterpretedCompatibilityRegressionPromotionError.invalidReport
             }
             return .unresolvedClass(summary)
@@ -400,9 +400,10 @@ public enum InterpretedCompatibilityRegressionPromotion {
             }
             let classDescriptor = String(summary[..<separator.lowerBound])
             let member = String(summary[separator.upperBound...])
-            guard classDescriptor == InterpretedCompatibilityRedaction.safeDEXSymbol(
-                classDescriptor
-            ), member == InterpretedCompatibilityRedaction.safeDEXSymbol(member) else {
+            let safeMember = kind == "method" ? InterpretedCompatibilityRedaction.safeMethod(member)
+                : InterpretedCompatibilityRedaction.safeMember(member)
+            guard classDescriptor == InterpretedCompatibilityRedaction.safeType(classDescriptor),
+                  member == safeMember else {
                 throw InterpretedCompatibilityRegressionPromotionError.invalidReport
             }
             if kind == "method" {
@@ -437,6 +438,76 @@ public enum InterpretedCompatibilityRegressionPromotion {
 }
 
 enum InterpretedCompatibilityRedaction {
+    private static let redacted = "<redacted-symbol>"
+
+    /// A conservative ASCII subset of DEX descriptors/member names, used only
+    /// for diagnostic output, never bytecode admission. Alphabet checks alone
+    /// cannot distinguish a slash-delimited local path from a DEX symbol.
+    static func safeType(_ value: String) -> String {
+        guard value != redacted else { return value }
+        guard safeDEXSymbol(value) == value else { return redacted }
+        let bytes = Array(value.utf8)
+        var cursor = 0
+        return type(bytes, cursor: &cursor, allowVoid: false) && cursor == bytes.count ? value : redacted
+    }
+
+    static func safeMember(_ value: String) -> String {
+        guard value != redacted else { return value }
+        guard safeDEXSymbol(value) == value, member(Array(value.utf8)[...]) else { return redacted }
+        return value
+    }
+
+    static func safeMethod(_ value: String) -> String {
+        guard value != redacted else { return value }
+        guard safeDEXSymbol(value) == value else { return redacted }
+        let bytes = Array(value.utf8)
+        guard let open = bytes.firstIndex(of: 0x28), member(bytes[..<open]) else { return redacted }
+        var cursor = open + 1
+        while cursor < bytes.count, bytes[cursor] != 0x29 {
+            guard type(bytes, cursor: &cursor, allowVoid: false) else { return redacted }
+        }
+        guard cursor < bytes.count else { return redacted }
+        cursor += 1
+        return type(bytes, cursor: &cursor, allowVoid: true) && cursor == bytes.count ? value : redacted
+    }
+
+    private static func simple(_ bytes: ArraySlice<UInt8>) -> Bool {
+        !bytes.isEmpty && bytes.allSatisfy {
+            (0x30...0x39).contains($0) || (0x41...0x5a).contains($0)
+                || (0x61...0x7a).contains($0) || $0 == 0x24 || $0 == 0x2d || $0 == 0x5f
+        }
+    }
+
+    private static func member(_ bytes: ArraySlice<UInt8>) -> Bool {
+        if bytes.first == 0x3c, bytes.last == 0x3e { return simple(bytes.dropFirst().dropLast()) }
+        return simple(bytes)
+    }
+
+    private static func type(_ bytes: [UInt8], cursor: inout Int, allowVoid: Bool) -> Bool {
+        var dimensions = 0
+        while cursor < bytes.count, bytes[cursor] == 0x5b {
+            dimensions += 1
+            cursor += 1
+            guard dimensions <= 255 else { return false }
+        }
+        guard cursor < bytes.count else { return false }
+        let code = bytes[cursor]
+        cursor += 1
+        if code == 0x56 { return allowVoid && dimensions == 0 }
+        if [0x5a, 0x42, 0x53, 0x43, 0x49, 0x4a, 0x46, 0x44].contains(code) { return true }
+        guard code == 0x4c else { return false }
+        var start = cursor
+        while cursor < bytes.count {
+            if bytes[cursor] == 0x2f || bytes[cursor] == 0x3b {
+                guard simple(bytes[start..<cursor]) else { return false }
+                if bytes[cursor] == 0x3b { cursor += 1; return true }
+                start = cursor + 1
+            }
+            cursor += 1
+        }
+        return false
+    }
+
     static func safePackage(_ value: String) -> String {
         guard !value.isEmpty, value.utf8.count <= 512,
               value.utf8.allSatisfy({ byte in

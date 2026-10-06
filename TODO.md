@@ -6,7 +6,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-05
 
 The full native-reader and compatibility objective remains active. The current
-continuation adds global search across enabled sources, with progressive groups,
+continuation exposes bounded local compatibility diagnostics and user-selected
+Files export, with typed-symbol validation and explicit loss accounting. It
+follows global search across enabled sources, with progressive groups,
 bounded concurrent queries, cancellation drainage and guarded source navigation.
 It follows tiled drawing and aspect-aware long-page resolution, plus
 hosted simulator rendering regressions. The bounded source bitmap still decodes
@@ -361,13 +363,15 @@ must not be used as evidence for the current commit.
 - [~] Production preference UI and persistence: FoolSlide has a closed, measured
       URL/adult schema and an authenticated SQLite configuration service in the
       current continuation. Other profiles retain their measured defaults.
-- [~] Privacy-safe compatibility telemetry — typed runtime class/method/field/
+- [x] Local compatibility diagnostics — typed runtime class/method/field/
       opcode failures are stage-deduplicated without arbitrary error strings;
       the first typed gap is retained below caught host-bridge fallbacks,
       external fields fail closed unless explicitly modeled, `compat-audit
       gaps` emits a deterministic path-free static/corpus priority report, and
       `compat-audit promote-gap` emits a deterministic focused XCTest seed.
-      App-facing user-selected export/share remains —
+      Extensions now exposes per-source inspection and user-selected Files
+      export, with bounded canonical reports, explicit omissions and conservative
+      typed-symbol validation. No automatic uploads or generic error logs —
       [#4](https://github.com/taizaki69/Kami/issues/4)
 - [~] Verify bounded gzip/raw backup decoding against the Kotlin serializer;
       complete native export, previewed restore and source-identity handling.
@@ -405,7 +409,10 @@ must not be used as evidence for the current commit.
 ## P2 — Polish
 
 - [ ] Local CBZ/ZIP source
-- [ ] Diagnostics screen + exportable logs (redacted)
+- [~] Diagnostics screen: per-source runtime compatibility reports and explicit
+      Files export are implemented. Broader app/storage/download diagnostics
+      and Apple Files-provider interaction checks remain open; see
+      [diagnostics](docs/COMPATIBILITY_DIAGNOSTICS.md).
 - [ ] iPad dual-page reader
 - [ ] Performance pass vs docs targets (launch, 5k-library, webtoon 500p)
 

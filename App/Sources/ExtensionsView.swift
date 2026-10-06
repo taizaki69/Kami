@@ -18,6 +18,13 @@ struct ExtensionsView: View {
         let presentation = model.libraryPresentation
         NavigationStack {
             List {
+                Section {
+                    NavigationLink {
+                        CompatibilityDiagnosticsView(presentation: presentation.generation)
+                    } label: {
+                        Label("Compatibility diagnostics", systemImage: "stethoscope")
+                    }
+                }
                 if let errorText {
                     notice(errorText, color: .orange)
                 }

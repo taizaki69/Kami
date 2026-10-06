@@ -4,7 +4,25 @@ Last updated: 2026-10-05 (America/Lima)
 
 ## Canonical continuation — 2026-10-05
 
-The active branch is `assistant/global-search-20261005`, based on
+The active branch is `assistant/compatibility-diagnostics-20261005`, based on
+`bc6f03e798728b7813f931f83c7d455764a02262` from
+[PR #27](https://github.com/taizaki69/Kami/pull/27), ready and unmerged. That
+base passed Linux 372 Compat + 416 Core/SQLite, macOS 372 Compat + 428 Core,
+simulator/device compilation, both hosted renderer tests and unsigned IPA,
+with identical head/CI trees. This increment exposes runtime diagnostics in
+Extensions and user-selected Files export. It strengthens typed-symbol output
+validation, preserves canonical regression-promotion input, accounts for export
+omissions and captures reports off-main under revocable registration ownership.
+See [diagnostics](docs/COMPATIBILITY_DIAGNOSTICS.md) and
+[verification](docs/VERIFICATION-2026-10-05-COMPATIBILITY-DIAGNOSTICS.md).
+Checkpoints are in `.git/checkpoints/20261005-compatibility-diagnostics/`.
+The full reader/compatibility objective remains active; broader diagnostics,
+Files-provider interaction and the other TODOs remain open. Publish and verify
+autonomously; keep PRs unmerged.
+
+## Earlier global-search continuation — 2026-10-05
+
+The preceding branch was `assistant/global-search-20261005`, based on
 `230f1de51687234ab0042cb96bcfdd11c887f208` from
 [PR #26](https://github.com/taizaki69/Kami/pull/26), ready and unmerged. That
 base passed Linux 372 Compat + 405 Core/SQLite, macOS 372 Compat + 417 Core,

@@ -946,12 +946,24 @@ final class AppModel: ObservableObject {
 
     /// Capture only ready published registrations. Busy or unauthenticated
     /// configurations are not an invitation to reconstruct/enable a source.
-    func searchRegistrations() -> [SourceRegistrationSnapshot] {
+    func readySourceRegistrations() -> [SourceRegistrationSnapshot] {
         sources.compactMap { source in
             guard case let .available(registration, _) = downloadSourceContext(sourceID: source.id)
             else { return nil }
             return registration
         }
+    }
+
+    func prepareCompatibilityReport(registration: SourceRegistrationSnapshot) async throws -> SourceCompatibilityReport {
+        try requireLibraryOperation()
+        guard readySourceRegistrations().contains(where: { $0.registrationID == registration.registrationID })
+        else { throw CancellationError() }
+        let report = try await SourceCompatibilityDiagnostics.prepare(registration: registration)
+        try requireLibraryOperation()
+        try Task.checkCancellation()
+        guard readySourceRegistrations().contains(where: { $0.registrationID == registration.registrationID })
+        else { throw CancellationError() }
+        return report
     }
 
     func isSourceCurrent(id: Int64, revision: UInt64) -> Bool {
