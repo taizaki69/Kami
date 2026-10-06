@@ -63,7 +63,10 @@ public final class SourceDiscoveryStore {
         self.init(read: {
             let handle: FileHandle
             do { handle = try FileHandle(forReadingFrom: fileURL) }
-            catch let error as CocoaError where error.code == .fileReadNoSuchFile { return nil }
+            catch {
+                guard Self.isMissingFile(error) else { throw error }
+                return nil
+            }
             defer { try? handle.close() }
             var data = Data()
             let limit = SourceDiscoveryPreferences.maximumBytes + 1
@@ -82,6 +85,18 @@ public final class SourceDiscoveryStore {
 
     public func snapshot() -> SourceDiscoverySelectionSnapshot {
         .init(preferences: state.preferences, scope: scope)
+    }
+
+    // Foundation's file-handle open reports absence through Cocoa on some
+    // platforms and POSIX on others. Only these explicit absence codes mean
+    // a fresh selection; permission/corruption/unknown errors stay closed.
+    nonisolated static func isMissingFile(_ error: Error) -> Bool {
+        let value = error as NSError
+        if value.domain == NSCocoaErrorDomain {
+            return value.code == CocoaError.fileNoSuchFile.rawValue
+                || value.code == CocoaError.fileReadNoSuchFile.rawValue
+        }
+        return value.domain == NSPOSIXErrorDomain && value.code == Int(POSIXErrorCode.ENOENT.rawValue)
     }
 
     public func save(_ preferences: SourceDiscoveryPreferences, expectedRevision: UUID) throws {

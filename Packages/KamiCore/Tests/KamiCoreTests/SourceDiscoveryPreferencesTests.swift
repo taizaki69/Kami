@@ -100,19 +100,44 @@ final class SourceDiscoveryPreferencesTests: XCTestCase {
 
     @MainActor
     func testAtomicFilePersistsSelectionAcrossReopenIncludingNone() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let file = directory.appendingPathComponent("source-selection.json")
-        let store = SourceDiscoveryStore(fileURL: file)
-        XCTAssertEqual(store.state.preferences, .all)
-        XCTAssertFalse(store.state.requiresRecovery)
-        let chosen = try SourceDiscoveryPreferences(sourceIDs: [-8, 99], languages: ["PT-br"])
-        try store.save(chosen, expectedRevision: store.state.revision)
-        XCTAssertEqual(try Data(contentsOf: file), try chosen.encoded())
-        let reopened = SourceDiscoveryStore(fileURL: file)
-        XCTAssertEqual(reopened.state.preferences, chosen)
-        try reopened.save(.none, expectedRevision: reopened.state.revision)
-        XCTAssertEqual(SourceDiscoveryStore(fileURL: file).state.preferences, .none)
+        for existingParent in [false, true] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            if existingParent { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
+            let file = directory.appendingPathComponent("source-selection.json")
+            do {
+                let handle = try FileHandle(forReadingFrom: file)
+                try handle.close()
+                XCTFail("The fixture file must not exist before first launch")
+            } catch {
+                let failure = error as NSError
+                XCTAssertTrue(SourceDiscoveryStore.isMissingFile(error),
+                    "Unrecognized missing-file error: \(failure.domain)/\(failure.code)")
+            }
+            let store = SourceDiscoveryStore(fileURL: file)
+            XCTAssertEqual(store.state.preferences, .all)
+            XCTAssertFalse(store.state.requiresRecovery)
+            let chosen = try SourceDiscoveryPreferences(sourceIDs: [-8, 99], languages: ["PT-br"])
+            try store.save(chosen, expectedRevision: store.state.revision)
+            XCTAssertEqual(try Data(contentsOf: file), try chosen.encoded())
+            let reopened = SourceDiscoveryStore(fileURL: file)
+            XCTAssertEqual(reopened.state.preferences, chosen)
+            try reopened.save(.none, expectedRevision: reopened.state.revision)
+            XCTAssertEqual(SourceDiscoveryStore(fileURL: file).state.preferences, .none)
+        }
+    }
+
+    func testMissingFileCodesAreRecognizedWithoutTreatingOtherReadFailuresAsAbsence() {
+        for error: Error in [CocoaError(.fileNoSuchFile), CocoaError(.fileReadNoSuchFile), POSIXError(.ENOENT)] {
+            XCTAssertTrue(SourceDiscoveryStore.isMissingFile(error))
+        }
+        let unknownWithMissingUnderlying = NSError(domain: NSCocoaErrorDomain,
+            code: CocoaError.fileReadUnknown.rawValue, userInfo: [NSUnderlyingErrorKey: POSIXError(.ENOENT)])
+        for error: Error in [CocoaError(.fileReadNoPermission), CocoaError(.fileReadCorruptFile),
+                             POSIXError(.EACCES), POSIXError(.EIO), unknownWithMissingUnderlying,
+                             NSError(domain: "unrelated", code: Int(POSIXErrorCode.ENOENT.rawValue))] {
+            XCTAssertFalse(SourceDiscoveryStore.isMissingFile(error))
+        }
     }
 
     @MainActor
