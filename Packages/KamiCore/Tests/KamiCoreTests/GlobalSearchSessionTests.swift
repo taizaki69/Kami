@@ -45,7 +45,7 @@ final class GlobalSearchSessionTests: XCTestCase {
     private struct Source: KamiSource {
         let id: Int64
         var name: String { "Source \(id)" }
-        let language = "en"
+        var language = "en"
         let baseURL = "https://fixture.invalid"
         let fetch: @Sendable (Call) async throws -> MangasPageCompat
         func getSearchManga(page: Int, query: String, filters: [SourceFilter]) async throws -> MangasPageCompat {
@@ -68,9 +68,144 @@ final class GlobalSearchSessionTests: XCTestCase {
         func getPageList(chapter: SChapterCompat) async throws -> [PageCompat] { [] }
     }
 
-    private func snapshot(_ id: Int64, scope: SourceRequestScope = .init(),
+    private func snapshot(_ id: Int64, language: String = "en", scope: SourceRequestScope = .init(),
                           fetch: @escaping @Sendable (Call) async throws -> MangasPageCompat) -> SourceRegistrationSnapshot {
-        .init(source: Source(id: id, fetch: fetch), revision: 1, origin: .native, scope: scope)
+        .init(source: Source(id: id, language: language, fetch: fetch), revision: 1, origin: .native, scope: scope)
+    }
+
+    @MainActor
+    private func selectionStore(_ preferences: SourceDiscoveryPreferences = .all) throws -> SourceDiscoveryStore {
+        var bytes = try preferences.encoded()
+        return .init(read: { bytes }, write: { bytes = $0 })
+    }
+
+    @MainActor
+    func testSelectionFiltersBeforeSourceLimitAndOnlyChosenLanguagesReceiveTheQuery() async throws {
+        let selection = try selectionStore(.init(sourceIDs: [2, 5, 80], languages: ["pt-BR"]))
+        let registrations = (1...90).map { value in
+            snapshot(Int64(value), language: value % 2 == 0 ? "PT-br" : "en") { call in
+                XCTAssertTrue([2, 80].contains(call.sourceID), "An excluded source received the query")
+                XCTAssertEqual(call.query, "fox")
+                return .init(mangas: [.init(url: "/m", title: "\(call.sourceID)")], hasNextPage: false)
+            }
+        }
+        let session = GlobalSearchSession()
+        await session.search(query: "fox", registrations: registrations, selection: selection.snapshot())
+        XCTAssertNil(session.state.inputError)
+        XCTAssertEqual(session.state.selectionID, selection.state.revision)
+        XCTAssertEqual(session.state.groups.map(\.sourceID), [2, 80])
+        XCTAssertTrue(session.state.groups.allSatisfy { $0.phase == .loaded })
+    }
+
+    @MainActor
+    func testEmptyAndRevokedSelectionsNeverQuerySources() async throws {
+        let store = try selectionStore()
+        let old = store.snapshot()
+        try store.save(.none, expectedRevision: old.id)
+        let registrations = [snapshot(1) { _ in
+            XCTFail("Empty or obsolete selection reached provider")
+            throw FixtureError.failed
+        }]
+        let session = GlobalSearchSession()
+        await session.search(query: "fox", registrations: registrations, selection: old)
+        XCTAssertEqual(session.state.inputError, .selectionChanged)
+        XCTAssertTrue(session.state.groups.isEmpty)
+        await session.search(query: "fox", registrations: registrations, selection: store.snapshot())
+        XCTAssertNil(session.state.inputError)
+        XCTAssertTrue(session.state.groups.isEmpty)
+        XCTAssertFalse(session.state.isSearching)
+    }
+
+    @MainActor
+    func testSelectionChangeFromEnqueueObserverPreventsProviderStart() async throws {
+        let store = try selectionStore()
+        let selected = store.snapshot()
+        let session = GlobalSearchSession()
+        session.onChange = { state in
+            if state.groups.first?.phase == .searching {
+                do { try store.save(.none, expectedRevision: selected.id) }
+                catch { XCTFail("Unexpected save error: \(error)") }
+            }
+        }
+        await session.search(query: "fox", registrations: [snapshot(1) { _ in
+            XCTFail("Changed selection must be checked after progress publication")
+            throw FixtureError.failed
+        }], selection: selected)
+        XCTAssertEqual(session.state.inputError, .selectionChanged)
+        XCTAssertTrue(session.state.groups.isEmpty)
+    }
+
+    @MainActor
+    func testSelectionChangeClearsPartialResultsStopsQueuedSourcesAndDrainsLibraryOwner() async throws {
+        let first = expectation(description: "Three active providers")
+        first.expectedFulfillmentCount = 3
+        let changed = expectation(description: "Selection changed after partial result")
+        let gate = Gate { call in
+            XCTAssertLessThanOrEqual(call.sourceID, 3)
+            first.fulfill()
+        }
+        let registrations = (1...4).map { id in snapshot(Int64(id)) { try await gate.fetch($0) } }
+        let store = try selectionStore()
+        let selected = store.snapshot()
+        let session = GlobalSearchSession()
+        var didChange = false
+        session.onChange = { state in
+            if !didChange, state.groups.first?.phase == .loaded {
+                didChange = true
+                do { try store.save(.none, expectedRevision: selected.id) }
+                catch { XCTFail("Unexpected save error: \(error)") }
+                changed.fulfill()
+            }
+        }
+        let operations = LibraryOperationCoordinator()
+        let presentation = operations.state.presentation
+        let worker = try operations.start(expected: presentation) {
+            await session.search(query: "fox", registrations: registrations, selection: selected)
+        }
+        await fulfillment(of: [first], timeout: 3)
+        await gate.release(1, title: "Old partial result")
+        await fulfillment(of: [changed], timeout: 3)
+        XCTAssertTrue(session.state.groups.isEmpty)
+        XCTAssertEqual(session.state.inputError, .selectionChanged)
+        XCTAssertEqual(operations.state.activeOperations, 1)
+        XCTAssertThrowsError(try operations.beginExclusive(expected: presentation))
+        await gate.release(2)
+        await gate.release(3)
+        try await worker.value
+        let calls = await gate.calls
+        XCTAssertEqual(calls.count, 3)
+        XCTAssertEqual(operations.state.activeOperations, 0)
+        XCTAssertTrue(session.state.groups.isEmpty)
+        let exclusive = try operations.beginExclusive(expected: presentation)
+        try operations.finishExclusive(exclusive)
+    }
+
+    @MainActor
+    func testSelectionRevocationCancelsProviderWithoutUIObserverButStillDrains() async throws {
+        let started = expectation(description: "Provider started")
+        let cancelled = expectation(description: "Provider cancellation delivered directly")
+        let gate = Gate { _ in started.fulfill() }
+        let registration = snapshot(1) { call in
+            try await withTaskCancellationHandler {
+                try await gate.fetch(call)
+            } onCancel: { cancelled.fulfill() }
+        }
+        let store = try selectionStore()
+        let selection = store.snapshot()
+        let session = GlobalSearchSession()
+        let operations = LibraryOperationCoordinator()
+        let worker = try operations.start(expected: operations.state.presentation) {
+            await session.search(query: "fox", registrations: [registration], selection: selection)
+        }
+        await fulfillment(of: [started], timeout: 3)
+        try store.save(.none, expectedRevision: selection.id)
+        await fulfillment(of: [cancelled], timeout: 3)
+        XCTAssertEqual(operations.state.activeOperations, 1)
+        await gate.release(1, title: "Late result must not publish")
+        try await worker.value
+        XCTAssertEqual(operations.state.activeOperations, 0)
+        XCTAssertTrue(session.state.groups.isEmpty)
+        XCTAssertEqual(session.state.inputError, .selectionChanged)
     }
 
     @MainActor

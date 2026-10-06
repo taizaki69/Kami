@@ -4,7 +4,26 @@ Last updated: 2026-10-05 (America/Lima)
 
 ## Canonical continuation — 2026-10-05
 
-The active branch is `assistant/compatibility-diagnostics-20261005`, based on
+The active branch is `assistant/source-selection-20261005`, based on
+`c85f2a4a25b261c2652a7d5b26f5661f2f6ace0b` from
+[PR #28](https://github.com/taizaki69/Kami/pull/28), ready and unmerged. That
+base passed Linux 379 Compat + 421 Core/SQLite, macOS 379 Compat + 433 Core,
+simulator/device compilation, both hosted renderer tests and unsigned IPA,
+with identical head/CI trees. This increment adds shared persistent source and
+language selection to Browse/global search. Explicit all/none choices,
+remembered unavailable identities, draft Apply/Cancel, revision checks,
+bounded atomic-file persistence/recovery and revocable selection snapshots
+prevent stale or excluded query publication without bypassing source admission.
+See [global search](docs/GLOBAL_SEARCH.md) and
+[verification](docs/VERIFICATION-2026-10-05-SOURCE-SELECTION.md).
+Checkpoints are in `.git/checkpoints/20261005-source-selection/`.
+Migration/chapter matching, physical editor interaction and the other reader/
+compatibility TODOs remain open. Continue the broad goal, publish/verify
+autonomously and keep PRs unmerged.
+
+## Earlier compatibility-diagnostics continuation — 2026-10-05
+
+The preceding branch was `assistant/compatibility-diagnostics-20261005`, based on
 `bc6f03e798728b7813f931f83c7d455764a02262` from
 [PR #27](https://github.com/taizaki69/Kami/pull/27), ready and unmerged. That
 base passed Linux 372 Compat + 416 Core/SQLite, macOS 372 Compat + 428 Core,

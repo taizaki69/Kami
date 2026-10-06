@@ -57,6 +57,8 @@ final class AppModel: ObservableObject {
     let libraryUpdateService: LibraryUpdateService
     let readingStateWriter: ReadingStateWriter
     let libraryOperations: LibraryOperationCoordinator
+    private let sourceDiscoveryStore: SourceDiscoveryStore
+    @Published private(set) var sourceDiscovery: SourceDiscoveryState
     @Published private(set) var libraryPresentation: LibraryPresentationState
     @Published var libraryOperationError: String?
     @Published var libraryRestoreNotice: String?
@@ -157,6 +159,9 @@ final class AppModel: ObservableObject {
         )
         self.sourceFactory = ExtensionSourceFactory()
         self.preferencesService = ExtensionPreferencesService(store: store)
+        let discovery = SourceDiscoveryStore(fileURL: url.appendingPathComponent("source-selection.json"))
+        self.sourceDiscoveryStore = discovery
+        self.sourceDiscovery = discovery.state
         self.libraryUpdateService = LibraryUpdateService(store: store)
         let operations = LibraryOperationCoordinator()
         self.libraryOperations = operations
@@ -184,6 +189,7 @@ final class AppModel: ObservableObject {
             self.discardedReadingWriteFailures = self.readingStateWriter.discardedFailureCount
         }
         operations.onStateChanged = { [weak self] state in self?.acceptOperationState(state) }
+        discovery.onChange = { [weak self] state in self?.sourceDiscovery = state }
         reloadLibrary()
         performLibraryOperation { [weak self] in
             await self?.restoreInstalledExtensions()
@@ -952,6 +958,16 @@ final class AppModel: ObservableObject {
             else { return nil }
             return registration
         }
+    }
+
+    var discoverySources: [any KamiSource] {
+        sources.filter { sourceDiscovery.preferences.includes(sourceID: $0.id, language: $0.language) }
+    }
+
+    func sourceDiscoverySnapshot() -> SourceDiscoverySelectionSnapshot { sourceDiscoveryStore.snapshot() }
+
+    func saveSourceDiscovery(_ preferences: SourceDiscoveryPreferences, expectedRevision: UUID) throws {
+        try sourceDiscoveryStore.save(preferences, expectedRevision: expectedRevision)
     }
 
     func prepareCompatibilityReport(registration: SourceRegistrationSnapshot) async throws -> SourceCompatibilityReport {

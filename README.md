@@ -23,8 +23,13 @@ can be created, renamed, reordered and deleted, assigned individually or in
 bulk, and combined with library search. Deleting a category preserves manga,
 chapter progress and history; bulk changes preserve untouched memberships.
 
-Browse → Search all sources runs a [global search](docs/GLOBAL_SEARCH.md)
-across ready, enabled registrations, showing results per source as they arrive.
+Browse → Search sources runs a [global search](docs/GLOBAL_SEARCH.md)
+across selected, ready registrations, showing results per source as they arrive.
+“Sources and languages” saves a shared selection for Browse and global search.
+Choose all enabled sources or explicit source/language lists, including none;
+unavailable selections are remembered. Applying changes cancels old searches
+and requires another submission. The selection does not filter your library,
+updates or downloads, or grant extension trust/enablement.
 It queries up to three sources at once and keeps up to 20 first-page matches per
 source. Open a source's search to paginate, retry or change filters. Cancelling,
 changing the query or replacing a source prevents stale results from appearing.
