@@ -512,11 +512,13 @@ receiver class. The broader current corpus is now locked and measured: all 11
 remaining measurement APKs analyzed without errors, with 7 structural
 candidates, four stable-wrapper blockers, 432 unique unregistered external
 method surfaces, zero omitted invocations, and zero unsupported opcodes.
-App-facing local report export remains open; the next compatibility step is
-evidence-driven promotion of the next locked structural candidate.
+App-facing local report inspection and Files export now live in Extensions →
+Compatibility diagnostics. Reports remain local until the user selects an
+export; see [scope and bounds](COMPATIBILITY_DIAGNOSTICS.md). Additional source
+compatibility still requires evidence-driven promotion of locked candidates.
 Komikcast and Yomu each have a measured dynamic genre path for their exact profile;
 arbitrary dynamic/network-backed filter lists and production preference
-UI/persistence remain open. Interpreted reader-image execution, currently proven for Baozi with
+UI/persistence beyond the measured FoolSlide settings remain open. Interpreted reader-image execution, currently proven for Baozi with
 its banner transform disabled, reaches the bounded source chain and
 observes/follows bounded GET redirects; page-URL profiles, including
 Mangas-Origines.fr, only expose validated URL/header projections and have no
@@ -650,7 +652,10 @@ HTTP/parser failures, and arbitrary error descriptions are discarded. Its
 bounded deterministic report contains only sanitized package/version,
 operation stage, and DEX API/opcode identity. `compat-audit promote-gap` strictly
 reparses that canonical v1 format, revalidates every exported identity, and
-emits only a focused XCTest assertion seed. The static
+emits only a focused XCTest assertion seed. Runtime diagnostic symbols now
+require a conservative ASCII descriptor/member/prototype grammar, so an
+alphabet-only path cannot pass as a typed symbol. The Files exporter revalidates
+output, caps its canonical report and accounts for omitted occurrences. The static
 auditor executes no bytecode and embeds only a sanitized plan status rather
 than the raw manifest/archive inspection. `compat-audit gaps` replaces input
 filenames with artifact ordinals and emits generic per-artifact parse failures.

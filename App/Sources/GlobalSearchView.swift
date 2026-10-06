@@ -129,7 +129,7 @@ struct GlobalSearchView: View {
         // A result's path belongs to its original registration. It must not be
         // reinterpreted on a newly configured website after navigation.
         if model.isSourceCurrent(id: group.sourceID, revision: group.revision),
-           model.searchRegistrations().contains(where: { $0.registrationID == group.registrationID }) {
+           model.readySourceRegistrations().contains(where: { $0.registrationID == group.registrationID }) {
             content()
         } else {
             ContentUnavailableView("Source changed", systemImage: "arrow.clockwise",
@@ -139,7 +139,7 @@ struct GlobalSearchView: View {
 
     private func submit() {
         let text = query
-        let registrations = model.searchRegistrations()
+        let registrations = model.readySourceRegistrations()
         requestTask?.cancel()
         notice = registrations.isEmpty ? "No sources are ready. Enable a source in Extensions and try again." : nil
         requestTask = model.performLibraryOperation(expected: presentation) {
