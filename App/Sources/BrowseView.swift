@@ -10,6 +10,13 @@ struct BrowseView: View {
         let presentation = model.libraryPresentation.generation
         NavigationStack {
             List {
+                Section {
+                    NavigationLink {
+                        GlobalSearchView(presentation: presentation)
+                    } label: {
+                        Label("Search all sources", systemImage: "magnifyingglass")
+                    }
+                }
                 Section("Sources") {
                     ForEach(model.sources, id: \.id) { source in
                         NavigationLink {
@@ -79,10 +86,11 @@ struct SourceBrowseView: View {
     @State private var requestTask: Task<Void, Never>?
     @State private var filterGeneration = 0
 
-    init(source: any KamiSource, presentation: LibraryPresentationGeneration) {
+    init(source: any KamiSource, presentation: LibraryPresentationGeneration, initialQuery: String = "") {
         self.sourceID = source.id
         self.sourceName = source.name
         _presentation = State(initialValue: presentation)
+        _query = State(initialValue: initialQuery)
         let filters = source.getFilterList()
         _defaultFilters = State(initialValue: filters)
         _appliedFilters = State(initialValue: filters)

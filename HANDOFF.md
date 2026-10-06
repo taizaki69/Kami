@@ -4,7 +4,23 @@ Last updated: 2026-10-05 (America/Lima)
 
 ## Canonical continuation — 2026-10-05
 
-The active branch is `assistant/reader-tiles-20261005`, based on
+The active branch is `assistant/global-search-20261005`, based on
+`230f1de51687234ab0042cb96bcfdd11c887f208` from
+[PR #26](https://github.com/taizaki69/Kami/pull/26), ready and unmerged. That
+base passed Linux 372 Compat + 405 Core/SQLite, macOS 372 Compat + 417 Core,
+simulator/device compilation, both hosted renderer tests and unsigned IPA,
+with identical head/CI trees. This increment adds progressive global search
+across ready registrations, bounded fan-out, cancellation drainage, small
+first-page projections and registration-bound navigation to details and
+individual source search. Migration matching and source selection remain open.
+See [global search](docs/GLOBAL_SEARCH.md) and its
+[verification](docs/VERIFICATION-2026-10-05-GLOBAL-SEARCH.md).
+Checkpoints are in `.git/checkpoints/20261005-global-search/`. Continue the
+broad goal, publish/verify autonomously and keep PRs unmerged.
+
+## Earlier tiled-reader continuation — 2026-10-05
+
+The preceding branch was `assistant/reader-tiles-20261005`, based on
 `c5ae522f57732e6316ee8eb1804784cbecb769a0` from
 [PR #25](https://github.com/taizaki69/Kami/pull/25), ready and unmerged. That
 base passed Linux 372 Compat + 398 Core/SQLite, macOS 372 Compat + 406 Core,

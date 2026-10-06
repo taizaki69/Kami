@@ -23,6 +23,12 @@ can be created, renamed, reordered and deleted, assigned individually or in
 bulk, and combined with library search. Deleting a category preserves manga,
 chapter progress and history; bulk changes preserve untouched memberships.
 
+Browse → Search all sources runs a [global search](docs/GLOBAL_SEARCH.md)
+across ready, enabled registrations, showing results per source as they arrive.
+It queries up to three sources at once and keeps up to 20 first-page matches per
+source. Open a source's search to paginate, retry or change filters. Cancelling,
+changing the query or replacing a source prevents stale results from appearing.
+
 The [reading-state store](docs/READING_STATE.md) commits page position, history
 and end-of-chapter read status together. Reader and manual read actions use
 database-issued targets tied to the exact manga/chapter identities, data epoch

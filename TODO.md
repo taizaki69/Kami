@@ -6,7 +6,9 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-05
 
 The full native-reader and compatibility objective remains active. The current
-continuation adds tiled drawing and aspect-aware long-page resolution, plus
+continuation adds global search across enabled sources, with progressive groups,
+bounded concurrent queries, cancellation drainage and guarded source navigation.
+It follows tiled drawing and aspect-aware long-page resolution, plus
 hosted simulator rendering regressions. The bounded source bitmap still decodes
 as a whole; region decoding and device profiling remain open. It follows reader
 memory warnings with cache purging, cancelable prefetch ownership, viewport-based
@@ -393,7 +395,12 @@ must not be used as evidence for the current commit.
 - [ ] Reader completion: cookie continuity for page-URL paths without a source
       executor, long-image region decoding and measured performance
 - [ ] Cloudflare WKWebView bridge + cookie sync (M4)
-- [ ] Global search across enabled sources
+- [x] Global search across enabled sources: progressive first-page previews,
+      at most three provider queries at once, exact source/path identities and
+      cancellation/replacement drainage. Open individual source search for
+      pagination, retry and filters; see [global search](docs/GLOBAL_SEARCH.md).
+- [ ] Source selection/language controls and migration matching on top of
+      global search; first-page previews do not implement library migration.
 
 ## P2 — Polish
 
