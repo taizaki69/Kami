@@ -5,6 +5,7 @@ import KamiCore
 @MainActor
 struct BrowseView: View {
     @EnvironmentObject var model: AppModel
+    @State private var showingSelection = false
 
     var body: some View {
         let presentation = model.libraryPresentation.generation
@@ -14,11 +15,20 @@ struct BrowseView: View {
                     NavigationLink {
                         GlobalSearchView(presentation: presentation)
                     } label: {
-                        Label("Search all sources", systemImage: "magnifyingglass")
+                        Label("Search sources", systemImage: "magnifyingglass")
+                    }
+                    Button { showingSelection = true } label: {
+                        Label("Sources and languages", systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                    Text("\(model.discoverySources.count) of \(model.sources.count) enabled sources selected")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if model.sourceDiscovery.requiresRecovery {
+                        Label("Review your saved source selection before searching.", systemImage: "exclamationmark.triangle")
+                            .font(.footnote).foregroundStyle(.orange)
                     }
                 }
                 Section("Sources") {
-                    ForEach(model.sources, id: \.id) { source in
+                    ForEach(model.discoverySources, id: \.id) { source in
                         NavigationLink {
                             SourceBrowseView(source: source, presentation: presentation)
                         } label: {
@@ -34,6 +44,10 @@ struct BrowseView: View {
                             }
                         }
                     }
+                    if model.discoverySources.isEmpty {
+                        Text("No sources match your selection. Choose sources or languages above, or enable a source in Extensions.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section {
                     Text("""
@@ -47,6 +61,9 @@ struct BrowseView: View {
                 }
             }
             .navigationTitle("Browse")
+            .sheet(isPresented: $showingSelection) {
+                SourceSelectionSheet(initial: model.sourceDiscovery)
+            }
         }
     }
 

@@ -32,13 +32,14 @@ public struct GlobalSearchGroup: Identifiable, Sendable {
 }
 
 public enum GlobalSearchInputError: Error, Equatable, Sendable, LocalizedError {
-    case queryTooLong, tooManySources, duplicateSource
+    case queryTooLong, tooManySources, duplicateSource, selectionChanged
 
     public var errorDescription: String? {
         switch self {
         case .queryTooLong: "Use a shorter search and try again."
-        case .tooManySources: "Global search supports up to 64 enabled sources. Search a source individually."
+        case .tooManySources: "Select up to 64 sources for global search, or search a source individually."
         case .duplicateSource: "The source list changed. Reopen Browse and try again."
+        case .selectionChanged: "Your source selection changed. Submit your search again."
         }
     }
 }
@@ -48,6 +49,7 @@ public struct GlobalSearchState: Sendable {
     public fileprivate(set) var groups: [GlobalSearchGroup] = []
     public fileprivate(set) var isSearching = false
     public fileprivate(set) var inputError: GlobalSearchInputError?
+    public fileprivate(set) var selectionID: UUID?
     public var completedSources: Int {
         groups.filter { $0.phase != .queued && $0.phase != .searching }.count
     }
@@ -74,22 +76,28 @@ public final class GlobalSearchSession {
 
     public init() {}
 
-    public func search(query: String, registrations: [SourceRegistrationSnapshot]) async {
+    public func search(query: String, registrations: [SourceRegistrationSnapshot],
+                       selection: SourceDiscoverySelectionSnapshot? = nil) async {
         guard !Task.isCancelled else { return }
         let previous = worker
         previous?.cancel()
         let token = UUID()
         generation = token
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidates = registrations.filter {
+            selection?.preferences.includes(sourceID: $0.sourceID, language: $0.source.language) ?? true
+        }
         let error: GlobalSearchInputError?
-        if query.utf8.count > 1_024 { error = .queryTooLong }
-        else if registrations.count > Self.maximumSources { error = .tooManySources }
-        else if Set(registrations.map(\.sourceID)).count != registrations.count { error = .duplicateSource }
+        if selection?.isCurrent == false { error = .selectionChanged }
+        else if query.utf8.count > 1_024 { error = .queryTooLong }
+        else if candidates.count > Self.maximumSources { error = .tooManySources }
+        else if Set(candidates.map(\.sourceID)).count != candidates.count { error = .duplicateSource }
         else { error = nil }
-        let selected = error == nil && !text.isEmpty ? registrations : []
+        let selected = error == nil && !text.isEmpty ? candidates : []
         var initial = GlobalSearchState()
         initial.query = error == .queryTooLong ? "" : text
         initial.inputError = error
+        initial.selectionID = selection?.id
         initial.groups = selected.map {
             GlobalSearchGroup(sourceID: $0.sourceID, registrationID: $0.registrationID,
                 revision: $0.revision, name: $0.source.name, language: $0.source.language)
@@ -100,8 +108,9 @@ public final class GlobalSearchSession {
             // A provider may acknowledge cancellation late. Keep its owner
             // alive and wait instead of silently starting another fan-out.
             await previous?.value
-            guard !Task.isCancelled, self.generation == token else { return }
-            await self.execute(query: text, registrations: selected, token: token)
+            guard !Task.isCancelled, self.generation == token,
+                  self.selectionIsCurrent(selection, token: token) else { return }
+            await self.execute(query: text, registrations: selected, token: token, selection: selection)
         }
         worker = task
         await withTaskCancellationHandler {
@@ -139,26 +148,41 @@ public final class GlobalSearchSession {
         var hasMore = false
     }
 
-    private func execute(query: String, registrations: [SourceRegistrationSnapshot], token: UUID) async {
+    private func selectionIsCurrent(_ selection: SourceDiscoverySelectionSnapshot?, token: UUID) -> Bool {
+        guard selection?.isCurrent == false else { return true }
+        if generation == token {
+            var cleared = GlobalSearchState()
+            cleared.query = state.query
+            cleared.selectionID = selection?.id
+            cleared.inputError = .selectionChanged
+            state = cleared
+        }
+        return false
+    }
+
+    private func execute(query: String, registrations: [SourceRegistrationSnapshot], token: UUID,
+                         selection: SourceDiscoverySelectionSnapshot?) async {
         await withTaskGroup(of: Outcome.self) { group in
             var nextIndex = 0
             @MainActor @discardableResult func enqueue() -> Bool {
-                guard !Task.isCancelled, generation == token,
+                guard !Task.isCancelled, generation == token, selectionIsCurrent(selection, token: token),
                       state.groups.indices.contains(nextIndex) else { return false }
                 let index = nextIndex
                 nextIndex += 1
                 state.groups[index].phase = .searching
                 // Observers may synchronously cancel/clear the presentation.
-                guard !Task.isCancelled, generation == token else { return false }
+                guard !Task.isCancelled, generation == token,
+                      selectionIsCurrent(selection, token: token) else { return false }
                 let registration = registrations[index]
-                group.addTask { await Self.fetch(query: query, registration: registration, index: index) }
+                group.addTask { await Self.fetch(query: query, registration: registration, index: index,
+                                                selection: selection) }
                 return true
             }
             while nextIndex < min(Self.maximumConcurrentSources, registrations.count) {
                 if !enqueue() { break }
             }
             while let outcome = await group.next() {
-                guard !Task.isCancelled, generation == token else {
+                guard !Task.isCancelled, generation == token, selectionIsCurrent(selection, token: token) else {
                     group.cancelAll()
                     continue
                 }
@@ -179,22 +203,32 @@ public final class GlobalSearchSession {
     }
 
     private nonisolated static func fetch(
-        query: String, registration: SourceRegistrationSnapshot, index: Int
+        query: String, registration: SourceRegistrationSnapshot, index: Int,
+        selection: SourceDiscoverySelectionSnapshot?
     ) async -> Outcome {
         do {
             try Task.checkCancellation()
             try registration.checkAvailability()
+            guard selection?.isCurrent != false else { throw CancellationError() }
             // Empty filters intentionally preserve each source's own defaults.
             // Global search never refreshes dynamic filters or invokes feeds.
-            let page = try await registration.source.getSearchManga(page: 1, query: query, filters: [])
+            let request: @Sendable () async throws -> MangasPageCompat = {
+                try Task.checkCancellation()
+                try registration.checkAvailability()
+                return try await registration.source.getSearchManga(page: 1, query: query, filters: [])
+            }
+            let page: MangasPageCompat
+            if let selection { page = try await selection.perform(request) }
+            else { page = try await request() }
             try Task.checkCancellation()
             try registration.checkAvailability()
+            guard selection?.isCurrent != false else { throw CancellationError() }
             let projection = try project(page)
             return Outcome(index: index, phase: .loaded, matches: projection.matches, hasMore: projection.hasMore)
         } catch {
             let unavailable = (try? registration.checkAvailability()) == nil
             return Outcome(index: index, phase: unavailable ? .unavailable
-                : Task.isCancelled ? .cancelled : .failed)
+                : Task.isCancelled || selection?.isCurrent == false ? .cancelled : .failed)
         }
     }
 

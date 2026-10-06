@@ -6,7 +6,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-05
 
 The full native-reader and compatibility objective remains active. The current
-continuation exposes bounded local compatibility diagnostics and user-selected
+continuation adds persistent source/language selection for Browse and global
+search, with explicit all/none semantics, remembered unavailable identities,
+reviewed edits and revocable search snapshots. It follows bounded local
+compatibility diagnostics and user-selected
 Files export, with typed-symbol validation and explicit loss accounting. It
 follows global search across enabled sources, with progressive groups,
 bounded concurrent queries, cancellation drainage and guarded source navigation.
@@ -403,8 +406,13 @@ must not be used as evidence for the current commit.
       at most three provider queries at once, exact source/path identities and
       cancellation/replacement drainage. Open individual source search for
       pagination, retry and filters; see [global search](docs/GLOBAL_SEARCH.md).
-- [ ] Source selection/language controls and migration matching on top of
-      global search; first-page previews do not implement library migration.
+- [x] Persistent source selection/language controls for Browse and global
+      search, including all/none, remembered unavailable IDs, reviewed edits,
+      stale-editor rejection and invalidation before queued queries/results.
+      See [global search](docs/GLOBAL_SEARCH.md); Apple interaction remains
+      separate from deterministic tests and exact-head compilation.
+- [ ] Migration matching on top of global search; first-page previews and
+      discovery preferences do not migrate library or chapter reading state.
 
 ## P2 — Polish
 
