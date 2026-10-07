@@ -136,6 +136,79 @@ public actor LibraryStore {
         catch is LibraryBackupSnapshotError { throw LibraryRestoreError.invalidStoredData }
     }
 
+    // MARK: - Reviewed source migration
+
+    public func previewSourceMigration(origin: MangaReadingSnapshot, destination: SourceMigrationCandidate,
+                                       expectedConfiguration: ExtensionExecutionConfiguration?) throws -> SourceMigrationPreview {
+        do {
+            try destination.checkAvailability()
+            let stamp = try db.restoreChangeStamp()
+            let preview = try withLibraryTransaction(readOnly: true) {
+                try validateMutationContext(origin.mutationContext)
+                try verifySourceUpdateConfiguration(sourceID: destination.manga.sourceID,
+                                                    expectedConfiguration: expectedConfiguration)
+                let state = try LibraryRestorePersistence.state(db, policy: .default)
+                guard let originID = origin.manga.id, let row = try self.manga(id: originID), row.inLibrary,
+                      row.sourceId == origin.manga.sourceId, Data(row.url.utf8) == Data(origin.manga.url.utf8),
+                      let original = state.document.manga.first(where: {
+                          $0.sourceID == row.sourceId && Data($0.url.utf8) == Data(row.url.utf8)
+                      }) else { throw SourceMigrationError.originUnavailable }
+                let target = destination.manga
+                guard original.sourceID != target.sourceID || Data(original.url.utf8) != Data(target.url.utf8)
+                else { throw SourceMigrationError.sameManga }
+                let existing = state.document.manga.first {
+                    $0.sourceID == target.sourceID && Data($0.url.utf8) == Data(target.url.utf8)
+                }
+                let names = state.document.categories.filter { category in
+                    original.categoryKeys.contains { Data($0.utf8) == Data(category.key.utf8) }
+                }.map(\.name)
+                return SourceMigrationPreview(id: UUID(), original: original, destination: destination,
+                    destinationExists: existing != nil,
+                    matching: try .prepare(original: original.chapters, destination: target.chapters),
+                    categoryNames: names, ownerID: readingOwnerID, originID: originID, epoch: state.epoch,
+                    dependencyDigest: state.digest, changeStamp: stamp, expectedConfiguration: expectedConfiguration)
+            }
+            guard try db.restoreChangeStamp() == stamp else { throw SourceMigrationError.previewExpired }
+            try destination.checkAvailability()
+            try Task.checkCancellation()
+            return preview
+        } catch is SQLiteDatabase.SQLiteError { throw SourceMigrationError.storageUnavailable }
+    }
+
+    /// Call under the shared coordinator's exclusive scope. This only adds
+    /// destination state: neither source identities nor files are reassigned.
+    public func commitSourceMigration(_ preview: SourceMigrationPreview, selectedMatches: Set<Int>,
+                                      copyCategories: Bool) throws -> SourceMigrationReport {
+        try Task.checkCancellation()
+        guard preview.ownerID == readingOwnerID else { throw SourceMigrationError.foreignPreview }
+        try preview.validateSelection(selectedMatches)
+        do {
+            return try withLibraryTransaction {
+                do { try LibraryRestorePersistence.requireIdle(db) }
+                catch LibraryRestoreError.activeWork { throw SourceMigrationError.activeWork }
+                guard try db.restoreChangeStamp() == preview.changeStamp,
+                      try ReadingStateReader.epoch(db) == preview.epoch else { throw SourceMigrationError.previewExpired }
+                try preview.destination.checkAvailability()
+                try verifySourceUpdateConfiguration(sourceID: preview.destination.manga.sourceID,
+                                                    expectedConfiguration: preview.expectedConfiguration)
+                let state = try LibraryRestorePersistence.state(db, policy: .default)
+                guard state.digest == preview.dependencyDigest else { throw SourceMigrationError.previewExpired }
+                let destinationID = try SourceMigrationPersistence.write(db, preview: preview,
+                    selectedMatches: selectedMatches, copyCategories: copyCategories)
+                // The combined state must still fit the bounded library model,
+                // including additions to an existing destination and baseline.
+                _ = try LibraryRestorePersistence.state(db, policy: .default)
+                try preview.destination.checkAvailability()
+                try Task.checkCancellation()
+                try db.run("UPDATE library_data_state SET epoch=randomblob(16) WHERE singleton=1")
+                guard try ReadingStateReader.epoch(db) != preview.epoch else { throw SourceMigrationError.storageUnavailable }
+                try Task.checkCancellation()
+                return .init(previewID: preview.id, destinationMangaID: destinationID,
+                             selectedChapters: selectedMatches.count)
+            }
+        } catch is SQLiteDatabase.SQLiteError { throw SourceMigrationError.storageUnavailable }
+    }
+
     // MARK: - Manga
 
     public func libraryManga() throws -> [Manga] {

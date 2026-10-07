@@ -36,8 +36,8 @@ struct RootTabView: View {
         .overlay {
             if model.libraryPresentation.isExclusive {
                 VStack(spacing: 12) {
-                    ProgressView("Restoring library…")
-                    Button("Cancel") { model.cancelLibraryRestore() }
+                    ProgressView("Saving library changes…")
+                    Button("Cancel") { model.cancelExclusiveLibraryChange() }
                 }
                     .padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }

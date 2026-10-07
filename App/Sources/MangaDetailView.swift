@@ -151,6 +151,15 @@ struct MangaDetailView: View {
         .navigationTitle(manga.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if inLibrary, let snapshot = readingSnapshot {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SourceMigrationView(origin: snapshot, title: detail?.title ?? manga.title, presentation: presentation)
+                    } label: {
+                        Label("Migrate to another source", systemImage: "arrow.triangle.swap")
+                    }
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showDownloads = true } label: { Label("Downloads", systemImage: "arrow.down.circle") }
             }

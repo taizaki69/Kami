@@ -4,7 +4,7 @@ A native iOS manga reader with a Swift runtime for measured Mihon/Tachiyomi
 extension APKs. Created and maintained by
 [taizaki69](https://github.com/taizaki69).
 
-## Current scope — 2026-10-05
+## Current scope — 2026-10-06
 
 Kami includes a native MangaDex source, a persistent library, history and
 reading progress, source browsing and filters, and an LTR/RTL/webtoon reader
@@ -33,6 +33,13 @@ updates or downloads, or grant extension trust/enablement.
 It queries up to three sources at once and keeps up to 20 first-page matches per
 source. Open a source's search to paginate, retry or change filters. Cancelling,
 changing the query or replacing a source prevents stale results from appearing.
+
+A saved manga's “Migrate to another source” action opens destination search and
+a [reviewed migration](docs/SOURCE_MIGRATION.md). Select chapter-number matches
+before copying read flags, bookmarks and optional categories into the destination.
+Duplicate or unknown chapter numbers remain unmatched. The original manga stays
+in your library, with its history, page positions and downloads; these are not
+reassigned between sources. Existing destination state is preserved.
 
 The [reading-state store](docs/READING_STATE.md) commits page position, history
 and end-of-chapter read status together. Reader and manual read actions use

@@ -1,10 +1,29 @@
 # Kami Continuation Handoff
 
-Last updated: 2026-10-05 (America/Lima)
+Last updated: 2026-10-06 (America/Lima)
 
-## Canonical continuation — 2026-10-05
+## Canonical continuation — 2026-10-06
 
-The active branch is `assistant/source-selection-20261005`, based on
+The active branch is `assistant/source-migration-20261005`, based on
+`fb93560fdc468447b8c43423f489f95c5eafb016` from
+[PR #29](https://github.com/taizaki69/Kami/pull/29), ready and unmerged. That
+base passed Linux 379 Compat + 437 Core/SQLite, macOS 379 Compat + 449 Core,
+simulator/device compilation, both hosted renderer tests and unsigned IPA,
+with identical head/CI trees. This increment adds destination search from a
+saved manga, reviewed unique-number chapter suggestions and atomic additive
+read/bookmark/category transfer. Origin snapshots and destination lifetimes
+bind exact identities; database/configuration changes expire previews. Original
+and existing destination history, page positions and download records are kept.
+See [migration](docs/SOURCE_MIGRATION.md) and
+[verification](docs/VERIFICATION-2026-10-05-SOURCE-MIGRATION.md).
+Checkpoints are in `.git/checkpoints/20261005-source-migration/`.
+Manual pairing, replace/remove mode, physical interaction and the other reader/
+compatibility TODOs remain open. Continue the broad goal, publish/verify
+autonomously and keep PRs unmerged.
+
+## Earlier source-selection continuation — 2026-10-05
+
+The preceding branch was `assistant/source-selection-20261005`, based on
 `c85f2a4a25b261c2652a7d5b26f5661f2f6ace0b` from
 [PR #28](https://github.com/taizaki69/Kami/pull/28), ready and unmerged. That
 base passed Linux 379 Compat + 421 Core/SQLite, macOS 379 Compat + 433 Core,
