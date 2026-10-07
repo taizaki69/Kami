@@ -6,6 +6,18 @@ import MihonCompatKit
 #if canImport(SQLite3)
 
 final class LibraryUpdateServiceTests: XCTestCase {
+    /// Progress may repeat the cancelling phase as requests drain. XCTest on
+    /// Darwin rejects fulfilling a single expectation more than once.
+    private actor Once {
+        private let expectation: XCTestExpectation
+        private var fulfilled = false
+        init(_ expectation: XCTestExpectation) { self.expectation = expectation }
+        func fulfill() {
+            guard !fulfilled else { return }
+            fulfilled = true
+            expectation.fulfill()
+        }
+    }
     private actor Gate {
         let entered: XCTestExpectation
         private var open = false
@@ -251,6 +263,7 @@ final class LibraryUpdateServiceTests: XCTestCase {
     func testOwnedRunWaitsForCancelledProviderAndKeepsPartialCommit() async throws {
         let entered = expectation(description: "Second owned request suspended")
         let cancelling = expectation(description: "Durable cancellation observed")
+        let cancellingOnce = Once(cancelling)
         let gate = Gate(entered), probe = Probe()
         let ledger = Ledger(items: [item(1, sourceID: 10), item(2, sourceID: 10), item(3, sourceID: 10)])
         let service = LibraryUpdateService(persistence: ledger)
@@ -260,7 +273,7 @@ final class LibraryUpdateServiceTests: XCTestCase {
         }
         let contexts: [Int64: LibraryUpdateSourceContext] = [10: .available(source: source, expectedConfiguration: nil)]
         let task = Task { try await service.run(sources: contexts) { progress in
-            if progress.phase == .cancelling, progress.summary.status == .cancelled { cancelling.fulfill() }
+            if progress.phase == .cancelling, progress.summary.status == .cancelled { await cancellingOnce.fulfill() }
         } }
         await fulfillment(of: [entered], timeout: 3)
         task.cancel()
@@ -312,6 +325,7 @@ final class LibraryUpdateServiceTests: XCTestCase {
         let secondID = try await store.upsert(Manga(sourceId: sourceID, url: "/second", title: "Second", inLibrary: true))
         let entered = expectation(description: "Real-store second request")
         let cancelled = expectation(description: "Real-store invalidated")
+        let cancelledOnce = Once(cancelled)
         let gate = Gate(entered), probe = Probe()
         let source = Source(id: sourceID, probe: probe) { manga in
             if manga.url == "/second" { await gate.wait() }
@@ -322,7 +336,7 @@ final class LibraryUpdateServiceTests: XCTestCase {
         let lease = try operations.open(expected: presentation)
         let worker = try lease.start {
             try await service.run(sources: [sourceID: .available(source: source, expectedConfiguration: nil)]) { progress in
-                if progress.phase == .cancelling, progress.summary.status == .cancelled { cancelled.fulfill() }
+                if progress.phase == .cancelling, progress.summary.status == .cancelled { await cancelledOnce.fulfill() }
             }
         }
         await fulfillment(of: [entered], timeout: 3)
