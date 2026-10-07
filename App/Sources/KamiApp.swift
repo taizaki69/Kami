@@ -2,14 +2,31 @@ import SwiftUI
 
 @main
 struct KamiApp: App {
-    @StateObject private var model = AppModel()
+    @UIApplicationDelegateAdaptor(KamiAppDelegate.self) private var delegate
 
     var body: some Scene {
         WindowGroup {
             RootTabView()
-                .environmentObject(model)
+                .environmentObject(delegate.model)
                 .preferredColorScheme(nil) // follow system; settings override later
         }
+    }
+}
+
+@MainActor
+final class KamiAppDelegate: NSObject, UIApplicationDelegate {
+    let model = AppModel()
+    private var refreshObserver: NSObjectProtocol?
+
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        model.registerBackgroundUpdates()
+        refreshObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.backgroundRefreshStatusDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.model.automaticUpdates.reconcile() }
+        }
+        return true
     }
 }
 

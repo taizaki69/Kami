@@ -4,6 +4,31 @@ Last updated: 2026-10-06 (America/Lima)
 
 ## Canonical continuation — 2026-10-06
 
+The active branch is `assistant/background-library-updates-20261006`, based on
+`3888625ef213dbd7e5cfb389a5cbb4687c783ae5` from
+[PR #31](https://github.com/taizaki69/Kami/pull/31), ready and unmerged. That
+base passed Linux 468 Core/SQLite + 379 Compat, macOS 480 Core + 379 Compat,
+simulator/device builds, both hosted rendering tests and unsigned IPA. All
+five checks used the same tree as the published head; all three artifact
+heads and digests were verified.
+
+This continuation adds default-off automatic Updates with durable minimum
+intervals, status/recovery controls, early BGAppRefreshTask registration and
+expiration ownership through provider/transaction drainage. Manual and automatic
+checks share AppModel's run and library lease. Local startup restores source
+registrations without fetching repository indexes during background launch.
+Schema 8 records a manga's last attempted scan before dispatch; source queues
+follow the oldest target, preventing repeated first-title/source priority after
+short grants. Existing discovery baselines, source tokens and read/download
+state remain authoritative. See [automatic updates](docs/AUTOMATIC_UPDATES.md)
+and [verification](docs/VERIFICATION-2026-10-06-AUTOMATIC-UPDATES.md).
+Checkpoints: `.git/checkpoints/20261006-background-library-updates/`.
+Device background launches/interaction, notifications and the broader reader/
+compatibility TODOs remain open. Publish/verify autonomously; do not merge or
+mark the full goal complete.
+
+## Earlier manual-matching continuation — 2026-10-06
+
 The active branch is `assistant/migration-matching-20261006`, based on
 `558100b519e0f452423259a1cb71a793f929027b` from
 [PR #30](https://github.com/taizaki69/Kami/pull/30), ready and unmerged. That

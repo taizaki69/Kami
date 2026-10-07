@@ -2,6 +2,11 @@
 
 One MainActor `LibraryOperationCoordinator` belongs to the shared AppModel,
 which is created outside WindowGroup. Every scene uses that same coordinator.
+The application delegate now owns that shared model so a background launch can
+restore local source registrations and run a scheduled library check without
+constructing a view. [Automatic updates](AUTOMATIC_UPDATES.md) and manual checks
+share one run slot; expiry forwards cancellation and retains the library lease
+through provider drainage and a separately registered saved-result reload.
 It complements the database-issued reading targets and mutation contexts; it
 does not replace SQLite transaction validation or grant extension/file authority.
 

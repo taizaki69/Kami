@@ -693,7 +693,18 @@ public actor LibraryStore {
             guard try db.query("SELECT 1 FROM library_update_scan WHERE status='running'").isEmpty else {
                 throw LibraryUpdatePersistenceError.scanAlreadyRunning
             }
-            let mangas = try libraryManga()
+            // Rotate attempted work, including requests interrupted by iOS.
+            // A short background grant must not always favor the first title
+            // or source. Scan row IDs are monotonic while scan history exists.
+            let attempts = Dictionary(uniqueKeysWithValues: try db.query(
+                "SELECT id,last_library_update_attempt FROM manga WHERE in_library=1"
+            ).compactMap { row -> (Int64, Int64)? in
+                guard let id = row.int64("id"), let attempt = row.int64("last_library_update_attempt") else { return nil }
+                return (id, attempt)
+            })
+            let mangas = try libraryManga().sorted {
+                (attempts[$0.id ?? 0] ?? 0, $0.id ?? 0) < (attempts[$1.id ?? 0] ?? 0, $1.id ?? 0)
+            }
             let scanID = UUID()
             let now = Int64(Date().timeIntervalSince1970)
             try db.run("""
@@ -788,6 +799,27 @@ public actor LibraryStore {
                                                 [.int(mangaID)]).first else { return false }
             return membership.bool("in_library")
                 && membership.int64("library_revision") == target.int64("library_revision")
+        }
+    }
+
+    /// Claim immediately before dispatch, retaining rotation even when a
+    /// provider is cancelled, fails or the process is terminated. This does
+    /// not establish a baseline or alter chapter/read/download state.
+    public func claimLibraryUpdateTarget(scanID: UUID, mangaID: Int64) throws -> Bool {
+        try Task.checkCancellation()
+        return try withLibraryTransaction {
+            let target = try activeLibraryUpdateTarget(scanID: scanID, mangaID: mangaID)
+            guard target.string("outcome") == "pending",
+                  let membership = try db.query("SELECT in_library,library_revision FROM manga WHERE id=?", [.int(mangaID)]).first,
+                  membership.bool("in_library"),
+                  membership.int64("library_revision") == target.int64("library_revision") else { return false }
+            guard let sequence = try db.query("SELECT rowid FROM library_update_scan WHERE scan_id=?",
+                                             [.text(scanID.uuidString)]).first?.int64("rowid"), sequence > 0 else {
+                throw LibraryUpdatePersistenceError.invalidStoredScan
+            }
+            try db.run("UPDATE manga SET last_library_update_attempt=? WHERE id=?", [.int(sequence), .int(mangaID)])
+            try Task.checkCancellation()
+            return true
         }
     }
 

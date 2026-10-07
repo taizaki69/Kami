@@ -55,6 +55,10 @@ final class AppModel: ObservableObject {
     let sourceFactory: ExtensionSourceFactory
     let preferencesService: ExtensionPreferencesService
     let libraryUpdateService: LibraryUpdateService
+    let automaticUpdates: LibraryRefreshScheduler
+    private let backgroundUpdateRequests: IOSLibraryRefreshRequests
+    private var sourceStartupTask: Task<Void, Never>?
+    private var foregroundRepositoriesStarted = false
     let readingStateWriter: ReadingStateWriter
     let libraryOperations: LibraryOperationCoordinator
     private let sourceDiscoveryStore: SourceDiscoveryStore
@@ -119,8 +123,7 @@ final class AppModel: ObservableObject {
     private var downloadChapterGenerations: [Int64: UInt64] = [:]
     private var downloadMangaByChapter: [Int64: Int64] = [:]
     private var libraryUpdatesReloadGeneration: UInt64 = 0
-    private var libraryUpdateTask: Task<Void, Never>?
-    private var libraryUpdateOperation: LibraryOperationLease?
+    private var libraryUpdateTask: Task<LibraryRefreshOutcome, Never>?
     private var pendingTrustOperation: (id: UUID, lease: LibraryOperationLease)?
     private var libraryUpdateDiscoveries: [LibraryChapterDiscovery] = []
     private var libraryUpdatesNextCursor: LibraryChapterDiscoveryCursor?
@@ -165,6 +168,13 @@ final class AppModel: ObservableObject {
         self.sourceDiscoveryStore = discovery
         self.sourceDiscovery = discovery.state
         self.libraryUpdateService = LibraryUpdateService(store: store)
+        let backgroundRequests = IOSLibraryRefreshRequests()
+        self.backgroundUpdateRequests = backgroundRequests
+        let refreshSettings = LibraryRefreshSettingsStore(fileURL: url.appendingPathComponent("automatic-updates.json"))
+        self.automaticUpdates = LibraryRefreshScheduler(settings: refreshSettings,
+            available: { persistentStore != nil && backgroundRequests.isAvailable },
+            submit: { try backgroundRequests.submit(earliest: $0) },
+            cancelRequest: { backgroundRequests.cancel() })
         let operations = LibraryOperationCoordinator()
         self.libraryOperations = operations
         self.libraryPresentation = .init(generation: operations.state.presentation, isExclusive: false)
@@ -192,10 +202,11 @@ final class AppModel: ObservableObject {
         }
         operations.onStateChanged = { [weak self] state in self?.acceptOperationState(state) }
         discovery.onChange = { [weak self] state in self?.sourceDiscovery = state }
+        refreshSettings.onChange = { [weak self] _ in self?.objectWillChange.send() }
+        automaticUpdates.onChange = { [weak self] in self?.objectWillChange.send() }
         reloadLibrary()
-        performLibraryOperation { [weak self] in
+        sourceStartupTask = performLibraryOperation { [weak self] in
             await self?.restoreInstalledExtensions()
-            await self?.reloadExtensionRepositories()
             await self?.refreshDownloads()
         }
     }
@@ -551,52 +562,94 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func checkLibraryForUpdates() async {
-        guard acceptsLibraryOperation() else { return }
-        guard libraryUpdateTask == nil else { return }
-        guard let operation = reserveLibraryLifetime() else { return }
-        libraryUpdateOperation = operation
+    @discardableResult
+    func checkLibraryForUpdates(cancelWithObserver: Bool = false) async -> LibraryRefreshOutcome {
+        guard acceptsLibraryOperation() else { return .busy }
+        guard libraryUpdateTask == nil else { return .busy }
+        guard !Task.isCancelled else { return .cancelled }
+        guard let operation = reserveLibraryLifetime() else { return .busy }
         libraryUpdateIsRunning = true
         libraryUpdateIsCancelling = false
         libraryUpdateProgress = nil
         libraryUpdatesError = nil
-        let task = performLibraryOperation(lease: operation) { [weak self] in
-            defer { operation.close() }
-            guard let self else { return }
-            defer { self.libraryUpdateOperation = nil }
-            var scanError: String?
-            do {
-                // Capture the facade and its configuration token together on
-                // MainActor, before the scanner captures its DB targets.
-                let contexts = self.libraryUpdateSourceContexts()
-                let run = try await self.libraryUpdateService.start(sources: contexts)
-                if self.libraryUpdateIsCancelling { await self.libraryUpdateService.cancel() }
-                for await progress in run.updates {
-                    guard progress.scanID == run.scanID else { continue }
-                    self.libraryUpdateProgress = progress
-                    if progress.phase == .cancelling { self.libraryUpdateIsCancelling = true }
-                    if let error = progress.error { scanError = error.errorDescription }
+        let work: Task<LibraryUpdateProgress, Error>
+        do {
+            work = try operation.start {
+                try await self.libraryUpdateService.run(sources: self.libraryUpdateSourceContexts()) { [weak self] progress in
+                    await self?.acceptLibraryUpdateProgress(progress)
                 }
-            } catch {
-                scanError = (error as? LibraryUpdateServiceError)?.errorDescription
-                    ?? "The library check could not finish. Saved updates have been kept."
             }
-            // Keep the local run locked until cooperative cancellation has
-            // drained and the stream closes. Navigation never cancels it.
-            await self.refreshLibraryUpdates()
-            await self.refreshLibrary()
-            if let scanError { self.libraryUpdatesError = scanError }
-            self.libraryUpdateIsRunning = false
-            self.libraryUpdateIsCancelling = false
-            self.libraryUpdateTask = nil
-        }
-        libraryUpdateTask = task
-        if task == nil {
+        } catch {
             operation.close()
-            libraryUpdateOperation = nil
             libraryUpdateIsRunning = false
+            return .busy
         }
-        await task?.value
+        let owned = Task { @MainActor in
+            defer {
+                operation.close()
+                self.libraryUpdateIsRunning = false
+                self.libraryUpdateIsCancelling = false
+                self.libraryUpdateTask = nil
+            }
+            let result = await withTaskCancellationHandler { await work.result } onCancel: { work.cancel() }
+            // Cleanup has its own registered worker, so observer cancellation
+            // cannot skip saved-result publication or release the lease early.
+            let cleanup = try? operation.start {
+                await self.refreshLibraryUpdates()
+                await self.refreshLibrary()
+            }
+            _ = await cleanup?.result
+            switch result {
+            case let .success(progress):
+                if let error = progress.error { self.libraryUpdatesError = error.errorDescription; return LibraryRefreshOutcome.failed }
+                if progress.summary.status == .cancelled { return .cancelled }
+                return progress.summary.failed > 0 ? .partial : .completed
+            case let .failure(error):
+                if error is CancellationError { return .cancelled }
+                self.libraryUpdatesError = (error as? LibraryUpdateServiceError)?.errorDescription
+                    ?? "The library check could not finish. Saved updates have been kept."
+                return .failed
+            }
+        }
+        libraryUpdateTask = owned
+        if cancelWithObserver {
+            return await withTaskCancellationHandler { await owned.value } onCancel: { owned.cancel() }
+        }
+        return await owned.value
+    }
+
+    private func acceptLibraryUpdateProgress(_ progress: LibraryUpdateProgress) {
+        libraryUpdateProgress = progress
+        if progress.phase == .cancelling { libraryUpdateIsCancelling = true }
+    }
+
+    func registerBackgroundUpdates() {
+        backgroundUpdateRequests.register { [weak self] in
+            guard let self else { return false }
+            return await self.automaticUpdates.run { await self.performBackgroundLibraryUpdate() }
+        }
+        automaticUpdates.reconcile()
+    }
+
+    var automaticUpdatesUnavailableMessage: String {
+        if !durableDatabaseAvailable { return "Saved library storage could not be opened. Reopen Kami after checking device storage." }
+        if !backgroundUpdateRequests.isRegistered { return "Background checks could not be registered. Reopen Kami to try again." }
+        return "Background checks are unavailable. Check Background App Refresh and Low Power Mode in iOS Settings, then return to Kami."
+    }
+
+    private func performBackgroundLibraryUpdate() async -> LibraryRefreshOutcome {
+        guard durableDatabaseAvailable else { return .failed }
+        // Source restoration is local, shared and authenticated. An expiring
+        // background observer must not cancel startup for a foreground scene.
+        await sourceStartupTask?.value
+        guard !Task.isCancelled else { return .cancelled }
+        guard libraryUpdateTask == nil, !libraryPresentation.isExclusive else { return .busy }
+        do {
+            let lease = try libraryOperations.open(expected: libraryPresentation.generation)
+            defer { lease.close() }
+            return try await lease.withScope { await checkLibraryForUpdates(cancelWithObserver: true) }
+        } catch is CancellationError { return .cancelled }
+        catch { return .busy }
     }
 
     func loadMoreLibraryUpdates() async {
@@ -630,9 +683,7 @@ final class AppModel: ObservableObject {
     func cancelLibraryUpdate() {
         guard libraryUpdateIsRunning, !libraryUpdateIsCancelling else { return }
         libraryUpdateIsCancelling = true
-        if performLibraryOperation(lease: libraryUpdateOperation, {
-            await self.libraryUpdateService.cancel()
-        }) == nil { libraryUpdateIsCancelling = false }
+        libraryUpdateTask?.cancel()
     }
 
     private func libraryUpdateSourceContexts() -> [Int64: LibraryUpdateSourceContext] {
@@ -938,6 +989,13 @@ final class AppModel: ObservableObject {
     }
 
     func downloadsSceneChanged(sceneID: UUID, active: Bool) {
+        automaticUpdates.reconcile()
+        if active, !foregroundRepositoriesStarted {
+            foregroundRepositoriesStarted = performLibraryOperation {
+                await self.sourceStartupTask?.value
+                await self.reloadExtensionRepositories()
+            } != nil
+        }
         if active { activeDownloadScenes.insert(sceneID) }
         else { activeDownloadScenes.remove(sceneID) }
         downloadsForegroundActive = !activeDownloadScenes.isEmpty

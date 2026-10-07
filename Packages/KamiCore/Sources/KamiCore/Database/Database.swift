@@ -5,9 +5,13 @@ import Foundation
 /// Versioned schema migrations. Every change ships as a new step; the
 /// `user_version` pragma tracks the applied version.
 enum Migrations {
-    static let latest: Int = 7
+    static let latest: Int = 8
 
     static let steps: [Int: String] = [
+        8: """
+        ALTER TABLE manga ADD COLUMN last_library_update_attempt INTEGER NOT NULL DEFAULT 0
+            CHECK(typeof(last_library_update_attempt)='integer' AND last_library_update_attempt>=0);
+        """,
         7: """
         CREATE TABLE source_content_binding (
             source_id INTEGER PRIMARY KEY CHECK(source_id=6351052922295965587),

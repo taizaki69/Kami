@@ -127,7 +127,7 @@ final class LibraryUpdateServiceTests: XCTestCase {
             }
             return LibraryUpdateScanSnapshot(record: current!, items: captured, mutationContext: context)
         }
-        func libraryUpdateTargetIsCurrent(scanID: UUID, mangaID: Int64) throws -> Bool {
+        func claimLibraryUpdateTarget(scanID: UUID, mangaID: Int64) throws -> Bool {
             try check(scanID)
             return outcomes[mangaID] == nil
         }
@@ -223,6 +223,128 @@ final class LibraryUpdateServiceTests: XCTestCase {
     }
     private func emptySource(_ id: Int64, probe: Probe) -> Source {
         Source(id: id, probe: probe) { .init(manga: $0, chapters: []) }
+    }
+
+    func testOwnedRunCancellationDuringBeginDrainsAndCannotCancelNextRun() async throws {
+        let entered = expectation(description: "Owned begin suspended")
+        let gate = Gate(entered), probe = Probe()
+        let ledger = Ledger(items: [item(1, sourceID: 10)], beginGate: gate)
+        let service = LibraryUpdateService(persistence: ledger)
+        let contexts: [Int64: LibraryUpdateSourceContext] = [10: .available(source: emptySource(10, probe: probe), expectedConfiguration: nil)]
+        let task = Task { try await service.run(sources: contexts) }
+        await fulfillment(of: [entered], timeout: 3)
+        task.cancel()
+        await gate.release()
+        let cancelled = try await task.value
+        XCTAssertEqual(cancelled.summary.status, .cancelled)
+        XCTAssertEqual(cancelled.summary.cancelled, 1)
+        let firstCalls = await probe.calls
+        XCTAssertTrue(firstCalls.isEmpty)
+        task.cancel() // A stale observer cannot target another scan.
+        let next = try await service.run(sources: contexts)
+        XCTAssertEqual(next.summary.status, .completed)
+        XCTAssertEqual(next.summary.checked, 1)
+        let begins = await ledger.begins
+        XCTAssertEqual(begins, 2)
+    }
+
+    func testOwnedRunWaitsForCancelledProviderAndKeepsPartialCommit() async throws {
+        let entered = expectation(description: "Second owned request suspended")
+        let cancelling = expectation(description: "Durable cancellation observed")
+        let gate = Gate(entered), probe = Probe()
+        let ledger = Ledger(items: [item(1, sourceID: 10), item(2, sourceID: 10), item(3, sourceID: 10)])
+        let service = LibraryUpdateService(persistence: ledger)
+        let source = Source(id: 10, probe: probe) { manga in
+            if manga.url == "/manga/2" { await gate.wait() }
+            return .init(manga: manga, chapters: [.init(url: manga.url + "/new", name: "Offline fixture")])
+        }
+        let contexts: [Int64: LibraryUpdateSourceContext] = [10: .available(source: source, expectedConfiguration: nil)]
+        let task = Task { try await service.run(sources: contexts) { progress in
+            if progress.phase == .cancelling, progress.summary.status == .cancelled { cancelling.fulfill() }
+        } }
+        await fulfillment(of: [entered], timeout: 3)
+        task.cancel()
+        await fulfillment(of: [cancelling], timeout: 3)
+        do { _ = try await service.start(sources: contexts); XCTFail("Old provider still owns the run") }
+        catch { XCTAssertEqual(error as? LibraryUpdateServiceError, .alreadyRunning) }
+        let savedBeforeDrain = await ledger.successfulManga
+        XCTAssertEqual(savedBeforeDrain.map(\.id), [1])
+        await gate.release()
+        let result = try await task.value
+        XCTAssertEqual(result.summary.status, .cancelled)
+        XCTAssertEqual(result.summary.checked, 1)
+        XCTAssertEqual(result.summary.cancelled, 2)
+        let calls = await probe.calls, saved = await ledger.successfulManga
+        XCTAssertEqual(calls.map(\.url), ["/manga/1", "/manga/2"])
+        XCTAssertEqual(saved.map(\.id), [1])
+    }
+
+    func testPrecancelledOwnedRunCannotCreateDurableScan() async throws {
+        let entered = expectation(description: "Before owned API")
+        let gate = Gate(entered), ledger = Ledger(items: [item(1, sourceID: 10)])
+        let service = LibraryUpdateService(persistence: ledger)
+        let task = Task { await gate.wait(); return try await service.run(sources: [:]) }
+        await fulfillment(of: [entered], timeout: 3)
+        task.cancel(); await gate.release()
+        do { _ = try await task.value; XCTFail("Expected cancellation") } catch { XCTAssertTrue(error is CancellationError) }
+        let begins = await ledger.begins
+        XCTAssertEqual(begins, 0)
+    }
+
+    func testSourceQueueUsesOldestSnapshotTargetOrderNotSourceID() async throws {
+        let items = [item(1, sourceID: 50), item(2, sourceID: 1), item(3, sourceID: 20)]
+        let service = LibraryUpdateService(persistence: Ledger(items: items), maximumConcurrentSources: 1)
+        let probe = Probe()
+        let contexts = Dictionary(uniqueKeysWithValues: [Int64(1), 20, 50].map {
+            ($0, LibraryUpdateSourceContext.available(source: emptySource($0, probe: probe), expectedConfiguration: nil))
+        })
+        let result = try await service.run(sources: contexts)
+        let calls = await probe.calls
+        XCTAssertEqual(calls.map(\.sourceID), [50, 1, 20])
+        XCTAssertEqual(result.summary.checked, 3)
+    }
+
+    @MainActor
+    func testOwnedRealStoreScanKeepsLeaseAndPartialRowsUntilExpiredProviderDrains() async throws {
+        let store = try LibraryStore(inMemory: true)
+        let sourceID = MangaDexSource().id
+        let firstID = try await store.upsert(Manga(sourceId: sourceID, url: "/first", title: "First", inLibrary: true))
+        let secondID = try await store.upsert(Manga(sourceId: sourceID, url: "/second", title: "Second", inLibrary: true))
+        let entered = expectation(description: "Real-store second request")
+        let cancelled = expectation(description: "Real-store invalidated")
+        let gate = Gate(entered), probe = Probe()
+        let source = Source(id: sourceID, probe: probe) { manga in
+            if manga.url == "/second" { await gate.wait() }
+            return .init(manga: manga, chapters: [.init(url: manga.url + "/chapter", name: "Saved offline fixture")])
+        }
+        let service = LibraryUpdateService(store: store)
+        let operations = LibraryOperationCoordinator(), presentation = operations.state.presentation
+        let lease = try operations.open(expected: presentation)
+        let worker = try lease.start {
+            try await service.run(sources: [sourceID: .available(source: source, expectedConfiguration: nil)]) { progress in
+                if progress.phase == .cancelling, progress.summary.status == .cancelled { cancelled.fulfill() }
+            }
+        }
+        await fulfillment(of: [entered], timeout: 3)
+        worker.cancel(); lease.close()
+        await fulfillment(of: [cancelled], timeout: 3)
+        XCTAssertThrowsError(try operations.beginExclusive(expected: presentation)) {
+            XCTAssertEqual($0 as? LibraryOperationError, .operationsInProgress)
+        }
+        let firstChapters = try await store.chapters(mangaId: firstID)
+        XCTAssertEqual(firstChapters.map(\.url), ["/first/chapter"])
+        await gate.release()
+        let result = try await worker.value
+        XCTAssertEqual(result.summary.checked, 1)
+        XCTAssertEqual(result.summary.cancelled, 1)
+        let secondChapters = try await store.chapters(mangaId: secondID)
+        XCTAssertTrue(secondChapters.isEmpty)
+        XCTAssertEqual(operations.state.activeOperations, 0)
+        let exclusive = try operations.beginExclusive(expected: presentation)
+        try operations.finishExclusive(exclusive)
+        let durable = try await store.libraryUpdatesSnapshot()
+        XCTAssertEqual(durable.latestScan?.status, .cancelled)
+        XCTAssertEqual(durable.latestScan?.checked, 1)
     }
 
     func testDistinctSourcesAreBoundedAndMangaWithinOneSourceStaySerial() async throws {

@@ -27,6 +27,68 @@ final class LibraryUpdatePersistenceTests: XCTestCase {
         urls.map { .init(url: $0, name: "Chapter \($0)") }
     }
 
+    func testAttemptRotationSurvivesInterruptionReopenAndDoesNotEstablishBaseline() async throws {
+        let folder = try directory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let path = folder.appendingPathComponent("fair.sqlite").path
+        let store = try LibraryStore(path: path)
+        let a = try await add("A", to: store), b = try await add("B", to: store), c = try await add("C", to: store)
+        let first = try await store.beginLibraryUpdateScan()
+        let claimed = try await store.claimLibraryUpdateTarget(scanID: first.record.scanID, mangaID: a.id!)
+        XCTAssertTrue(claimed)
+        // Simulate a process stop before receiving a provider result.
+        let reopened = try LibraryStore(path: path)
+        let recovered = try await reopened.recoverInterruptedLibraryUpdateScans()
+        XCTAssertEqual(recovered?.status, .interrupted)
+        let next = try await reopened.beginLibraryUpdateScan()
+        XCTAssertEqual(next.items.map(\.manga.id), [b.id, c.id, a.id])
+        XCTAssertTrue(next.items.allSatisfy { !$0.hasSuccessfulBaseline })
+        let claimedB = try await reopened.claimLibraryUpdateTarget(scanID: next.record.scanID, mangaID: b.id!)
+        XCTAssertTrue(claimedB)
+        _ = try await reopened.finishLibraryUpdateScan(scanID: next.record.scanID, status: .cancelled)
+        let third = try await reopened.beginLibraryUpdateScan()
+        XCTAssertEqual(third.items.map(\.manga.id), [c.id, a.id, b.id])
+        _ = try await reopened.finishLibraryUpdateScan(scanID: third.record.scanID, status: .cancelled)
+    }
+
+    func testClaimRejectsRemovedReaddedAndTerminalTargetsWithoutRotation() async throws {
+        let store = try LibraryStore(inMemory: true)
+        let a = try await add("A", to: store), b = try await add("B", to: store)
+        let scan = try await store.beginLibraryUpdateScan()
+        try await store.setLibrary(false, mangaId: a.id!)
+        try await store.setLibrary(true, mangaId: a.id!)
+        let claimed = try await store.claimLibraryUpdateTarget(scanID: scan.record.scanID, mangaID: a.id!)
+        XCTAssertFalse(claimed)
+        _ = try await store.finishLibraryUpdateScan(scanID: scan.record.scanID, status: .cancelled)
+        await expect(.scanNotRunning) { _ = try await store.claimLibraryUpdateTarget(scanID: scan.record.scanID, mangaID: b.id!) }
+        let next = try await store.beginLibraryUpdateScan()
+        XCTAssertEqual(next.items.map(\.manga.id), [a.id, b.id])
+        _ = try await store.finishLibraryUpdateScan(scanID: next.record.scanID, status: .cancelled)
+    }
+
+    func testSchemaSevenUpgradePreservesReadingStateAndStartsRotationAtZero() async throws {
+        let folder = try directory()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let path = folder.appendingPathComponent("v7.sqlite").path
+        let old = try SQLiteDatabase(path: path)
+        for version in 1...7 { try old.execute(try XCTUnwrap(Migrations.steps[version])) }
+        try old.execute("PRAGMA user_version=7")
+        let mangaID = try old.insert("INSERT INTO manga(source_id,url,title,in_library) VALUES (?,?,?,1)",
+                                    [.int(Self.nativeID), .text("/v7"), .text("Existing manga")])
+        let chapterID = try old.insert("INSERT INTO chapter(manga_id,url,name,read,bookmark,last_page_read) VALUES (?,?,?,1,1,42)",
+                                      [.int(mangaID), .text("/v7/c"), .text("Saved chapter")])
+        try old.run("INSERT INTO history(manga_id,chapter_id,last_read) VALUES (?,?,123)", [.int(mangaID), .int(chapterID)])
+        let store = try LibraryStore(path: path)
+        let chapters = try await store.chapters(mangaId: mangaID)
+        XCTAssertEqual(chapters.first?.id, chapterID)
+        XCTAssertEqual(chapters.first?.lastPageRead, 42)
+        XCTAssertEqual(chapters.first?.read, true)
+        XCTAssertEqual(chapters.first?.bookmark, true)
+        XCTAssertEqual(try old.query("SELECT last_read FROM history").first?.int64("last_read"), 123)
+        XCTAssertEqual(try old.query("SELECT last_library_update_attempt FROM manga").first?.int64("last_library_update_attempt"), 0)
+        XCTAssertEqual(try old.query("PRAGMA user_version").first?.int("user_version"), Migrations.latest)
+    }
+
     private func expect(
         _ error: LibraryUpdatePersistenceError,
         _ operation: () async throws -> Void
