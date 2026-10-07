@@ -3,7 +3,7 @@ import MihonCompatKit
 
 public enum SourceMigrationError: Error, Equatable, Sendable, LocalizedError {
     case invalidDestination, sourceChanged, sameManga, originUnavailable
-    case foreignPreview, previewExpired, invalidSelection, activeWork, storageUnavailable
+    case foreignPreview, previewExpired, invalidSelection, destinationAlreadyMatched, activeWork, storageUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -13,6 +13,7 @@ public enum SourceMigrationError: Error, Equatable, Sendable, LocalizedError {
         case .originUnavailable: "The original manga is no longer in your library. Reopen it before migrating."
         case .foreignPreview, .previewExpired: "Your library changed. Prepare a new migration preview before continuing."
         case .invalidSelection: "The selected chapter matches are no longer valid. Prepare a new preview."
+        case .destinationAlreadyMatched: "That destination chapter already has a match. Remove its existing pair before assigning it again."
         case .activeWork: "Let library updates and downloads finish before migrating."
         case .storageUnavailable: "The migration could not be saved. Your library was kept unchanged."
         }
@@ -21,6 +22,7 @@ public enum SourceMigrationError: Error, Equatable, Sendable, LocalizedError {
 
 public struct SourceMigrationMatch: Identifiable, Sendable {
     public let id: Int
+    public let destinationIndex: Int
     public let original: LibraryBackupDocument.Chapter
     public let destination: LibraryBackupDocument.Chapter
 }
@@ -63,7 +65,7 @@ public struct SourceMigrationMatching: Sendable {
             if chapter.number < 0 { reason = .unknownNumber }
             else if left[chapter.number]?.count != 1 || (right[chapter.number]?.count ?? 0) > 1 { reason = .ambiguousNumber }
             else if let target = right[chapter.number]?.first {
-                matches.append(.init(id: i, original: chapter, destination: destination[target]))
+                matches.append(.init(id: i, destinationIndex: target, original: chapter, destination: destination[target]))
                 continue
             } else { reason = .noDestination }
             unmatched.append(.init(id: i, chapter: chapter, reason: reason))
@@ -141,8 +143,8 @@ public struct SourceMigrationCandidate: Sendable {
     }
 }
 
-/// Immutable, store-issued approval data. A list of selected match IDs can
-/// only narrow these reviewed suggestions, never inject another chapter URL.
+/// Immutable, store-issued approval data. Selections can pair only chapters
+/// inside this preview; they cannot inject URLs or refer to another preview.
 public struct SourceMigrationPreview: Identifiable, Sendable {
     public let id: UUID
     public let original: LibraryBackupDocument.Manga
@@ -157,8 +159,32 @@ public struct SourceMigrationPreview: Identifiable, Sendable {
     let changeStamp: [Int64]
     let expectedConfiguration: ExtensionExecutionConfiguration?
 
-    func validateSelection(_ selected: Set<Int>) throws {
+    public func makeDraft() -> SourceMigrationDraft {
+        .init(previewID: id, originalCount: original.chapters.count,
+              destinationCount: destination.manga.chapters.count, suggestions: matching.matches)
+    }
+
+    func suggestedSelection(_ selected: Set<Int>) throws -> SourceMigrationSelection {
         guard selected.isSubset(of: Set(matching.matches.map(\.id))) else { throw SourceMigrationError.invalidSelection }
+        return .init(previewID: id, pairs: matching.matches.filter { selected.contains($0.id) }.map {
+            .init(originalIndex: $0.id, destinationIndex: $0.destinationIndex)
+        })
+    }
+
+    func resolvedMatches(_ selection: SourceMigrationSelection) throws -> [SourceMigrationMatch] {
+        guard selection.previewID == id, selection.pairs.count <= original.chapters.count,
+              selection.pairs.count <= destination.manga.chapters.count else { throw SourceMigrationError.invalidSelection }
+        var origins = Set<Int>(), destinations = Set<Int>()
+        return try selection.pairs.map { pair in
+            try Task.checkCancellation()
+            guard original.chapters.indices.contains(pair.originalIndex),
+                  destination.manga.chapters.indices.contains(pair.destinationIndex),
+                  origins.insert(pair.originalIndex).inserted, destinations.insert(pair.destinationIndex).inserted
+            else { throw SourceMigrationError.invalidSelection }
+            return .init(id: pair.originalIndex, destinationIndex: pair.destinationIndex,
+                         original: original.chapters[pair.originalIndex],
+                         destination: destination.manga.chapters[pair.destinationIndex])
+        }
     }
 }
 

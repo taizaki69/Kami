@@ -6,11 +6,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-06
 
 The full native-reader and compatibility objective remains active. The current
-continuation adds reviewed, additive source migration: selected-source search,
-unique-number chapter suggestions, explicit unmatched coverage, selectable
-read/bookmark transfer and optional category union. The original and its files,
-history and page positions remain intact. Manual pairing, replace/remove mode,
-and physical migration interaction remain open; see [migration](docs/SOURCE_MIGRATION.md).
+continuation extends reviewed, additive source migration with manual one-to-one
+chapter pairing, bounded local chapter search and current match coverage.
+Occupied destinations require explicit unpairing; changed choices invalidate
+review acknowledgement. It follows unique-number suggestions, selected-source
+search and atomic read/bookmark/category transfer. The original and its files,
+history and page positions remain intact. Replace/remove mode and physical
+migration interaction remain open; see [migration](docs/SOURCE_MIGRATION.md).
 It follows persistent source/language selection for Browse and global
 search, with explicit all/none semantics, remembered unavailable identities,
 reviewed edits and revocable search snapshots. It follows bounded local
@@ -395,8 +397,10 @@ must not be used as evidence for the current commit.
 - [x] Additive migration flow (multi-source search + reviewed unique-number
       chapter matching), read/bookmark transfer and optional categories.
       Original manga, history, page offsets and downloaded identities stay intact.
-- [ ] Manual ambiguous/unknown chapter pairing, replace/remove-original mode,
-      destination search pagination and physical-device migration interaction.
+- [x] Manual ambiguous/unknown chapter pairing with one-to-one assignments,
+      bounded local chapter search/pagination and renewed review after changes.
+- [ ] Replace/remove-original mode, destination manga-search pagination and
+      physical-device migration interaction.
 - [x] Native backup export and reviewed restore UI with counts/conflicts.
 - [x] Mihon import UI with measured English MangaDex mapping and coverage report.
 - [ ] Broaden source mapping and supported Mihon fields with producer evidence.

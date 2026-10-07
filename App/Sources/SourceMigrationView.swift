@@ -76,7 +76,7 @@ struct SourceMigrationView: View {
         .onChange(of: model.sourceDiscovery.revision) { _, _ in sourcesChanged() }
         .onDisappear { stop() }
         .sheet(isPresented: $showingSelection) { SourceSelectionSheet(initial: model.sourceDiscovery) }
-        .sheet(item: $preview) { item in SourceMigrationReview(preview: item, presentation: presentation) }
+        .sheet(item: $preview) { item in SourceMigrationReview(preview: item, presentation: presentation).id(item.id) }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { submit() } label: { Label("Search", systemImage: "magnifyingglass") }
@@ -149,16 +149,20 @@ private struct SourceMigrationReview: View {
     @Environment(\.dismiss) private var dismiss
     let preview: SourceMigrationPreview
     let presentation: LibraryPresentationGeneration
-    @State private var selected: Set<Int>
+    @State private var draft: SourceMigrationDraft
     @State private var copyCategories = true
-    @State private var reviewed = false
+    @State private var reviewedRevision: UUID?
+    @State private var reviewedCategories: Bool?
+    @State private var showingReset = false
     @State private var errorText: String?
     @State private var expired = false
 
     init(preview: SourceMigrationPreview, presentation: LibraryPresentationGeneration) {
         self.preview = preview; self.presentation = presentation
-        _selected = State(initialValue: Set(preview.matching.matches.map(\.id)))
+        _draft = State(initialValue: preview.makeDraft())
     }
+
+    private var reviewed: Bool { reviewedRevision == draft.revision && reviewedCategories == copyCategories }
 
     var body: some View {
         NavigationStack {
@@ -171,7 +175,7 @@ private struct SourceMigrationReview: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("What will be copied") {
-                    Text("Read status and bookmarks from \(selected.count) selected chapter matches. Existing destination flags stay set.")
+                    Text("Read status and bookmarks from \(draft.matchedCount) selected chapter matches. Existing destination flags stay set.")
                     if !preview.categoryNames.isEmpty {
                         Toggle("Copy categories", isOn: $copyCategories)
                         Text(preview.categoryNames.joined(separator: ", ")).font(.footnote)
@@ -180,43 +184,43 @@ private struct SourceMigrationReview: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Chapter coverage") {
-                    Text("\(preview.matching.matches.count) suggested matches out of \(preview.original.chapters.count) original chapters")
-                    Text("\(preview.matching.unmatchedDestinationCount) destination chapters have no suggested original match.")
+                    Text("\(draft.matchedCount) selected pairs: \(draft.manualCount) manual, \(draft.matchedCount - draft.manualCount) suggested by number")
+                    Text("\(draft.unmatchedOriginalCount) original and \(draft.unmatchedDestinationCount) destination chapters remain unmatched.")
                         .font(.footnote).foregroundStyle(.secondary)
-                    if !preview.matching.unmatched.isEmpty {
-                        NavigationLink("Review \(preview.matching.unmatched.count) unmatched original chapters") {
-                            List(preview.matching.unmatched) { item in
-                                VStack(alignment: .leading) {
-                                    Text(item.chapter.name)
-                                    Text(reason(item.reason)).font(.caption).foregroundStyle(.secondary)
-                                    if item.chapter.read || item.chapter.bookmark {
-                                        Text("Reading state stays on the original").font(.caption)
-                                    }
+                    NavigationLink("Match chapters manually") {
+                        SourceMigrationChapterEditor(preview: preview, draft: $draft)
+                    }
+                    Button("Reset to number suggestions") { showingReset = true }
+                }
+                Section {
+                    ForEach(draft.pairs) { pair in
+                        HStack {
+                            NavigationLink {
+                                SourceMigrationDestinationPicker(preview: preview, originalIndex: pair.originalIndex, draft: $draft)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(preview.original.chapters[pair.originalIndex].name)
+                                    Text("→ \(preview.destination.manga.chapters[pair.destinationIndex].name)").font(.subheadline)
+                                    Text(draft.isNumberSuggestion(pair) ? "Suggested by number" : "Manual match")
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
-                            }.navigationTitle("Unmatched chapters")
-                        }
-                    }
-                }
-                Section {
-                    ForEach(preview.matching.matches) { match in
-                        Toggle(isOn: Binding(get: { selected.contains(match.id) }, set: {
-                            if $0 { selected.insert(match.id) } else { selected.remove(match.id) }
-                        })) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(match.original.name)
-                                Text("→ \(match.destination.name)").font(.subheadline)
-                                Text("Number \(match.original.number.formatted()) · \(match.original.read ? "Read" : "Unread") · \(match.original.bookmark ? "Bookmarked" : "No bookmark")")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                if let left = match.original.scanlator { Text("Original: \(left)").font(.caption) }
-                                if let right = match.destination.scanlator { Text("Destination: \(right)").font(.caption) }
                             }
+                            Button {
+                                do { try draft.assign(destination: nil, to: pair.originalIndex) }
+                                catch { errorText = error.localizedDescription }
+                            } label: { Label("Remove match", systemImage: "minus.circle") }
+                                .labelStyle(.iconOnly).buttonStyle(.borderless)
                         }
                     }
-                } header: { Text("Review suggested matches") } footer: {
-                    Text("Suggestions use a chapter number that occurs once on each side. Check titles and editions before copying. Duplicate or unknown numbers are left unmatched; manual pairing is not available yet.")
+                } header: { Text("Review selected pairs") } footer: {
+                    Text("Check chapter titles, editions and scanlators before copying. Open a pair to review its details or choose a different destination. Each destination can be paired once; chapter numbers do not prove identical content.")
                 }
                 Section {
-                    Toggle("I checked the destination and selected matches", isOn: $reviewed)
+                    Toggle("I checked the destination and selected matches", isOn: Binding(
+                        get: { reviewed }, set: {
+                            reviewedRevision = $0 ? draft.revision : nil
+                            reviewedCategories = $0 ? copyCategories : nil
+                        }))
                     Button("Add destination and copy selected state") { commit() }
                         .disabled(!reviewed || expired || model.libraryPresentation.isExclusive)
                     if let errorText { Text(errorText).font(.footnote).foregroundStyle(.red) }
@@ -240,8 +244,11 @@ private struct SourceMigrationReview: View {
                     Button("Close") { dismiss() }.disabled(model.libraryPresentation.isExclusive)
                 }
             }
-            .onChange(of: selected) { _, _ in reviewed = false }
-            .onChange(of: copyCategories) { _, _ in reviewed = false }
+            .confirmationDialog("Replace your chapter choices with number suggestions?", isPresented: $showingReset) {
+                Button("Reset suggested pairs", role: .destructive) { draft.resetToSuggestions() }
+            }
+            .onChange(of: draft.revision) { _, _ in reviewedRevision = nil }
+            .onChange(of: copyCategories) { _, _ in reviewedCategories = nil }
             .onChange(of: model.sourceMigrationFailure?.id) { _, _ in
                 if let failure = model.sourceMigrationFailure, failure.previewID == preview.id {
                     errorText = failure.message; expired = true
@@ -252,18 +259,11 @@ private struct SourceMigrationReview: View {
 
     private func commit() {
         do {
-            try model.beginSourceMigration(preview, selectedMatches: selected,
+            try model.beginSourceMigration(preview, selection: draft.selection,
                 copyCategories: copyCategories, expected: presentation)
         } catch {
             errorText = (error as? LocalizedError)?.errorDescription ?? "Migration is unavailable. Prepare a new preview."
         }
     }
 
-    private func reason(_ value: SourceMigrationUnmatched.Reason) -> String {
-        switch value {
-        case .unknownNumber: "No known chapter number"
-        case .ambiguousNumber: "This number occurs more than once"
-        case .noDestination: "No destination chapter with this number"
-        }
-    }
 }

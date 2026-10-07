@@ -16,10 +16,15 @@ the title to find another destination. Search and preview do not save manga.
   in both the original's stored chapters and the fetched destination list.
   Fractional numbers and zero are retained. Titles and scanlators are shown
   for review; matching numbers alone do not establish identical content.
-- Deselect any unsuitable match. A separate list explains every unmatched
-  original chapter: unknown number, duplicate number or no destination number.
-  Coverage also counts destination chapters without suggestions. Hidden original
-  chapters participate, so previously saved editions can make a number ambiguous.
+- Remove an unsuitable pair, open it to change the destination, or choose
+  **Match chapters manually** to assign an unmatched original. Unknown or
+  duplicate numbers have no automatic suggestion. Hidden original chapters
+  participate, so previously saved editions can make a number ambiguous.
+- Each original and destination can occur in at most one selected pair. A
+  destination already assigned to another original must be freed explicitly
+  before reusing it; choosing a new pair never silently displaces another.
+  Current coverage counts selected manual/number pairs and unmatched chapters
+  on both sides. Existing numeric suggestions can also be overridden manually.
 - Confirm that you checked the destination and selected matches, then apply.
   The destination enters the library and missing fetched chapters are added.
   Selected matches copy read and bookmark flags by union; existing flags stay set.
@@ -35,6 +40,23 @@ the title to find another destination. Search and preview do not save manga.
 A migration with zero selected pairs still adds the destination; the preview
 states the zero coverage before confirmation. A subsequent normal source
 refresh uses the ordinary chapter-currentness and discovery rules.
+
+## Choosing chapter pairs
+
+The original picker defaults to unmatched chapters; disable that filter to
+review or change an existing pair. The destination picker defaults to available
+chapters and retains the current choice. Disable its filter to inspect occupied
+destinations and their assigned original; those choices remain disabled.
+Both pickers search chapter title, number and scanlator locally, with 100
+results per page and explicit previous/next controls. No provider call or
+database write occurs while editing chapter pairs. Chapter paths are shown to
+help distinguish entries whose titles, numbers and scanlators are identical.
+
+The review distinguishes manual assignments from retained number suggestions.
+Changing a pair invalidates acknowledgement even after returning to the old
+mapping; no-op edits keep the current revision. **Reset to number suggestions**
+asks before replacing manual choices. Category changes also require renewed
+review. Applying captures an immutable selection of the reviewed pairs.
 
 ## Ownership and atomicity
 
@@ -54,8 +76,12 @@ provider has already stopped. Commit makes no provider requests.
 The store issues an immutable preview with a bounded full-domain fingerprint,
 connection/external-change stamp, epoch and captured destination execution
 configuration. The stamp catches changes that return to the same value (ABA).
-Commit accepts only a subset of that preview's match IDs. It rejects another
-store's preview, stale state, revoked candidates, pending durable updates or
+Commit accepts only one-to-one pairs of chapter indices inside that exact
+preview UUID. It checks both index bounds and both sides' uniqueness before
+resolving the original UTF-8 URLs. A selection from another preview is rejected,
+even if its chapter counts and database state are identical. The original
+numeric-subset API remains a narrowing wrapper over this validated path.
+Commit rejects another store's preview, stale state, revoked candidates, pending durable updates or
 active download publication. FoolSlide's authenticated configuration and saved
 deployment namespace are revalidated inside the write transaction; migration
 never changes or infers that namespace.
@@ -75,8 +101,16 @@ manga, 4 KiB identity URLs, 8 KiB metadata fields, 256 KiB descriptions and
 The combined stored state is validated before COMMIT. These are retained-data
 bounds, not a measurement of provider allocations or peak device memory.
 
-This first flow is additive. Manual arbitrary pairing for ambiguous/unknown
-numbers, replacement/removal of the original and destination pagination remain
+Local chapter search limits the query to 256 UTF-8 bytes, each name/scanlator
+to 8 KiB and aggregate searched name/scanlator text to 32 MiB. Search checks
+cancellation while scanning, retains at most 100 result indices per page and
+preserves the immutable preview indices. Case/diacritic-insensitive display
+search does not normalize or search identity URLs. App search workers run off
+the main actor, drain cancelled predecessors and reject stale publication.
+
+The flow is additive. Replacement/removal of the original and destination
+manga-search pagination remain
 open. No history, progress-page or download transfer across providers is
 claimed. Physical-device, VoiceOver, multiwindow and large-library interaction
-need separate validation. See [verification](VERIFICATION-2026-10-05-SOURCE-MIGRATION.md).
+need separate validation. See [original verification](VERIFICATION-2026-10-05-SOURCE-MIGRATION.md)
+and [manual matching verification](VERIFICATION-2026-10-06-MIGRATION-MATCHING.md).

@@ -430,12 +430,12 @@ final class AppModel: ObservableObject {
         } onCancel: { worker.cancel() }
     }
 
-    func beginSourceMigration(_ preview: SourceMigrationPreview, selectedMatches: Set<Int>,
+    func beginSourceMigration(_ preview: SourceMigrationPreview, selection: SourceMigrationSelection,
                               copyCategories: Bool, expected: LibraryPresentationGeneration) throws {
         guard durableDatabaseAvailable else { throw SourceMigrationError.storageUnavailable }
         guard sourceMigrationTask == nil else { throw LibraryOperationError.exclusiveInProgress }
         let operation = try libraryOperations.startSourceMigration(store: store, preview: preview,
-            selectedMatches: selectedMatches, copyCategories: copyCategories, expected: expected)
+            selection: selection, copyCategories: copyCategories, expected: expected)
         sourceMigrationTask = operation
         sourceMigrationFailure = nil
         libraryRestoreNotice = nil
