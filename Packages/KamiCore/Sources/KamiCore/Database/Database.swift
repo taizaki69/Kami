@@ -5,9 +5,24 @@ import Foundation
 /// Versioned schema migrations. Every change ships as a new step; the
 /// `user_version` pragma tracks the applied version.
 enum Migrations {
-    static let latest: Int = 8
+    static let latest: Int = 9
 
     static let steps: [Int: String] = [
+        9: """
+        CREATE TABLE library_notification_state (
+            singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+            enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+            revision INTEGER NOT NULL CHECK(typeof(revision)='integer' AND revision>0),
+            scan_cursor INTEGER NOT NULL CHECK(typeof(scan_cursor)='integer' AND scan_cursor>=0),
+            batch_id TEXT,
+            chapter_count INTEGER NOT NULL DEFAULT 0 CHECK(typeof(chapter_count)='integer' AND chapter_count>=0),
+            incomplete INTEGER NOT NULL DEFAULT 0 CHECK(incomplete IN (0,1)),
+            outcome TEXT CHECK(outcome IN ('attempting','submitted','unconfirmed')),
+            CHECK((batch_id IS NULL AND outcome IS NULL AND chapter_count=0) OR
+                  (length(CAST(batch_id AS BLOB))=36 AND outcome IS NOT NULL AND chapter_count>0))
+        );
+        INSERT INTO library_notification_state(singleton,enabled,revision,scan_cursor) VALUES (1,0,1,0);
+        """,
         8: """
         ALTER TABLE manga ADD COLUMN last_library_update_attempt INTEGER NOT NULL DEFAULT 0
             CHECK(typeof(last_library_update_attempt)='integer' AND last_library_update_attempt>=0);

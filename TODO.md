@@ -3,16 +3,22 @@
 Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocked
 
 
-## Active continuation — 2026-10-06
+## Active continuation — 2026-10-07
 
 The full native-reader and compatibility objective remains active. The current
-continuation adds opt-in background library checks with durable 6/12/24-hour
+continuation adds separately opt-in chapter notifications for saved discoveries,
+with explicit foreground permission, durable batch claims, interruption
+reconciliation and one-scene navigation into current Updates. Initial baselines
+are silent; uncertain delivery is visible and never blindly replayed. Physical
+permission/delivery/tap behavior remains unverified; see
+[chapter notifications](docs/CHAPTER_NOTIFICATIONS.md).
+It follows opt-in background library checks with durable 6/12/24-hour
 minimum intervals, visible scheduling failures, request-scoped expiration and
 provider drainage. Oldest-attempt ordering rotates both manga and source queues
 after short grants or interruption. Manual and automatic scans share one owner;
 restores/migrations remain excluded until cleanup finishes. Actual iOS launch
-frequency, restrictions and interaction still need device verification; system
-notifications remain open. See [automatic updates](docs/AUTOMATIC_UPDATES.md).
+frequency, restrictions and interaction still need device verification.
+See [automatic updates](docs/AUTOMATIC_UPDATES.md).
 It follows reviewed, additive source migration with manual one-to-one
 chapter pairing, bounded local chapter search and current match coverage.
 Occupied destinations require explicit unpairing; changed choices invalidate
@@ -70,7 +76,10 @@ must not be used as evidence for the current commit.
       durable eligibility, request-scoped cancellation/drainage and fair rotation.
 - [ ] Verify real background launches, system restrictions, process termination,
       battery/network behavior and settings interaction on an Apple device.
-- [ ] Add user-controlled new-chapter system notifications.
+- [x] Add user-controlled new-chapter system notifications, with durable
+      attempts, no baseline alerts, permission controls and current Updates routing.
+- [ ] Verify notification permission, foreground/background delivery, denial,
+      Focus settings, process termination and multiwindow taps on an Apple device.
 - [x] Implement the foreground downloads manager: durable queue, pause/cancel,
       fresh retry, bounded file storage, offline reader and deferred deletion.
       Local fixtures pass; exact-commit Apple CI is recorded on its PR,

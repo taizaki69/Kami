@@ -1022,6 +1022,22 @@ public actor LibraryStore {
 
     // MARK: - Guarded reading state
 
+    public func libraryNotificationSettings() throws -> LibraryNotificationSettings {
+        try withLibraryTransaction(readOnly: true) { try LibraryNotificationPersistence.read(db) }
+    }
+
+    public func saveLibraryNotificationSettings(enabled: Bool, expectedRevision: Int64) throws -> LibraryNotificationSettings {
+        try withLibraryTransaction { try LibraryNotificationPersistence.save(db, enabled: enabled, expectedRevision: expectedRevision) }
+    }
+
+    public func claimLibraryNotificationBatch(expectedRevision: Int64) throws -> LibraryNotificationBatch? {
+        try withLibraryTransaction { try LibraryNotificationPersistence.claim(db, expectedRevision: expectedRevision) }
+    }
+
+    public func finishLibraryNotificationBatch(id: UUID, outcome: LibraryNotificationOutcome) throws {
+        try withLibraryTransaction { try LibraryNotificationPersistence.finish(db, id: id, outcome: outcome) }
+    }
+
     /// Explicit initial opening by exact source/UTF-8 manga identity. Retained
     /// sessions must validate their captured target instead of calling this to
     /// obtain the latest epoch after a provider suspension.
