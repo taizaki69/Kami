@@ -3,10 +3,15 @@
 Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocked
 
 
-## Active continuation — 2026-10-05
+## Active continuation — 2026-10-06
 
 The full native-reader and compatibility objective remains active. The current
-continuation adds persistent source/language selection for Browse and global
+continuation adds reviewed, additive source migration: selected-source search,
+unique-number chapter suggestions, explicit unmatched coverage, selectable
+read/bookmark transfer and optional category union. The original and its files,
+history and page positions remain intact. Manual pairing, replace/remove mode,
+and physical migration interaction remain open; see [migration](docs/SOURCE_MIGRATION.md).
+It follows persistent source/language selection for Browse and global
 search, with explicit all/none semantics, remembered unavailable identities,
 reviewed edits and revocable search snapshots. It follows bounded local
 compatibility diagnostics and user-selected
@@ -25,7 +30,7 @@ It builds on durable FoolSlide website identity, atomic reader state with databa
 native export to Files, Mihon gzip/raw backup decoding, offline downloads,
 updates, History resume and revocable source registrations. Native restore is
 available; the measured Mihon subset now imports with explicit coverage and
-exclusion review. Broader source adapters and migration remain pending.
+exclusion review. Broader source adapters remain pending.
 See [native backup verification](docs/VERIFICATION-2026-10-04-NATIVE-BACKUPS.md),
 [reading-state design](docs/READING_STATE.md),
 [Mihon decoder verification](docs/VERIFICATION-2026-10-04.md) and
@@ -387,7 +392,11 @@ must not be used as evidence for the current commit.
 - [x] Manual library update scanner, grouping and per-manga outcomes (PR #12).
       Scheduled updates and system notifications remain open.
 - [x] Categories UI + management (PR #10); device interaction remains unverified.
-- [ ] Migration flow (multi-source search + chapter matching)
+- [x] Additive migration flow (multi-source search + reviewed unique-number
+      chapter matching), read/bookmark transfer and optional categories.
+      Original manga, history, page offsets and downloaded identities stay intact.
+- [ ] Manual ambiguous/unknown chapter pairing, replace/remove-original mode,
+      destination search pagination and physical-device migration interaction.
 - [x] Native backup export and reviewed restore UI with counts/conflicts.
 - [x] Mihon import UI with measured English MangaDex mapping and coverage report.
 - [ ] Broaden source mapping and supported Mihon fields with producer evidence.
@@ -411,8 +420,9 @@ must not be used as evidence for the current commit.
       stale-editor rejection and invalidation before queued queries/results.
       See [global search](docs/GLOBAL_SEARCH.md); Apple interaction remains
       separate from deterministic tests and exact-head compilation.
-- [ ] Migration matching on top of global search; first-page previews and
-      discovery preferences do not migrate library or chapter reading state.
+- [x] Migration review on top of global search and discovery preferences;
+      bounded store-issued previews, atomic merge, stale-state rejection and
+      shared exclusive commit. See [migration](docs/SOURCE_MIGRATION.md).
 
 ## P2 — Polish
 

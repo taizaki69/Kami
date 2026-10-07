@@ -123,7 +123,10 @@ exception strings. The query and results are held only in the open screen.
 
 ## Remaining work
 
-Cross-source ranking and migration/chapter matching remain separate tasks.
+Cross-source ranking remains open. The saved-manga
+[migration route](SOURCE_MIGRATION.md) now reuses this bounded first-page
+search with a separate reviewed, atomic reading-state transfer. Ordinary global
+search still performs no library writes.
 Live-source availability and physical-device search/editor interaction are not
 established by deterministic fixtures or compilation. The selector does not
 change a source's content-language filters or broaden Mihon backup adapters.

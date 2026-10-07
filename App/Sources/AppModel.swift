@@ -64,6 +64,8 @@ final class AppModel: ObservableObject {
     @Published var libraryRestoreNotice: String?
     @Published private(set) var libraryRestoreFailure: LibraryRestoreFailure?
     private var libraryRestoreTask: Task<LibraryRestoreCompletion, Error>?
+    @Published private(set) var sourceMigrationFailure: LibraryRestoreFailure?
+    private var sourceMigrationTask: Task<SourceMigrationCompletion, Error>?
     private let durableDatabaseAvailable: Bool
     private let downloadContentStore: DownloadContentStore?
     private var downloadService: LibraryDownloadService?
@@ -395,6 +397,65 @@ final class AppModel: ObservableObject {
     }
 
     func cancelLibraryRestore() { libraryRestoreTask?.cancel() }
+
+    func cancelExclusiveLibraryChange() {
+        libraryRestoreTask?.cancel()
+        sourceMigrationTask?.cancel()
+    }
+
+    func prepareSourceMigration(origin: MangaReadingSnapshot, match: GlobalSearchMatch,
+                                registration: SourceRegistrationSnapshot,
+                                selection: SourceDiscoverySelectionSnapshot) async throws -> SourceMigrationPreview {
+        try requireLibraryOperation()
+        guard durableDatabaseAvailable else { throw SourceMigrationError.storageUnavailable }
+        guard readySourceRegistrations().contains(where: { $0.registrationID == registration.registrationID })
+        else { throw SourceMigrationError.sourceChanged }
+        await waitForReadingSaves()
+        let configuration = try sourceExecutionConfiguration(id: registration.sourceID, revision: registration.revision)
+        try await store.validateSourceExecution(sourceID: registration.sourceID,
+            expectedConfiguration: configuration, context: origin.mutationContext)
+        let store = self.store
+        let worker = Task.detached(priority: .userInitiated) {
+            let destination = try await SourceMigrationCandidate.fetch(registration: registration, manga: match.manga, selection: selection)
+            return try await store.previewSourceMigration(origin: origin, destination: destination,
+                expectedConfiguration: configuration)
+        }
+        return try await withTaskCancellationHandler {
+            let preview = try await worker.value
+            try Task.checkCancellation()
+            try requireLibraryOperation()
+            guard readySourceRegistrations().contains(where: { $0.registrationID == registration.registrationID })
+            else { throw SourceMigrationError.sourceChanged }
+            return preview
+        } onCancel: { worker.cancel() }
+    }
+
+    func beginSourceMigration(_ preview: SourceMigrationPreview, selectedMatches: Set<Int>,
+                              copyCategories: Bool, expected: LibraryPresentationGeneration) throws {
+        guard durableDatabaseAvailable else { throw SourceMigrationError.storageUnavailable }
+        guard sourceMigrationTask == nil else { throw LibraryOperationError.exclusiveInProgress }
+        let operation = try libraryOperations.startSourceMigration(store: store, preview: preview,
+            selectedMatches: selectedMatches, copyCategories: copyCategories, expected: expected)
+        sourceMigrationTask = operation
+        sourceMigrationFailure = nil
+        libraryRestoreNotice = nil
+        Task { @MainActor in
+            do {
+                let completion = try await operation.value
+                libraryRestoreNotice = "Destination saved with \(completion.report.selectedChapters) selected chapter matches. Your original manga and downloads are still in the library."
+                if !completion.presentationPublished {
+                    libraryOperationError = "Migration was saved. Reopen the library to refresh its display."
+                }
+            } catch {
+                let message = error is CancellationError ? "Migration cancelled. Your library was kept unchanged."
+                    : (error as? SourceMigrationError)?.errorDescription
+                        ?? "Migration could not finish. Your library was kept unchanged. Prepare a new preview."
+                sourceMigrationFailure = .init(previewID: preview.id, message: message)
+                libraryRestoreNotice = message
+            }
+            sourceMigrationTask = nil
+        }
+    }
 
     func refreshLibrary() async {
         guard acceptsLibraryOperation() else { return }

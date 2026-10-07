@@ -38,6 +38,10 @@ public struct SourceRegistrationSnapshot: Sendable {
         try scope.checkAvailability()
     }
 
+    func perform<Value: Sendable>(_ operation: @escaping @Sendable () async throws -> Value) async throws -> Value {
+        try await scope.perform(operation)
+    }
+
     /// Native projections gain this lifetime; already-bound interpreted
     /// requests must have the exact same original scope and retain their handle.
     public func scopedImageRequest(_ request: ImageRequest) throws -> ImageRequest {
