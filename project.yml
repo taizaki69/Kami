@@ -32,6 +32,10 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         UIRequiresFullScreen: false
         ITSAppUsesNonExemptEncryption: false
+        UIBackgroundModes:
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - app.kami.reader.library-refresh
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: app.kami.library-backup
             UTTypeDescription: Kami Library Backup

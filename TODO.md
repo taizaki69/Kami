@@ -6,7 +6,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-06
 
 The full native-reader and compatibility objective remains active. The current
-continuation extends reviewed, additive source migration with manual one-to-one
+continuation adds opt-in background library checks with durable 6/12/24-hour
+minimum intervals, visible scheduling failures, request-scoped expiration and
+provider drainage. Oldest-attempt ordering rotates both manga and source queues
+after short grants or interruption. Manual and automatic scans share one owner;
+restores/migrations remain excluded until cleanup finishes. Actual iOS launch
+frequency, restrictions and interaction still need device verification; system
+notifications remain open. See [automatic updates](docs/AUTOMATIC_UPDATES.md).
+It follows reviewed, additive source migration with manual one-to-one
 chapter pairing, bounded local chapter search and current match coverage.
 Occupied destinations require explicit unpairing; changed choices invalidate
 review acknowledgement. It follows unique-number suggestions, selected-source
@@ -59,7 +66,11 @@ must not be used as evidence for the current commit.
       History/Updates from current persisted reading state. The SQLite and
       coordination suites pass locally; the implementation PR records Apple
       verification for its exact commit, separately from interaction testing.
-- [ ] Add scheduled background updates with explicit product controls.
+- [x] Add opt-in scheduled background updates with explicit product controls,
+      durable eligibility, request-scoped cancellation/drainage and fair rotation.
+- [ ] Verify real background launches, system restrictions, process termination,
+      battery/network behavior and settings interaction on an Apple device.
+- [ ] Add user-controlled new-chapter system notifications.
 - [x] Implement the foreground downloads manager: durable queue, pause/cancel,
       fresh retry, bounded file storage, offline reader and deferred deletion.
       Local fixtures pass; exact-commit Apple CI is recorded on its PR,
@@ -392,7 +403,9 @@ must not be used as evidence for the current commit.
 - [x] Foreground downloads manager; active continuation above. Retry restarts
       partial chapters; background transfers and byte-range resume remain open.
 - [x] Manual library update scanner, grouping and per-manga outcomes (PR #12).
-      Scheduled updates and system notifications remain open.
+- [x] Opt-in scheduled updates with shared manual/automatic ownership and
+      interruption-safe attempt rotation. System notifications and physical
+      background behavior remain open; see the active continuation above.
 - [x] Categories UI + management (PR #10); device interaction remains unverified.
 - [x] Additive migration flow (multi-source search + reviewed unique-number
       chapter matching), read/bookmark transfer and optional categories.

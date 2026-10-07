@@ -92,7 +92,7 @@ final class SourceContentBindingPersistenceTests: XCTestCase {
             XCTAssertEqual(binding.deploymentURL.map { Data($0.utf8) }, Data(website.utf8))
             XCTAssertEqual(binding.revision, 1)
             XCTAssertEqual(try f.db.query("SELECT epoch FROM library_data_state").first?.bytes("epoch"), epoch)
-            XCTAssertEqual(try f.db.query("PRAGMA user_version").first?.int("user_version"), 7)
+            XCTAssertEqual(try f.db.query("PRAGMA user_version").first?.int("user_version"), Migrations.latest)
             let current = try await store.installedExtensionTrust(packageName: package)
             XCTAssertEqual(current, installed)
             XCTAssertEqual(try f.db.query("SELECT hex(CAST(user_values AS BLOB)) AS value FROM installed_extension_preferences").first?.string("value"), preferences)

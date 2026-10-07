@@ -54,8 +54,12 @@ appear in a persistent, paginated feed grouped by day and manga. Missing
 chapters retain their reading state and history if they return. History and
 Updates open the current saved chapter at its stored reading position.
 Checks use enabled source registrations, with at most three sources in
-parallel and one manga at a time per source. They do not run automatically in
-the background. Native MangaDex requests share the bounded, cancellable HTTP
+parallel and one manga at a time per source. [Automatic updates](docs/AUTOMATIC_UPDATES.md)
+are opt-in in Updates, with 6/12/24-hour minimum intervals and visible scheduling
+status. iOS chooses the actual launch time and may skip a request. Expiration
+keeps committed results and waits for pending work to drain; durable attempt
+rotation gives later manga and sources priority after an interrupted check.
+Native MangaDex requests share the bounded, cancellable HTTP
 transport and reject HTTP failures and incomplete chapter catalogs.
 
 The [download manager](docs/DOWNLOADS.md) queues selected library chapters for
@@ -152,7 +156,8 @@ conformance fixtures. Historical paths under `measurement/` are retained; the
 manifest's `role` field determines measurement membership. Source acquisition
 provenance, fixture hashes and separate third-party notices are preserved.
 
-Background downloads, scheduled background updates, broader Mihon import, migration replacement mode, further
+Background downloads, update notifications, physical background-launch verification,
+broader Mihon import, migration replacement mode, further
 source settings, Cloudflare cookie bridging, iPad spreads and physical-device performance verification
 remain on the [task tracker](TODO.md). The broader daily-reader and extension
 compatibility objective is still in progress.

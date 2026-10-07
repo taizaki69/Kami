@@ -51,7 +51,7 @@ public struct LibraryUpdateRun: Sendable {
 protocol LibraryUpdatePersisting: Sendable {
     func recoverInterruptedLibraryUpdateScans() async throws -> LibraryUpdateSummary?
     func beginLibraryUpdateScan() async throws -> LibraryUpdateScanSnapshot
-    func libraryUpdateTargetIsCurrent(scanID: UUID, mangaID: Int64) async throws -> Bool
+    func claimLibraryUpdateTarget(scanID: UUID, mangaID: Int64) async throws -> Bool
     func verifyLibraryUpdateSourceConfiguration(
         sourceID: Int64, expectedConfiguration: ExtensionExecutionConfiguration?, context: LibraryMutationContext
     ) async throws
@@ -83,6 +83,13 @@ extension LibraryStore: LibraryUpdatePersisting {
 /// Cancellation invalidates the durable scan before draining cooperative work,
 /// so an old callback cannot become a new discovery after Cancel.
 public actor LibraryUpdateService {
+    private final class Cancellation: @unchecked Sendable {
+        let id = UUID()
+        private let lock = NSLock()
+        private var cancelled = false
+        var isCancelled: Bool { lock.withLock { cancelled } }
+        func cancel() { lock.withLock { cancelled = true } }
+    }
     private struct SourceQueue: Sendable {
         let sourceID: Int64
         let items: [LibraryUpdateItem]
@@ -100,6 +107,7 @@ public actor LibraryUpdateService {
         var error: LibraryUpdateServiceError?
         var worker: Task<Void, Never>?
         var termination: Task<LibraryUpdateSummary, Error>?
+        var cancellation: Cancellation?
     }
 
     private let persistence: any LibraryUpdatePersisting
@@ -137,12 +145,52 @@ public actor LibraryUpdateService {
     }
 
     public func start(sources: [Int64: LibraryUpdateSourceContext]) async throws -> LibraryUpdateRun {
+        try await start(sources: sources, cancellation: nil)
+    }
+
+    /// Owned, cancellation-aware scan for automatic work. The stream consumer
+    /// is deliberately not cancelled: it waits until provider/transaction work
+    /// has drained. A late cancellation is scoped to this request only.
+    public nonisolated func run(
+        sources: [Int64: LibraryUpdateSourceContext],
+        onProgress: @escaping @Sendable (LibraryUpdateProgress) async -> Void = { _ in }
+    ) async throws -> LibraryUpdateProgress {
+        try Task.checkCancellation()
+        let cancellation = Cancellation()
+        let worker = Task {
+            let run = try await self.start(sources: sources, cancellation: cancellation)
+            var latest: LibraryUpdateProgress?
+            for await progress in run.updates {
+                latest = progress
+                await onProgress(progress)
+            }
+            guard let latest, latest.phase == .finished else {
+                throw LibraryUpdateServiceError.storageUnavailable
+            }
+            return latest
+        }
+        return try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            cancellation.cancel()
+            Task { await self.cancel(requestID: cancellation.id) }
+        }
+    }
+
+    private func cancel(requestID: UUID) async {
+        guard state?.cancellation?.id == requestID, let scanID = state?.summary.scanID else { return }
+        await invalidateRun(scanID: scanID)
+    }
+
+    private func start(sources: [Int64: LibraryUpdateSourceContext], cancellation: Cancellation?) async throws -> LibraryUpdateRun {
         guard !starting, state == nil else { throw LibraryUpdateServiceError.alreadyRunning }
         starting = true
         cancelRequestedDuringStart = false
         defer { starting = false }
         try Task.checkCancellation()
+        if cancellation?.isCancelled == true { throw CancellationError() }
         _ = try await prepare()
+        if cancellation?.isCancelled == true { throw CancellationError() }
         let snapshot: LibraryUpdateScanSnapshot
         do { snapshot = try await persistence.beginLibraryUpdateScan() }
         catch let error as LibraryUpdatePersistenceError where error == .scanAlreadyRunning {
@@ -152,8 +200,9 @@ public actor LibraryUpdateService {
         let pair = AsyncStream<LibraryUpdateProgress>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let run = LibraryUpdateRun(scanID: snapshot.record.scanID, updates: pair.stream)
         state = State(snapshot: snapshot, sources: sources, continuation: pair.continuation, summary: snapshot.record)
+        state?.cancellation = cancellation
         emit()
-        if cancelRequestedDuringStart || Task.isCancelled {
+        if cancelRequestedDuringStart || Task.isCancelled || cancellation?.isCancelled == true {
             await invalidateRun(scanID: run.scanID)
             await finishRun(scanID: run.scanID)
         } else {
@@ -176,6 +225,7 @@ public actor LibraryUpdateService {
     private func execute(scanID: UUID) async {
         guard let captured = state, captured.summary.scanID == scanID else { return }
         var itemsBySource: [Int64: [LibraryUpdateItem]] = [:]
+        var sourceOrder: [Int64] = []
         for item in captured.snapshot.items {
             guard canWork(scanID) else { break }
             guard let mangaID = item.manga.id else {
@@ -196,10 +246,11 @@ public actor LibraryUpdateService {
                     await recordSkip(scanID: scanID, mangaID: mangaID, reason: .configurationChanged)
                     continue
                 }
+                if itemsBySource[item.manga.sourceId] == nil { sourceOrder.append(item.manga.sourceId) }
                 itemsBySource[item.manga.sourceId, default: []].append(item)
             }
         }
-        let queues = itemsBySource.keys.sorted().compactMap { id -> SourceQueue? in
+        let queues = sourceOrder.compactMap { id -> SourceQueue? in
             guard case let .available(source, configuration)? = captured.sources[id],
                   let items = itemsBySource[id] else { return nil }
             return SourceQueue(sourceID: id, items: items, source: source, configuration: configuration)
@@ -233,13 +284,14 @@ public actor LibraryUpdateService {
                 continue
             }
             do {
-                guard try await persistence.libraryUpdateTargetIsCurrent(scanID: scanID, mangaID: mangaID) else {
-                    await recordSkip(scanID: scanID, mangaID: mangaID, reason: .removedFromLibrary)
-                    continue
-                }
                 try await persistence.verifyLibraryUpdateSourceConfiguration(
                     sourceID: queue.sourceID, expectedConfiguration: queue.configuration, context: context
                 )
+                guard canWork(scanID) else { return }
+                guard try await persistence.claimLibraryUpdateTarget(scanID: scanID, mangaID: mangaID) else {
+                    await recordSkip(scanID: scanID, mangaID: mangaID, reason: .removedFromLibrary)
+                    continue
+                }
             } catch {
                 guard canWork(scanID) else { return }
                 guard Self.configurationChanged(error) else {
@@ -340,7 +392,8 @@ public actor LibraryUpdateService {
     }
 
     private func canWork(_ scanID: UUID) -> Bool {
-        state?.summary.scanID == scanID && state?.cancelling == false && !Task.isCancelled
+        state?.summary.scanID == scanID && state?.cancelling == false
+            && state?.cancellation?.isCancelled != true && !Task.isCancelled
     }
 
     private func removeInFlight(_ mangaID: Int64, scanID: UUID) {
@@ -397,6 +450,9 @@ public actor LibraryUpdateService {
 
     private func finishRun(scanID: UUID) async {
         guard state?.summary.scanID == scanID else { return }
+        if state?.cancellation?.isCancelled == true, state?.cancelling == false {
+            await invalidateRun(scanID: scanID)
+        }
         do {
             let summary = try await terminate(scanID: scanID, status: state?.cancelling == true ? .cancelled : .completed)
             accept(summary, scanID: scanID)

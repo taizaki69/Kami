@@ -42,6 +42,7 @@ private struct ChapterReadingRoute: Hashable {
 @MainActor
 struct UpdatesView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showingAutomaticUpdates = false
 
     var body: some View {
         let presentation = model.libraryPresentation
@@ -98,6 +99,12 @@ struct UpdatesView: View {
                 issuesSection
             }
             .navigationTitle("Updates")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Automatic updates", systemImage: "clock.arrow.2.circlepath") { showingAutomaticUpdates = true }
+                }
+            }
+            .sheet(isPresented: $showingAutomaticUpdates) { AutomaticUpdatesSettingsView() }
             .refreshable { await model.runLibraryOperation(expected: presentation.generation) { await model.checkLibraryForUpdates() } }
             .navigationDestination(for: ChapterReadingRoute.self) { route in
                 PersistedChapterReaderDestination(manga: route.manga, chapterID: route.chapterID,
