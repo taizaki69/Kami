@@ -4,7 +4,7 @@ A native iOS manga reader with a Swift runtime for measured Mihon/Tachiyomi
 extension APKs. Created and maintained by
 [taizaki69](https://github.com/taizaki69).
 
-## Current scope — 2026-10-06
+## Current scope — 2026-10-07
 
 Kami includes a native MangaDex source, a persistent library, history and
 reading progress, source browsing and filters, and an LTR/RTL/webtoon reader
@@ -59,6 +59,11 @@ are opt-in in Updates, with 6/12/24-hour minimum intervals and visible schedulin
 status. iOS chooses the actual launch time and may skip a request. Expiration
 keeps committed results and waits for pending work to drain; durable attempt
 rotation gives later manga and sources priority after an interrupted check.
+[Chapter notifications](docs/CHAPTER_NOTIFICATIONS.md) are separately opt-in.
+They summarize new chapters saved by manual or automatic checks and open the
+current Updates tab. The initial baseline stays silent; iOS permission is
+requested only from a foreground user action. Interrupted alert attempts are
+reconciled without blindly sending a duplicate. Delivery still depends on iOS.
 Native MangaDex requests share the bounded, cancellable HTTP
 transport and reject HTTP failures and incomplete chapter catalogs.
 

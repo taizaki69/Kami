@@ -4,7 +4,7 @@ SQLite via a thin system-library wrapper (`KamiCore/Database/SQLiteDatabase.swif
 no third-party dependency). Single database at
 `~/Library/Application Support/Kami/kami.sqlite` (WAL mode, foreign keys on).
 
-## Schema (v8 — `Database.swift` migrations)
+## Schema (v9 — `Database.swift` migrations)
 
 | Table | Purpose |
 |---|---|
@@ -18,6 +18,7 @@ no third-party dependency). Single database at
 | `installed_extension_preferences` | authenticated settings bound to installation identity and revision |
 | `chapter_discovery_baseline` / `known_chapter` | silent initial baseline and durable chapter discovery feed |
 | `library_update_scan` / `library_update_target` | shared manual/automatic scan lifetime and finite per-manga outcomes |
+| `library_notification_state` | default-off alert preference, editor revision, scan watermark and last batch/outcome (schema 9) |
 | `download_job` / `download_page` | durable queue, fresh attempt revisions, ordered page receipts and prepared/complete publication |
 | `download_cleanup` | generation-specific cleanup retained until file removal is acknowledged |
 | `library_data_state` | durable epoch for database-issued reading and mutation targets (schema 6) |
@@ -30,6 +31,13 @@ state by URL matching** (`LibraryStore.replaceChapters`).
 
 All access is serialized through the `LibraryStore` actor; no view touches
 SQL directly.
+
+Schema 9 adds a singleton notification journal. Enabling captures the latest
+started scan; only later terminal scans contribute to a claimed digest. The
+watermark and attempt persist atomically before the OS call. An uncertain
+submission is reconciled, never automatically replayed. This operational state
+is local and excluded from backup v1. Scan-history pruning must also preserve
+or rebase the notification watermark. See [chapter notifications](CHAPTER_NOTIFICATIONS.md).
 
 Schema 8 adds `manga.last_library_update_attempt`, initially zero. A current
 pending target is claimed immediately before dispatch; the scan sequence survives

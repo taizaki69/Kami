@@ -1,8 +1,29 @@
 # Kami Continuation Handoff
 
-Last updated: 2026-10-06 (America/Lima)
+Last updated: 2026-10-07 (America/Lima)
 
-## Canonical continuation — 2026-10-06
+## Canonical continuation — 2026-10-07
+
+The active branch is `assistant/chapter-notifications-20261007`, based on
+`e0bf2d7b4fefc0208dd3fb092536c4ba84602841` from
+[PR #32](https://github.com/taizaki69/Kami/pull/32), ready/open/unmerged. All
+five exact-head checks passed: Linux490/379, macOS502/379, device/simulator,
+two hosted rendering tests and unsigned IPA. CI tree and artifact digests match.
+
+This continuation adds default-off chapter-count notifications, explicit
+foreground permission, SQLite schema9 preference/journal, bounded terminal-scan
+claims, silent baselines and partial-commit handling. A durable attempt precedes
+the OS call; interrupted attempts reconcile pending/delivered IDs without blind
+replay. Disable/cancellation drains the old submission and removes only its own
+alerts. A tap opens current Updates in one active scene after exclusive work.
+No stale chapter identities are used. See [design](docs/CHAPTER_NOTIFICATIONS.md)
+and [verification](docs/VERIFICATION-2026-10-07-CHAPTER-NOTIFICATIONS.md).
+Checkpoint: `.git/checkpoints/20261007-chapter-notifications/`.
+Physical notification/background/scene interaction and the broader reader and
+compatibility TODOs remain open. Publish and verify autonomously, without merging
+or marking the full goal complete.
+
+## Earlier automatic-updates continuation — 2026-10-06
 
 The active branch is `assistant/background-library-updates-20261006`, based on
 `3888625ef213dbd7e5cfb389a5cbb4687c783ae5` from

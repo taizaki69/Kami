@@ -14,7 +14,9 @@ app usage affect availability. Requests may use cellular data. They query saved
 library titles through ready, authenticated source registrations, including
 sources hidden by the Browse selection. They do not enable extensions, change
 trust, fetch extension repository catalogs, download chapter images or request
-notification permission. New-chapter system notifications remain a separate TODO.
+notification permission. [Chapter notifications](CHAPTER_NOTIFICATIONS.md) are
+separately opt-in and can report saved results after a check; enabling background
+checks alone does not enable alerts or prompt for notification permission.
 
 ## Scheduling and storage
 

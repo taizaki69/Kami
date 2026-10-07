@@ -56,6 +56,9 @@ final class AppModel: ObservableObject {
     let preferencesService: ExtensionPreferencesService
     let libraryUpdateService: LibraryUpdateService
     let automaticUpdates: LibraryRefreshScheduler
+    let chapterNotifications: LibraryNotificationService
+    private let notificationRouter = LibraryNotificationRouter()
+    @Published private(set) var notificationRouteToken: UUID?
     private let backgroundUpdateRequests: IOSLibraryRefreshRequests
     private var sourceStartupTask: Task<Void, Never>?
     private var foregroundRepositoriesStarted = false
@@ -168,6 +171,7 @@ final class AppModel: ObservableObject {
         self.sourceDiscoveryStore = discovery
         self.sourceDiscovery = discovery.state
         self.libraryUpdateService = LibraryUpdateService(store: store)
+        self.chapterNotifications = LibraryNotificationService(store: store, platform: IOSChapterNotifications(), available: persistentStore != nil)
         let backgroundRequests = IOSLibraryRefreshRequests()
         self.backgroundUpdateRequests = backgroundRequests
         let refreshSettings = LibraryRefreshSettingsStore(fileURL: url.appendingPathComponent("automatic-updates.json"))
@@ -204,10 +208,15 @@ final class AppModel: ObservableObject {
         discovery.onChange = { [weak self] state in self?.sourceDiscovery = state }
         refreshSettings.onChange = { [weak self] _ in self?.objectWillChange.send() }
         automaticUpdates.onChange = { [weak self] in self?.objectWillChange.send() }
+        chapterNotifications.onChange = { [weak self] in self?.objectWillChange.send() }
         reloadLibrary()
         sourceStartupTask = performLibraryOperation { [weak self] in
             await self?.restoreInstalledExtensions()
             await self?.refreshDownloads()
+            // Recover interrupted scans before considering their saved discoveries.
+            guard let self else { return }
+            do { _ = try await self.libraryUpdateService.prepare() }
+            catch { /* Updates exposes the finite storage failure on reload. */ }
         }
     }
 
@@ -599,6 +608,10 @@ final class AppModel: ObservableObject {
                 await self.refreshLibrary()
             }
             _ = await cleanup?.result
+            if !Task.isCancelled {
+                let notification = try? operation.start { await self.chapterNotifications.process() }
+                _ = await withTaskCancellationHandler { await notification?.result } onCancel: { notification?.cancel() }
+            }
             switch result {
             case let .success(progress):
                 if let error = progress.error { self.libraryUpdatesError = error.errorDescription; return LibraryRefreshOutcome.failed }
@@ -990,6 +1003,12 @@ final class AppModel: ObservableObject {
 
     func downloadsSceneChanged(sceneID: UUID, active: Bool) {
         automaticUpdates.reconcile()
+        if active {
+            performLibraryOperation {
+                await self.sourceStartupTask?.value
+                await self.chapterNotifications.process()
+            }
+        }
         if active, !foregroundRepositoriesStarted {
             foregroundRepositoriesStarted = performLibraryOperation {
                 await self.sourceStartupTask?.value
@@ -1002,6 +1021,14 @@ final class AppModel: ObservableObject {
         if !downloadsForegroundActive, let operation = downloadRunOperation {
             performLibraryOperation(lease: operation) { await self.pauseDownloads() }
         }
+    }
+
+    func openUpdatesNotification(identifier: String) {
+        if notificationRouter.request(identifier: identifier) { notificationRouteToken = notificationRouter.pending }
+    }
+
+    func consumeUpdatesNotification(active: Bool) -> Bool {
+        notificationRouter.consume(active: active, libraryAvailable: !libraryPresentation.isExclusive)
     }
 
     func openOfflineChapter(target: ChapterWriteTarget) async throws -> OfflineReaderChapter? {
