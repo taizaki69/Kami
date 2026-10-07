@@ -179,9 +179,14 @@ public actor LibraryStore {
     /// destination state: neither source identities nor files are reassigned.
     public func commitSourceMigration(_ preview: SourceMigrationPreview, selectedMatches: Set<Int>,
                                       copyCategories: Bool) throws -> SourceMigrationReport {
+        try commitSourceMigration(preview, selection: preview.suggestedSelection(selectedMatches), copyCategories: copyCategories)
+    }
+
+    public func commitSourceMigration(_ preview: SourceMigrationPreview, selection: SourceMigrationSelection,
+                                      copyCategories: Bool) throws -> SourceMigrationReport {
         try Task.checkCancellation()
         guard preview.ownerID == readingOwnerID else { throw SourceMigrationError.foreignPreview }
-        try preview.validateSelection(selectedMatches)
+        let matches = try preview.resolvedMatches(selection)
         do {
             return try withLibraryTransaction {
                 do { try LibraryRestorePersistence.requireIdle(db) }
@@ -194,7 +199,7 @@ public actor LibraryStore {
                 let state = try LibraryRestorePersistence.state(db, policy: .default)
                 guard state.digest == preview.dependencyDigest else { throw SourceMigrationError.previewExpired }
                 let destinationID = try SourceMigrationPersistence.write(db, preview: preview,
-                    selectedMatches: selectedMatches, copyCategories: copyCategories)
+                    matches: matches, copyCategories: copyCategories)
                 // The combined state must still fit the bounded library model,
                 // including additions to an existing destination and baseline.
                 _ = try LibraryRestorePersistence.state(db, policy: .default)
@@ -204,7 +209,7 @@ public actor LibraryStore {
                 guard try ReadingStateReader.epoch(db) != preview.epoch else { throw SourceMigrationError.storageUnavailable }
                 try Task.checkCancellation()
                 return .init(previewID: preview.id, destinationMangaID: destinationID,
-                             selectedChapters: selectedMatches.count)
+                             selectedChapters: matches.count)
             }
         } catch is SQLiteDatabase.SQLiteError { throw SourceMigrationError.storageUnavailable }
     }

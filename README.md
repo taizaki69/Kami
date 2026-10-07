@@ -35,9 +35,10 @@ source. Open a source's search to paginate, retry or change filters. Cancelling,
 changing the query or replacing a source prevents stale results from appearing.
 
 A saved manga's “Migrate to another source” action opens destination search and
-a [reviewed migration](docs/SOURCE_MIGRATION.md). Select chapter-number matches
-before copying read flags, bookmarks and optional categories into the destination.
-Duplicate or unknown chapter numbers remain unmatched. The original manga stays
+a [reviewed migration](docs/SOURCE_MIGRATION.md). Review chapter-number suggestions
+or pair chapters manually before copying read flags, bookmarks and optional
+categories into the destination. Search chapter titles, numbers and scanlators;
+each destination can be assigned once. The original manga stays
 in your library, with its history, page positions and downloads; these are not
 reassigned between sources. Existing destination state is preserved.
 
@@ -151,7 +152,7 @@ conformance fixtures. Historical paths under `measurement/` are retained; the
 manifest's `role` field determines measurement membership. Source acquisition
 provenance, fixture hashes and separate third-party notices are preserved.
 
-Background downloads, scheduled background updates, broader Mihon import and source migration, further
+Background downloads, scheduled background updates, broader Mihon import, migration replacement mode, further
 source settings, Cloudflare cookie bridging, iPad spreads and physical-device performance verification
 remain on the [task tracker](TODO.md). The broader daily-reader and extension
 compatibility objective is still in progress.

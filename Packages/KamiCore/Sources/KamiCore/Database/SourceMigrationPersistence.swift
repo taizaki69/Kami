@@ -5,7 +5,7 @@ import Foundation
 /// bind existing destination state. Matching never changes a stored identity.
 enum SourceMigrationPersistence {
     static func write(_ db: SQLiteDatabase, preview: SourceMigrationPreview,
-                      selectedMatches: Set<Int>, copyCategories: Bool) throws -> Int64 {
+                      matches: [SourceMigrationMatch], copyCategories: Bool) throws -> Int64 {
         let manga = preview.destination.manga
         let now = Int64(Date().timeIntervalSince1970)
         let id: Int64
@@ -26,7 +26,7 @@ enum SourceMigrationPersistence {
                       .text(try json(manga.genres)), .int(manga.status.rawValue), .int(now), .text(manga.updateStrategy.rawValue)])
         }
         var transferred: [Data: LibraryBackupDocument.Chapter] = [:]
-        for match in preview.matching.matches where selectedMatches.contains(match.id) {
+        for match in matches {
             transferred[Data(match.destination.url.utf8)] = match.original
         }
         for chapter in manga.chapters {

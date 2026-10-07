@@ -4,7 +4,28 @@ Last updated: 2026-10-06 (America/Lima)
 
 ## Canonical continuation — 2026-10-06
 
-The active branch is `assistant/source-migration-20261005`, based on
+The active branch is `assistant/migration-matching-20261006`, based on
+`558100b519e0f452423259a1cb71a793f929027b` from
+[PR #30](https://github.com/taizaki69/Kami/pull/30), ready and unmerged. That
+base passed Linux 379 Compat + 456 Core/SQLite, macOS 379 Compat + 468 Core,
+simulator/device compilation, both hosted renderer tests and unsigned IPA,
+with identical head/CI trees. This increment adds manual one-to-one chapter
+pairing for unknown, ambiguous and overridden suggestions. A preview-bound
+draft rejects occupied destinations without displacing pairs, carries exact
+indices into an immutable selection and invalidates review after changes.
+Original/destination chapter pickers use bounded cancellable local search and
+100-result pages. Commit retains all source, deployment, database and exclusive
+ownership checks, preserving original and destination history/pages/downloads.
+See [migration](docs/SOURCE_MIGRATION.md) and
+[verification](docs/VERIFICATION-2026-10-06-MIGRATION-MATCHING.md).
+Checkpoints are in `.git/checkpoints/20261006-migration-matching/`.
+Replace/remove mode, destination manga pagination, physical interaction and
+other reader/compatibility TODOs remain open. Continue the broad goal,
+publish/verify autonomously and keep PRs unmerged.
+
+## Earlier source-migration continuation — 2026-10-06
+
+The preceding branch was `assistant/source-migration-20261005`, based on
 `fb93560fdc468447b8c43423f489f95c5eafb016` from
 [PR #29](https://github.com/taizaki69/Kami/pull/29), ready and unmerged. That
 base passed Linux 379 Compat + 437 Core/SQLite, macOS 379 Compat + 449 Core,

@@ -274,6 +274,106 @@ final class SourceMigrationPersistenceTests: XCTestCase {
         }
     }
 
+    func testManualUnknownAndDuplicatePairsCopyExactFlagsWithoutMovingOriginalHistoryPagesOrDownloads() async throws {
+        let f = try fixture(); defer { try? FileManager.default.removeItem(at: f.directory) }
+        for (url, number, read, bookmark) in [("/dup-a", 2, true, false), ("/dup-b", 2, false, true), ("/unknown", -1, false, true)] {
+            try f.db.run("INSERT INTO chapter(manga_id,url,name,number,read,bookmark,last_page_read) VALUES (?,?,?, ?,?,?,9)",
+                         [.int(f.origin), .text(url), .text(url), .int(number), .bool(read), .bool(bookmark)])
+        }
+        try download(f, mangaID: f.origin, chapterID: f.chapter, sourceID: 7)
+        let downloadBefore = try downloadEvidence(f), before = try await snapshot(f)
+        let composed = "/caf\u{e9}", decomposed = "/cafe\u{301}"
+        let destination = try await candidate(f, chapters: [
+            .init(url: "/one", name: "One", number: "1.25"),
+            .init(url: composed, name: "Edition A", number: "2"),
+            .init(url: decomposed, name: "Edition B", number: "2"),
+            .init(url: "/special", name: "Special", chapterNumber: -1)])
+        let plan = try await f.store.previewSourceMigration(origin: origin(f), destination: destination, expectedConfiguration: nil)
+        var draft = plan.makeDraft()
+        XCTAssertEqual(draft.matchedCount, 1)
+        for (originalURL, destinationURL) in [("/dup-a", decomposed), ("/dup-b", composed), ("/unknown", "/special")] {
+            let left = try XCTUnwrap(plan.original.chapters.firstIndex { Data($0.url.utf8) == Data(originalURL.utf8) })
+            let right = try XCTUnwrap(plan.destination.manga.chapters.firstIndex { Data($0.url.utf8) == Data(destinationURL.utf8) })
+            try draft.assign(destination: right, to: left)
+        }
+        XCTAssertEqual(draft.manualCount, 3); XCTAssertEqual(draft.unmatchedOriginalCount, 0)
+        let coordinator = LibraryOperationCoordinator(), generation = coordinator.state.presentation
+        let worker = try coordinator.startSourceMigration(store: f.store, preview: plan, selection: draft.selection,
+            copyCategories: true, expected: generation)
+        let completion = try await worker.value
+        XCTAssertTrue(completion.presentationPublished); XCTAssertNotEqual(coordinator.state.presentation, generation)
+        XCTAssertEqual(completion.report.selectedChapters, 4)
+        let saved = try await snapshot(f)
+        XCTAssertEqual(saved.manga.first { $0.sourceID == 7 }, before.manga.first { $0.sourceID == 7 })
+        XCTAssertEqual(try downloadEvidence(f), downloadBefore)
+        let target = try XCTUnwrap(saved.manga.first { $0.sourceID == MangaDexSource().id })
+        let flags = Dictionary(uniqueKeysWithValues: target.chapters.map { (Data($0.url.utf8), $0) })
+        XCTAssertTrue(try XCTUnwrap(flags[Data(decomposed.utf8)]).read)
+        XCTAssertFalse(try XCTUnwrap(flags[Data(decomposed.utf8)]).bookmark)
+        XCTAssertFalse(try XCTUnwrap(flags[Data(composed.utf8)]).read)
+        XCTAssertTrue(try XCTUnwrap(flags[Data(composed.utf8)]).bookmark)
+        XCTAssertTrue(try XCTUnwrap(flags[Data("/special".utf8)]).bookmark)
+        XCTAssertTrue(target.history.isEmpty); XCTAssertTrue(target.chapters.allSatisfy { $0.lastPageRead == 0 })
+        XCTAssertEqual(target.categoryKeys.count, 1)
+    }
+
+    func testMalformedManualSelectionsCannotInjectOrDuplicatePreviewChapterIdentities() async throws {
+        let f = try fixture(); defer { try? FileManager.default.removeItem(at: f.directory) }
+        try f.db.run("INSERT INTO chapter(manga_id,url,name,number) VALUES (?,'/extra','Extra',-1)", [.int(f.origin)])
+        let plan = try await preview(f), before = try await snapshot(f), oldEpoch = try epoch(f)
+        let malformed: [[SourceMigrationPair]] = [
+            [.init(originalIndex: -1, destinationIndex: 0)], [.init(originalIndex: 0, destinationIndex: Int.max)],
+            [.init(originalIndex: Int.max, destinationIndex: 0)], [.init(originalIndex: 0, destinationIndex: -1)],
+            [.init(originalIndex: 0, destinationIndex: 0), .init(originalIndex: 0, destinationIndex: 1)],
+            [.init(originalIndex: 0, destinationIndex: 0), .init(originalIndex: 1, destinationIndex: 0)]
+        ]
+        for pairs in malformed {
+            let selection = SourceMigrationSelection(previewID: plan.id, pairs: pairs)
+            await rejects(.invalidSelection) {
+                _ = try await f.store.commitSourceMigration(plan, selection: selection, copyCategories: true)
+            }
+        }
+        let after = try await snapshot(f); XCTAssertEqual(after, before); XCTAssertEqual(try epoch(f), oldEpoch)
+    }
+
+    func testSelectionCannotRebaseOntoAnotherPreviewAndRejectsBeforeExclusiveReservation() async throws {
+        let f = try fixture(); defer { try? FileManager.default.removeItem(at: f.directory) }
+        let first = try await preview(f), second = try await preview(f)
+        var draft = first.makeDraft()
+        let originalIndex = try XCTUnwrap(first.matching.matches.first?.id)
+        try draft.assign(destination: 1, to: originalIndex)
+        let selection = draft.selection, coordinator = LibraryOperationCoordinator()
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertThrowsError(try coordinator.startSourceMigration(store: f.store, preview: second, selection: selection,
+            copyCategories: true, expected: coordinator.state.presentation)) {
+            XCTAssertEqual($0 as? SourceMigrationError, .invalidSelection)
+        }
+        XCTAssertFalse(coordinator.state.isExclusive); XCTAssertEqual(coordinator.state.activeOperations, 0)
+        await rejects(.invalidSelection) {
+            _ = try await f.store.commitSourceMigration(second, selection: selection, copyCategories: false)
+        }
+        try f.db.run("UPDATE chapter SET read=0 WHERE id=?", [.int(f.chapter)])
+        try f.db.run("UPDATE chapter SET read=1 WHERE id=?", [.int(f.chapter)])
+        await rejects(.previewExpired) {
+            _ = try await f.store.commitSourceMigration(first, selection: selection, copyCategories: true)
+        }
+    }
+
+    func testCancellingQueuedManualSelectionKeepsLibraryAndEpochUnchanged() async throws {
+        let f = try fixture(); defer { try? FileManager.default.removeItem(at: f.directory) }
+        let plan = try await preview(f), before = try await snapshot(f), oldEpoch = try epoch(f)
+        var draft = plan.makeDraft()
+        try draft.assign(destination: 1, to: try XCTUnwrap(plan.matching.matches.first?.id))
+        let coordinator = LibraryOperationCoordinator(), generation = coordinator.state.presentation
+        let worker = try coordinator.startSourceMigration(store: f.store, preview: plan, selection: draft.selection,
+            copyCategories: true, expected: generation)
+        worker.cancel()
+        do { _ = try await worker.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertFalse(coordinator.state.isExclusive); XCTAssertEqual(coordinator.state.presentation, generation)
+        let after = try await snapshot(f); XCTAssertEqual(after, before); XCTAssertEqual(try epoch(f), oldEpoch)
+    }
+
     func testExclusiveCoordinatorRejectsReadersCancelsBeforeStartAndPublishesDespiteLateCancellation() async throws {
         let f = try fixture(); defer { try? FileManager.default.removeItem(at: f.directory) }
         let plan = try await preview(f), oldEpoch = try epoch(f), coordinator = LibraryOperationCoordinator()
