@@ -4,11 +4,11 @@ SQLite via a thin system-library wrapper (`KamiCore/Database/SQLiteDatabase.swif
 no third-party dependency). Single database at
 `~/Library/Application Support/Kami/kami.sqlite` (WAL mode, foreign keys on).
 
-## Schema (v7 — `Database.swift` migrations)
+## Schema (v8 — `Database.swift` migrations)
 
 | Table | Purpose |
 |---|---|
-| `manga` | metadata + library membership; unique per `(source_id, url)` |
+| `manga` | metadata + library membership; unique per `(source_id, url)`; last attempted scan sequence for fair update rotation (schema 8) |
 | `category` / `manga_category` | categories, many-to-many |
 | `chapter` | per-manga chapters; read/bookmark/progress state; missing source rows retained as non-current |
 | `history` | reading history (manga, chapter, last_read, duration) |
@@ -17,7 +17,7 @@ no third-party dependency). Single database at
 | `installed_extension` | installed APK path/hash, package/version, repository, install time, enabled state, verified signature scheme/current signers/history, sticky trust source, and declared source IDs |
 | `installed_extension_preferences` | authenticated settings bound to installation identity and revision |
 | `chapter_discovery_baseline` / `known_chapter` | silent initial baseline and durable chapter discovery feed |
-| `library_update_scan` / `library_update_target` | manual scan lifetime and finite per-manga outcomes |
+| `library_update_scan` / `library_update_target` | shared manual/automatic scan lifetime and finite per-manga outcomes |
 | `download_job` / `download_page` | durable queue, fresh attempt revisions, ordered page receipts and prepared/complete publication |
 | `download_cleanup` | generation-specific cleanup retained until file removal is acknowledged |
 | `library_data_state` | durable epoch for database-issued reading and mutation targets (schema 6) |
@@ -30,6 +30,14 @@ state by URL matching** (`LibraryStore.replaceChapters`).
 
 All access is serialized through the `LibraryStore` actor; no view touches
 SQL directly.
+
+Schema 8 adds `manga.last_library_update_attempt`, initially zero. A current
+pending target is claimed immediately before dispatch; the scan sequence survives
+failure, cancellation and process interruption without establishing a successful
+chapter baseline. Later snapshots prioritize the oldest attempted manga and
+source queues. Scan-history pruning must preserve or rebase this sequence.
+The default-off automatic schedule is a separate bounded JSON file, not part of
+the library backup. See [automatic updates](AUTOMATIC_UPDATES.md).
 
 Download schema 5 migrates old scaffold rows to paused/unverified regardless of
 their former state. An old progress value cannot prove local files exist.
@@ -59,4 +67,6 @@ COMMIT remains success if cancellation arrives while the UI awaits the result.
 Existing metadata/current chapter lists, downloads/files, runtime settings,
 repositories and signing trust survive unchanged. Archive source descriptions
 are not installation or request authority. See [merge and source-conflict
-rules](NATIVE_BACKUPS.md). Restore uses schema 7 without a new migration.
+rules](NATIVE_BACKUPS.md). Restore was introduced on schema 7 and continues on
+the current schema. Existing attempt sequences stay local; new restored manga
+receive the schema default. This operational field does not change backup v1.
