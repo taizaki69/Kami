@@ -134,11 +134,18 @@ final class CoroutineMutexTests: XCTestCase {
             parameters: ["Ljava/lang/Object;", "Lkotlin/coroutines/Continuation;"])
         let unlock = builder.method(classDescriptor: descriptor, name: "unlock", shorty: "VL", ret: "V", parameters: ["Ljava/lang/Object;"])
         builder.setClass("LTest;")
+        var instructions: [UInt16] = []
+        instructions += Insn.const4Units(0, 1)
+        instructions += Insn.const4Units(1, 1)
+        instructions += Insn.const4Units(2, 0)
+        instructions += Insn.invokeStatic(factory, [0, 1, 2])
+        instructions += Insn.moveResultObject(3)
+        instructions += Insn.invokeInterface(lock, [3, 2, 2])
+        instructions += Insn.moveResultObject(4)
+        instructions += Insn.invokeInterface(unlock, [3, 2])
+        instructions += Insn.returnObjectReg(4)
         builder.addMethod(.init(name: "run", registers: 5, ins: 0, outs: 3,
-            insns: Insn.const4Units(0, 1) + Insn.const4Units(1, 1) + Insn.const4Units(2, 0)
-                + Insn.invokeStatic(factory, [0, 1, 2]) + Insn.moveResultObject(3)
-                + Insn.invokeInterface(lock, [3, 2, 2]) + Insn.moveResultObject(4)
-                + Insn.invokeInterface(unlock, [3, 2]) + Insn.returnObjectReg(4),
+            insns: instructions,
             isStatic: true, returnType: "Ljava/lang/Object;"))
         let bridge = HostBridge.minimal()
         let vm = DexInterpreter(dex: try DexFile(builder.build()), bridge: bridge, maxInstructions: 100)
@@ -163,13 +170,14 @@ final class CoroutineMutexTests: XCTestCase {
         let lock = builder.method(classDescriptor: descriptor, name: "lock", shorty: "LLL", ret: "Ljava/lang/Object;",
             parameters: ["Ljava/lang/Object;", "Lkotlin/coroutines/Continuation;"])
         builder.setClass("LTest;")
-        let acquire = Insn.const4Units(0, 0) + Insn.invokeInterface(lock, [1, 0, 0])
-        for (name, code) in [
+        let acquire: [UInt16] = Insn.const4Units(0, 0) + Insn.invokeInterface(lock, [1, 0, 0])
+        let methods: [(String, [UInt16])] = [
             ("hold", acquire + [0x000e]),
             ("abort", acquire + [0x0000, 0xff28]),
             ("throwNull", acquire + [0x0027]),
             ("spin", [UInt16(0x0000), 0xff28]),
-        ] {
+        ]
+        for (name, code) in methods {
             builder.addMethod(.init(name: name, registers: 2, ins: 1, outs: 3,
                 insns: code, isStatic: true, parameters: [descriptor]))
         }
