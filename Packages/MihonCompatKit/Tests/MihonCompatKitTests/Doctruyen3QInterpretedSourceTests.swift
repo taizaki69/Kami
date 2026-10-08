@@ -28,6 +28,7 @@ final class Doctruyen3QInterpretedSourceTests: XCTestCase {
         func execute(_ request: CompatHTTPRequest) async throws -> CompatHTTPResponse {
             requests.append(request)
             guard let response = responses[request.url] else {
+                XCTFail("Unexpected offline request: \(request.method) \(request.url)")
                 throw RoutingError.unexpectedRequest
             }
             return response
@@ -289,7 +290,7 @@ final class Doctruyen3QInterpretedSourceTests: XCTestCase {
     }
 
     func testExactDoctruyen3QSearchWithGenreAndStatusFilters() async throws {
-        let searchURL = "https://doctruyen3qhub.vip/tim-truyen/%2Fthe-loai?status=1&page=1"
+        let searchURL = "https://doctruyen3qhub.vip/tim-truyen/adventure?status=1&page=1"
         let transport = RoutingTransport(responses: [
             "https://doctruyen3qhub.vip/tim-truyen": htmlResponse(
                 url: "https://doctruyen3qhub.vip/tim-truyen",

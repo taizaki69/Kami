@@ -30,6 +30,13 @@ decision.
   <https://github.com/keiyoushi/extensions>.
 
 ## Runtime dependencies
+- **Public Suffix List** — MPL-2.0. The unchanged ICANN + PRIVATE data file is
+  bundled by MihonCompatKit for cookie-domain acceptance. Its original notice
+  and license link are retained in `Resources/public_suffix_list.dat`.
+  Version `2026-10-07_07-28-19_UTC`, upstream commit
+  `3929462652695bad04f0a27afb600974014a3c8b`; provenance, SHA-256 and update checks:
+  [runtime verification](docs/VERIFICATION-2026-10-07-MANGAPANDA.md#public-suffix-resource).
+  Source: <https://publicsuffix.org/list/public_suffix_list.dat>.
 - **SwiftSoup 2.9.6** — MIT license. Used as the bounded HTML parser and CSS
   selector engine behind the Jsoup compatibility bridge. Source:
   <https://github.com/scinfu/SwiftSoup/tree/2.9.6>.

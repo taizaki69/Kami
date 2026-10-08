@@ -310,7 +310,7 @@ final class CompatHTTPTransportTests: XCTestCase {
     }
 
     func testCookieJarKeepsHostPathAndSecureScope() throws {
-        var jar = CompatHTTPCookieJar()
+        let jar = CompatHTTPCookieJar()
         jar.store(from: CompatHTTPResponse(
             finalURL: "https://example.test/foo/login",
             statusCode: 200,
@@ -405,6 +405,34 @@ final class CompatHTTPTransportTests: XCTestCase {
         XCTAssertNil(captured[0].value(forHTTPHeaderField: "Cookie"))
         XCTAssertTrue(captured[1].value(forHTTPHeaderField: "Cookie")?.contains("session=one") == true)
         XCTAssertNil(captured[2].value(forHTTPHeaderField: "Cookie"))
+    }
+
+    func testURLSessionAndDEXShareCookieWritesReadsDeletionAndHeaderLimits() async throws {
+        let url = try XCTUnwrap(URL(string: "https://example.test/"))
+        let response = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+            headerFields: ["Set-Cookie": "response=from-network; Path=/; Secure"]))
+        StubURLProtocol.configure([
+            .init(response: response, chunks: []), .init(response: response, chunks: []),
+        ])
+        let transport = URLSessionCompatHTTPTransport(sourceID: "dex-cookie-source", protocolClasses: [StubURLProtocol.self])
+        let fixture = try CookieBridgeFixture(transport: transport)
+        try fixture.save(fixture.parse("dex=from-source; Path=/; Secure", url: url.absoluteString), url: url.absoluteString)
+        try await fixture.execute(.init(url: url.absoluteString))
+        XCTAssertEqual(try fixture.cookies(url: url.absoluteString), ["dex=from-source", "response=from-network"])
+        try fixture.save(fixture.parse("dex=; Max-Age=0; Path=/", url: url.absoluteString), url: url.absoluteString)
+        try await fixture.execute(.init(url: url.absoluteString))
+        XCTAssertEqual(StubURLProtocol.requests().map { $0.value(forHTTPHeaderField: "Cookie") }, ["dex=from-source", "response=from-network"])
+        await transport.clearCookies()
+        XCTAssertTrue(try fixture.cookies(url: url.absoluteString).isEmpty)
+
+        StubURLProtocol.configure([])
+        let smallPolicy = CompatHTTPTransportPolicy(maximumRequestHeaderBytes: 20)
+        let limited = URLSessionCompatHTTPTransport(sourceID: "limited-cookie-source", policy: smallPolicy, protocolClasses: [StubURLProtocol.self])
+        let bounded = try CookieBridgeFixture(transport: limited, policy: smallPolicy)
+        try bounded.save(bounded.parse("large=" + String(repeating: "x", count: 30), url: url.absoluteString), url: url.absoluteString)
+        do { try await bounded.execute(.init(url: url.absoluteString)); XCTFail("Expected cookie header bound") }
+        catch { XCTAssertTrue(error is DEXThrowable) }
+        XCTAssertTrue(StubURLProtocol.requests().isEmpty)
     }
 
     func testURLSessionAdapterCancelsWhenStreamExceedsLimit() async throws {

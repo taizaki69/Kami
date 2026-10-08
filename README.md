@@ -114,6 +114,7 @@ The current lib 1.6 profile catalog contains:
 | EternalMangas | 1.6.28 |
 | DocTruyen3Q | 1.6.38 |
 | FoolSlide Customizable | 1.6.6, requires a configured HTTPS source URL |
+| MangaPanda.onl | 1.6.36 |
 
 These profiles are backed by deterministic real-APK tests with injected
 responses. Their evidence does not establish live-site availability,
@@ -155,13 +156,13 @@ Reports disclose omitted findings and expire with their source instance.
 No report is sent automatically; no findings is not proof of full compatibility.
 See [diagnostics and export](docs/COMPATIBILITY_DIAGNOSTICS.md).
 
-The lock contains 27 artifacts: eleven exact current execution profiles, two
-legacy constructor fixtures, eight measurement-only APKs, and six AOSP signing
+The lock contains 27 artifacts: twelve exact current execution profiles, two
+legacy constructor fixtures, seven measurement-only APKs, and six AOSP signing
 conformance fixtures. Historical paths under `measurement/` are retained; the
 manifest's `role` field determines measurement membership. Source acquisition
 provenance, fixture hashes and separate third-party notices are preserved.
 
-Background downloads, update notifications, physical background-launch verification,
+Background downloads, physical notification/background-launch verification,
 broader Mihon import, migration replacement mode, further
 source settings, Cloudflare cookie bridging, iPad spreads and physical-device performance verification
 remain on the [task tracker](TODO.md). The broader daily-reader and extension

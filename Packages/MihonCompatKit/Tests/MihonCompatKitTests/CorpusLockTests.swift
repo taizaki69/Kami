@@ -99,8 +99,8 @@ final class CorpusLockTests: XCTestCase {
         XCTAssertEqual(lock.upstream.catalogRevision.count, 40)
         XCTAssertEqual(lock.upstream.sourceRevision.count, 40)
         XCTAssertEqual(lock.artifacts.count, 27)
-        XCTAssertEqual(lock.selection.executionArtifactCount, 13)
-        XCTAssertEqual(lock.selection.measurementArtifactCount, 8)
+        XCTAssertEqual(lock.selection.executionArtifactCount, 14)
+        XCTAssertEqual(lock.selection.measurementArtifactCount, 7)
         XCTAssertEqual(lock.selection.conformanceArtifactCount, 6)
         XCTAssertEqual(
             lock.selection.currentLib16ArtifactCount,
@@ -116,19 +116,19 @@ final class CorpusLockTests: XCTestCase {
         )
 
         let byRole = Dictionary(grouping: lock.artifacts, by: \.role)
-        XCTAssertEqual(byRole["execution"]?.count, 13)
-        XCTAssertEqual(byRole["measurement"]?.count, 8)
+        XCTAssertEqual(byRole["execution"]?.count, 14)
+        XCTAssertEqual(byRole["measurement"]?.count, 7)
         XCTAssertEqual(byRole["conformance"]?.count, 6)
         XCTAssertEqual(Set(byRole.keys), ["execution", "measurement", "conformance"])
 
         XCTAssertEqual(Set(byRole["execution", default: []].map(\.name)), [
             "akuma", "mangadex", "batcave", "kawiimanga", "mangamelon",
             "baozimanhua", "tuttoanimemanga", "mangasoriginesfr", "komikcast",
-            "sssscanlator", "eternalmangas", "doctruyen3q", "foolslidecustomizable",
+            "sssscanlator", "eternalmangas", "doctruyen3q", "foolslidecustomizable", "mangapandaonl",
         ])
         XCTAssertEqual(Set(byRole["measurement", default: []].map(\.name)), [
             "hayalistic",
-            "komga", "mangapandaonl", "mangaplus",
+            "komga", "mangaplus",
             "nhentaixxx", "pixivcomic", "readmanga", "xcomic",
         ])
 

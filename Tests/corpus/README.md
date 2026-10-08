@@ -3,17 +3,17 @@
 `manifest.json` is the authoritative lock for three deliberately separate
 roles:
 
-- `execution` fixtures are the ten real APKs used by constructor,
+- `execution` fixtures are the fourteen real APKs used by constructor,
   signature, and interpreted-operation tests.
-- `measurement` fixtures are the remaining 11 current lib 1.6 release APKs used
+- `measurement` fixtures are the remaining seven current lib 1.6 release APKs used
   only for bounded parsing, structural planning, and static compatibility-gap
   ranking.
 - `conformance` fixtures are small AOSP apksig inputs, including intentionally
   invalid and unsigned APKs.
 
-The lock contains 27 APK artifacts: 10 execution, 11 measurement, and 6
-conformance fixtures. Thus 19 locked artifacts are current lib 1.6 (8 execution
-and 11 measurement).
+The lock contains 27 APK artifacts: 14 execution, 7 measurement, and 6
+conformance fixtures. Thus 19 locked artifacts are current lib 1.6 (12 execution
+and 7 measurement).
 
 The measurement set is behavior-stratified, not statistically sampled. It
 covers dominant generated families, custom/API-heavy sources, preferences,
@@ -24,13 +24,22 @@ the release signatures as parser conformance, but exact trust and admission
 remain in Kami's separate repository-key and install-admission policy, and
 executable profiles remain an explicit fail-closed catalog.
 
-The eight exact current-lib-1.6 executable profiles are BatCave, Kawii Manga,
-MangaMelon, Baozi Manhua, TuttoAnimeManga, Mangas-Origines.fr,
-Komikcast/VoraToon, and Yomu Comics/SSSCanlator. The current deterministic
-measurement baseline analyzed 11/11 remaining artifacts, with 7 structural
-candidates, four stable-wrapper blockers, 432 unique unregistered external
-method surfaces, 0 omitted invocations, and 0 unsupported opcodes. These are static prioritization
-results, not a compatibility percentage or runtime proof.
+The twelve exact current-lib-1.6 profiles and their operation scope are listed
+in the [current matrix](../../docs/EXTENSION_COMPATIBILITY_MATRIX.md). The
+current static baseline analyzes 7/7 measurement artifacts, with three structural
+candidates, four stable-wrapper blockers, 330 unique unregistered external
+method surfaces, zero omitted invocations and zero unsupported opcodes. Static
+counts are prioritization evidence, not execution coverage or a compatibility
+percentage. Historical paths under `measurement/` stay unchanged; select using
+`compat-audit gaps Tests/corpus --role measurement`.
+
+[MangaPanda verification](../../docs/VERIFICATION-2026-10-07-MANGAPANDA.md)
+records its exact identity, host-registration changes, role promotion and
+factory tests. No fixture hash, upstream provenance or trust policy changed.
+
+## Earlier per-profile evidence
+
+The following notes retain their original measured scope and historical counts.
 
 The fourth exact current-lib executable profile is Baozi Manhua 1.6.29
 (`eu.kanade.tachiyomi.extension.zh.baozimanhua`, version code 29). Its exact

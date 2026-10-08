@@ -75,6 +75,11 @@ public final class DexInterpreter {
     /// outer entry's remaining instruction budget instead of starting a fresh
     /// budget session.
     private var activeAsyncEntryDepth = 0
+    /// Guardrail errors deliberately bypass DEX catch/finally handlers. Keep
+    /// only the permits acquired by this async session so cancellation/budget
+    /// failures cannot leave a source's mutex permanently held. Normal DEX
+    /// return/throw semantics still decide when a legitimate lock is released.
+    private var mutexPermits: [ObjectIdentifier: (HostCoroutineMutex, HostCoroutineMutex.Ticket)] = [:]
     /// Number of suspended host operations currently executing on behalf of an
     /// async VM entry. Interpreted re-entry from those callbacks happens after
     /// the original frames have unwound to depth zero, so this is the remaining
@@ -145,7 +150,7 @@ public final class DexInterpreter {
         let observation = CompatibilityGapObservation(record: record)
         compatibilityGapObservations.append(observation)
         defer { removeCompatibilityGapObservation(observation) }
-        return try await reportCompatibilityGap(from: operation)
+        return try await withAsyncErrorBoundary(from: operation)
     }
 
     /// Executes the most-specific DEX-defined virtual override when one exists
@@ -276,7 +281,7 @@ public final class DexInterpreter {
         prototype: String,
         args: [RVal]
     ) async throws -> RVal {
-        try await reportCompatibilityGap {
+        try await withAsyncErrorBoundary {
             activeAsyncEntryDepth += 1
             defer { activeAsyncEntryDepth -= 1 }
             do {
@@ -383,7 +388,7 @@ public final class DexInterpreter {
     @discardableResult
     public func callAsync(classDescriptor: String, method: String,
                            args: [RVal] = []) async throws -> RVal {
-        try await reportCompatibilityGap {
+        try await withAsyncErrorBoundary {
             activeAsyncEntryDepth += 1
             defer { activeAsyncEntryDepth -= 1 }
             do {
@@ -400,7 +405,7 @@ public final class DexInterpreter {
     @discardableResult
     public func callAsync(classDescriptor: String, method: String, prototype: String,
                            args: [RVal] = []) async throws -> RVal {
-        try await reportCompatibilityGap {
+        try await withAsyncErrorBoundary {
             activeAsyncEntryDepth += 1
             defer { activeAsyncEntryDepth -= 1 }
             do {
@@ -426,7 +431,7 @@ public final class DexInterpreter {
     @discardableResult
     func callNestedAsync(classDescriptor: String, method: String, prototype: String,
                          args: [RVal] = []) async throws -> RVal {
-        try await reportCompatibilityGap {
+        try await withAsyncErrorBoundary {
             guard activeAsyncEntryDepth > 0 else {
                 throw VMError.verify(
                     "nested async DEX entry requires an active async VM session"
@@ -458,7 +463,7 @@ public final class DexInterpreter {
     func withFreshAsyncSession<T>(
         _ operation: () async throws -> T
     ) async throws -> T {
-        try await reportCompatibilityGap {
+        try await withAsyncErrorBoundary {
             guard activeAsyncEntryDepth == 0, entryDepth == 0, depth == 0 else {
                 throw VMError.verify("fresh async DEX session overlaps active execution")
             }
@@ -520,15 +525,45 @@ public final class DexInterpreter {
         }
     }
 
-    private func reportCompatibilityGap<T>(
+    private func withAsyncErrorBoundary<T>(
         from operation: () async throws -> T
     ) async throws -> T {
+        let isOutermost = activeAsyncEntryDepth == 0
+        defer { if isOutermost { mutexPermits.removeAll(keepingCapacity: false) } }
         do {
             return try await operation()
         } catch let error as VMError {
+            if isOutermost { releaseMutexPermitsAfterGuardFailure() }
             recordCompatibilityGap(error)
             throw error
+        } catch let error as DEXThrowable {
+            throw error
+        } catch {
+            if isOutermost { releaseMutexPermitsAfterGuardFailure() }
+            throw error
         }
+    }
+
+    func retainMutexPermit(_ mutex: HostCoroutineMutex, ticket: HostCoroutineMutex.Ticket) throws {
+        // Synchronous tryLock calls outside an async session retain their
+        // ordinary cross-entry lifetime, with no suspended guard cleanup.
+        guard activeAsyncEntryDepth > 0 else { return }
+        let key = ObjectIdentifier(mutex)
+        guard mutexPermits[key] != nil || mutexPermits.count < 32 else {
+            mutex.cancel(ticket)
+            throw VMError.verify("async session exceeds 32 held mutexes")
+        }
+        mutexPermits[key] = (mutex, ticket)
+    }
+
+    func forgetMutexPermit(_ mutex: HostCoroutineMutex) {
+        mutexPermits.removeValue(forKey: ObjectIdentifier(mutex))
+    }
+
+    private func releaseMutexPermitsAfterGuardFailure() {
+        let permits = Array(mutexPermits.values)
+        mutexPermits.removeAll(keepingCapacity: false)
+        for (mutex, ticket) in permits { mutex.cancel(ticket) }
     }
 
     private func recordCompatibilityGap(_ error: VMError) {
@@ -794,6 +829,7 @@ public final class DexInterpreter {
 
         while pc < code.insnsCount {
             guard remainingInstructions > 0 else { throw VMError.budgetExceeded(limit: maxInstructions) }
+            try RuntimeObjectOwnership.current?.check()
             remainingInstructions -= 1
             if remainingInstructions & 0x3FF == 0, cancelled() { throw VMError.cancelled }
 

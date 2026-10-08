@@ -125,11 +125,11 @@ public enum CompatHTTPTransportError: Swift.Error, Sendable, Equatable, CustomSt
 /// Production URLSession adapter. Response data is accumulated through
 /// URLSessionDataDelegate callbacks, so the body limit is enforced while bytes
 /// arrive rather than after URLSession has buffered the entire response.
-public actor URLSessionCompatHTTPTransport: CompatHTTPSingleExchangeTransport {
+public actor URLSessionCompatHTTPTransport: CompatHTTPSingleExchangeTransport, CompatHTTPCookieStoreProviding {
     public nonisolated let sourceID: String
     public let policy: CompatHTTPTransportPolicy
 
-    private var cookieJar = CompatHTTPCookieJar()
+    nonisolated let cookieJar = CompatHTTPCookieJar()
     private let protocolClasses: [AnyClass]?
 
     public init(sourceID: String, policy: CompatHTTPTransportPolicy = .init()) {
@@ -159,12 +159,16 @@ public actor URLSessionCompatHTTPTransport: CompatHTTPSingleExchangeTransport {
         _ request: CompatHTTPRequest,
         followsRedirects: Bool
     ) async throws -> CompatHTTPResponse {
-        var encoded = try CompatHTTPRequestEncoder.encode(request, policy: policy)
-        cookieJar.apply(to: &encoded)
+        let withCookies = cookieJar.applying(to: request)
+        try policy.validate(request: withCookies)
+        let encoded = try CompatHTTPRequestEncoder.encode(withCookies, policy: policy)
         let response = try await CompatHTTPTaskRunner(
             policy: policy,
             protocolClasses: protocolClasses,
-            followsRedirects: followsRedirects
+            followsRedirects: followsRedirects,
+            cookieJar: cookieJar,
+            automaticCookieHeader: request.headers.contains(where: { $0.name.caseInsensitiveCompare("Cookie") == .orderedSame })
+                ? nil : encoded.value(forHTTPHeaderField: "Cookie")
         ).run(encoded)
         cookieJar.store(from: response)
         return response
@@ -172,92 +176,6 @@ public actor URLSessionCompatHTTPTransport: CompatHTTPSingleExchangeTransport {
 
     public func clearCookies() {
         cookieJar.clear()
-    }
-}
-
-struct CompatHTTPCookieJar {
-    private struct StoredCookie {
-        let cookie: HTTPCookie
-        let hostOnly: Bool
-    }
-
-    private static let maximumCookies = 256
-    private var cookies: [String: StoredCookie] = [:]
-
-    mutating func apply(to request: inout URLRequest) {
-        guard request.value(forHTTPHeaderField: "Cookie") == nil,
-              let url = request.url else { return }
-        removeExpiredCookies()
-        let matching = cookies.values.filter {
-            Self.cookie($0, appliesTo: url)
-        }.map(\.cookie).sorted {
-            if $0.domain != $1.domain { return $0.domain < $1.domain }
-            if $0.path != $1.path { return $0.path < $1.path }
-            return $0.name < $1.name
-        }
-        for (name, value) in HTTPCookie.requestHeaderFields(with: matching) {
-            request.setValue(value, forHTTPHeaderField: name)
-        }
-    }
-
-    mutating func store(from response: CompatHTTPResponse) {
-        guard let url = URL(string: response.finalURL) else { return }
-        for header in response.headers where header.name.caseInsensitiveCompare("Set-Cookie") == .orderedSame {
-            let hostOnly = !header.value.split(separator: ";").dropFirst().contains {
-                $0.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased().hasPrefix("domain=")
-            }
-            let parsed = HTTPCookie.cookies(
-                withResponseHeaderFields: ["Set-Cookie": header.value],
-                for: url
-            )
-            for cookie in parsed {
-                let size = cookie.name.utf8.count + cookie.value.utf8.count
-                    + cookie.domain.utf8.count + cookie.path.utf8.count
-                guard size <= 8_192 else { continue }
-                cookies[Self.cookieKey(cookie)] = StoredCookie(
-                    cookie: cookie,
-                    hostOnly: hostOnly
-                )
-            }
-        }
-        removeExpiredCookies()
-        if cookies.count > Self.maximumCookies {
-            for key in cookies.keys.sorted().prefix(cookies.count - Self.maximumCookies) {
-                cookies.removeValue(forKey: key)
-            }
-        }
-    }
-
-    mutating func clear() {
-        cookies.removeAll(keepingCapacity: false)
-    }
-
-    private mutating func removeExpiredCookies() {
-        let now = Date()
-        cookies = cookies.filter { _, stored in
-            guard let expires = stored.cookie.expiresDate else { return true }
-            return expires > now
-        }
-    }
-
-    private static func cookieKey(_ cookie: HTTPCookie) -> String {
-        cookie.name + "\u{0}" + cookie.domain.lowercased() + "\u{0}" + cookie.path
-    }
-
-    private static func cookie(_ stored: StoredCookie, appliesTo url: URL) -> Bool {
-        let cookie = stored.cookie
-        guard let host = url.host?.lowercased() else { return false }
-        let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        let domainMatches = host == domain || (!stored.hostOnly && host.hasSuffix("." + domain))
-        guard domainMatches else { return false }
-        if cookie.isSecure && url.scheme?.lowercased() != "https" { return false }
-        let requestPath = url.path.isEmpty ? "/" : url.path
-        let cookiePath = cookie.path.isEmpty ? "/" : cookie.path
-        guard requestPath.hasPrefix(cookiePath) else { return false }
-        if requestPath.count == cookiePath.count || cookiePath.hasSuffix("/") { return true }
-        let boundary = requestPath.index(requestPath.startIndex, offsetBy: cookiePath.count)
-        return requestPath[boundary] == "/"
     }
 }
 
@@ -517,6 +435,36 @@ enum CompatHTTPRedirectPolicy {
         )
     }
 
+    /// Preserve explicit same-origin Cookie headers, but replace a generated
+    /// header on every hop so path/expiry changes and redirect Set-Cookie
+    /// values are reflected before the next exchange. The resulting headers
+    /// pass the normal byte/syntax bounds before URLSession sees them.
+    static func cookieManagedRequest(
+        response: HTTPURLResponse,
+        proposed: URLRequest,
+        redirectCount: Int,
+        policy: CompatHTTPTransportPolicy,
+        jar: CompatHTTPCookieJar,
+        automaticCookieHeader: String?
+    ) throws -> (request: URLRequest, automaticCookieHeader: String?) {
+        guard let sourceURL = response.url else { throw CompatHTTPTransportError.invalidResponse }
+        var request = try sanitizedRequest(from: sourceURL, proposed: proposed, redirectCount: redirectCount, policy: policy)
+        var buffer = CompatHTTPResponseBuffer(policy: policy)
+        try buffer.receive(response)
+        jar.store(from: try buffer.finish())
+        if let automaticCookieHeader, request.value(forHTTPHeaderField: "Cookie") == automaticCookieHeader {
+            request.setValue(nil, forHTTPHeaderField: "Cookie")
+        }
+        let explicit = request.value(forHTTPHeaderField: "Cookie") != nil
+        jar.apply(to: &request)
+        try policy.validate(request: CompatHTTPRequest(
+            url: request.url?.absoluteString ?? "",
+            method: request.httpMethod ?? "GET",
+            headers: (request.allHTTPHeaderFields ?? [:]).map { .init(name: $0.key, value: $0.value) }
+        ))
+        return (request, explicit ? nil : request.value(forHTTPHeaderField: "Cookie"))
+    }
+
     static func sanitizedRequest(
         from sourceURL: URL,
         proposed: URLRequest,
@@ -610,6 +558,8 @@ private final class CompatHTTPTaskRunner: NSObject, URLSessionDataDelegate,
     private let policy: CompatHTTPTransportPolicy
     private let protocolClasses: [AnyClass]?
     private let followsRedirects: Bool
+    private let cookieJar: CompatHTTPCookieJar
+    private var automaticCookieHeader: String?
     private let lock = NSLock()
     private var buffer: CompatHTTPResponseBuffer
     private var continuation: CheckedContinuation<CompatHTTPResponse, Swift.Error>?
@@ -623,11 +573,15 @@ private final class CompatHTTPTaskRunner: NSObject, URLSessionDataDelegate,
     init(
         policy: CompatHTTPTransportPolicy,
         protocolClasses: [AnyClass]?,
-        followsRedirects: Bool
+        followsRedirects: Bool,
+        cookieJar: CompatHTTPCookieJar,
+        automaticCookieHeader: String?
     ) {
         self.policy = policy
         self.protocolClasses = protocolClasses
         self.followsRedirects = followsRedirects
+        self.cookieJar = cookieJar
+        self.automaticCookieHeader = automaticCookieHeader
         self.buffer = CompatHTTPResponseBuffer(policy: policy)
     }
 
@@ -758,17 +712,20 @@ private final class CompatHTTPTaskRunner: NSObject, URLSessionDataDelegate,
             lock.lock()
             redirectCount += 1
             let count = redirectCount
+            let previousCookieHeader = automaticCookieHeader
             lock.unlock()
-            guard let sourceURL = response.url else {
-                throw CompatHTTPTransportError.invalidResponse
-            }
-            let sanitized = try CompatHTTPRedirectPolicy.sanitizedRequest(
-                from: sourceURL,
+            let prepared = try CompatHTTPRedirectPolicy.cookieManagedRequest(
+                response: response,
                 proposed: request,
                 redirectCount: count,
-                policy: policy
+                policy: policy,
+                jar: cookieJar,
+                automaticCookieHeader: previousCookieHeader
             )
-            completionHandler(sanitized)
+            lock.lock()
+            automaticCookieHeader = prepared.automaticCookieHeader
+            lock.unlock()
+            completionHandler(prepared.request)
         } catch let error as CompatHTTPTransportError {
             completionHandler(nil)
             fail(error)
