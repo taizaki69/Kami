@@ -14,9 +14,17 @@ final class JSONBuilderContractTests: XCTestCase {
         let builderIndex = dex.type(builderType)
         let key = dex.string("inner"), value = dex.string("value")
         dex.setClass("LJSONAction;", interfaces: ["Lkotlin/jvm/functions/Function1;"])
-        let instructions = loopingAction ? [UInt16(0x0000), 0xff28] :
-            [0x031f, UInt16(builderIndex)] + Insn.constString(0, key) + Insn.constString(1, value) + Insn.invokeStatic(put, [3, 0, 1])
-            + Insn.sget(0, unit, object: true) + Insn.returnObjectReg(0)
+        var instructions: [UInt16]
+        if loopingAction {
+            instructions = [0x0000, 0xff28]
+        } else {
+            instructions = [0x031f, UInt16(builderIndex)]
+            instructions += Insn.constString(0, key)
+            instructions += Insn.constString(1, value)
+            instructions += Insn.invokeStatic(put, [3, 0, 1])
+            instructions += Insn.sget(0, unit, object: true)
+            instructions += Insn.returnObjectReg(0)
+        }
         dex.addMethod(.init(name: "invoke", registers: 4, ins: 2, outs: 3, insns: instructions, isStatic: false,
             returnType: "Ljava/lang/Object;", parameters: ["Ljava/lang/Object;"], isVirtual: true))
         let bridge = HostBridge.minimal(htmlPolicy: .init(maximumExtractedStringBytes: limit))
