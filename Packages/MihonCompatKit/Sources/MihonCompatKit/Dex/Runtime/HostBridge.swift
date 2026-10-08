@@ -123,12 +123,37 @@ public final class HostBridge {
     }
 
     private final class HostListBox {
-        var elements: [RVal]
+        private final class Storage {
+            var elements: [RVal]
+            init(_ elements: [RVal]) { self.elements = elements }
+        }
+        private let storage: Storage
+        private let reversed: Bool
+        var elements: [RVal] {
+            get { reversed ? Array(storage.elements.reversed()) : storage.elements }
+            _modify {
+                if reversed {
+                    var values = Array(storage.elements.reversed())
+                    defer { storage.elements = Array(values.reversed()) }
+                    yield &values
+                } else { yield &storage.elements }
+            }
+        }
         var isMutable: Bool
 
         init(_ elements: [RVal] = [], isMutable: Bool) {
-            self.elements = elements
+            storage = Storage(elements)
+            reversed = false
             self.isMutable = isMutable
+        }
+
+        /// The JVM `asReversed` ABI is a read-only, backed view. The mutable
+        /// overload has a different name (`asReversedMutable`). Flatten views
+        /// onto shared storage so repeated reversal cannot grow a call chain.
+        init(reversing source: HostListBox) {
+            storage = source.storage
+            reversed = !source.reversed
+            isMutable = false
         }
     }
 
@@ -228,12 +253,14 @@ public final class HostBridge {
         let kind: FilterKind
         let name: String
         let values: [String]
+        let selectValues: ArrInstance?
         var state: RVal
 
-        init(kind: FilterKind, name: String, values: [String] = [], state: RVal) {
+        init(kind: FilterKind, name: String, values: [String] = [], selectValues: ArrInstance? = nil, state: RVal) {
             self.kind = kind
             self.name = name
             self.values = values
+            self.selectValues = selectValues
             self.state = state
         }
     }
@@ -276,6 +303,12 @@ public final class HostBridge {
         let value: String
         let host: String
         let pathSegments: [String]
+    }
+
+    private final class CookieBuilderBox {
+        var name: String?
+        var value: String?
+        var cookie = CompatHTTPCookie(name: "", value: "", domain: "")
     }
 
     private struct URIBox {
@@ -796,7 +829,6 @@ public final class HostBridge {
 
     private final class JSONObjectBuilderBox {
         var object = OrderedJSONObject()
-        var utf8Bytes = 0
     }
 
     private struct JSONObjectBox {
@@ -941,6 +973,10 @@ public final class HostBridge {
     private var pendingCoroutineJobs: [(scope: RVal, block: RVal)] = []
     private let virtualFileSystem = VirtualFileSystemBox()
     private let transport: (any CompatHTTPTransport)?
+    private let cookieJar: CompatHTTPCookieJar
+    private lazy var cookieJarValue = RVal.obj(ObjInstance(
+        dexType: "Lokhttp3/CookieJar;", payload: cookieJar, isHost: true
+    ))
     private let transportPolicy: CompatHTTPTransportPolicy
     private let htmlPolicy: CompatHTMLPolicy
 
@@ -960,6 +996,7 @@ public final class HostBridge {
         htmlPolicy: CompatHTMLPolicy = .init()
     ) {
         self.transport = transport
+        self.cookieJar = (transport as? any CompatHTTPCookieStoreProviding)?.cookieJar ?? CompatHTTPCookieJar()
         self.transportPolicy = transportPolicy
         self.htmlPolicy = htmlPolicy
     }
@@ -974,6 +1011,21 @@ public final class HostBridge {
     }
 
     var hasPendingCoroutineJobs: Bool { !pendingCoroutineJobs.isEmpty }
+
+    /// Called only after a private source session has drained. Registered
+    /// closures capture this bridge; clear them so replacing a session releases
+    /// its client/cache/resources instead of retaining a closure cycle.
+    func retire() {
+        methods.removeAll()
+        asyncMethods.removeAll()
+        objectFactories.removeAll()
+        staticFields.removeAll()
+        sourceNetworks.removeAll()
+        pendingCoroutineJobs.removeAll()
+        virtualFileSystem.files.removeAll()
+        virtualFileSystem.directories.removeAll()
+        lastPreparedRequest = nil
+    }
 
     public func register(class descriptor: String, _ methodName: String,
                          prototype: String, isStatic: Bool = false,
@@ -1204,23 +1256,25 @@ public final class HostBridge {
 
         // Object identity basics.
         bridge.register(class: "Ljava/lang/Object;", "<init>", prototype: "()V") { _, _ in .null }
-        bridge.register(
-            class: "Ljava/lang/Exception;",
-            "<init>",
-            prototype: "(Ljava/lang/String;)V"
-        ) { _, args in
-            guard case let .obj(object) = try argument(args, 0, "Exception.<init>") else {
-                throw VMError.verify("Exception.<init> receiver")
+        for descriptor in ["Ljava/lang/Exception;", "Ljava/io/IOException;"] {
+            bridge.register(
+                class: descriptor,
+                "<init>",
+                prototype: "(Ljava/lang/String;)V"
+            ) { _, args in
+                guard case let .obj(object) = try argument(args, 0, "Exception.<init>") else {
+                    throw VMError.verify("Exception.<init> receiver")
+                }
+                let message = try requiredString(args, 1, "Exception.<init>")
+                guard message.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                    throw hostThrowable(
+                        "Ljava/lang/IllegalArgumentException;",
+                        "Exception message is too long"
+                    )
+                }
+                object.payload = message
+                return .null
             }
-            let message = try requiredString(args, 1, "Exception.<init>")
-            guard message.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
-                throw hostThrowable(
-                    "Ljava/lang/IllegalArgumentException;",
-                    "Exception message is too long"
-                )
-            }
-            object.payload = message
-            return .null
         }
         bridge.register(
             class: "Ljava/lang/Object;",
@@ -1340,6 +1394,17 @@ public final class HostBridge {
         Self.registerVirtualFileSurface(bridge)
         Self.registerResourceBundleSurface(bridge, resources: resources)
         Self.registerCoroutineSurface(bridge)
+        let randomDefault = "Lkotlin/random/Random$Default;"
+        bridge.staticFields["Lkotlin/random/Random;->Default"] = .obj(ObjInstance(dexType: randomDefault, isHost: true))
+        bridge.register(class: randomDefault, "nextInt", prototype: "(II)I") { _, args in
+            guard case let .obj(receiver) = try argument(args, 0, "Random.nextInt"), receiver.dexType == randomDefault,
+                  case let .int(lower) = try argument(args, 1, "Random.nextInt"),
+                  case let .int(upper) = try argument(args, 2, "Random.nextInt") else {
+                throw VMError.verify("Random.nextInt arguments")
+            }
+            guard lower < upper else { throw hostThrowable("Ljava/lang/IllegalArgumentException;", "Random range is empty") }
+            return .int(Int32.random(in: lower..<upper))
+        }
 
         // These abstract tachiyomix base classes are supplied by the host app,
         // not packaged in extension DEX files. Their empty construction surface
@@ -1610,10 +1675,10 @@ public final class HostBridge {
             let value = vmStringValue(try argument(args, 0, "StringsKt.trim"))
             return string(value.trimmingCharacters(in: .whitespacesAndNewlines))
         }
-        for (name, beforeLast) in [
-            ("substringAfter$default", false),
-            ("substringBeforeLast$default", true),
-            ("substringAfterLast$default", true),
+        for (name, backwards, before) in [
+            ("substringAfter$default", false, false),
+            ("substringBeforeLast$default", true, true),
+            ("substringAfterLast$default", true, false),
         ] {
             bridge.register(
                 class: "Lkotlin/text/StringsKt;",
@@ -1639,13 +1704,20 @@ public final class HostBridge {
                         "substring input is too long"
                     )
                 }
-                let options: String.CompareOptions = beforeLast ? [.backwards] : []
-                guard let range = value.range(of: delimiter, options: options) else {
+                let text = value as NSString
+                let range: NSRange
+                if delimiter.isEmpty {
+                    range = NSRange(location: backwards ? text.length : 0, length: 0)
+                } else {
+                    let options: NSString.CompareOptions = backwards ? [.literal, .backwards] : [.literal]
+                    range = text.range(of: delimiter, options: options)
+                }
+                guard range.location != NSNotFound else {
                     return string(missingValue)
                 }
-                let result = beforeLast
-                    ? String(value[..<range.lowerBound])
-                    : String(value[range.upperBound...])
+                let result = before
+                    ? text.substring(to: range.location)
+                    : text.substring(from: range.location + range.length)
                 return string(result)
             }
         }
@@ -2214,6 +2286,7 @@ public final class HostBridge {
         Self.registerJSONElementSurface(bridge)
         Self.registerKotlinDurationSurface(bridge)
         Self.registerOkHttpRequestSurface(bridge)
+        Self.registerCookieSurface(bridge)
         Self.registerOkHttpResponseSurface(bridge)
         Self.registerHTMLSurface(bridge)
         Self.registerSourceModelSurface(bridge)
@@ -2320,6 +2393,27 @@ public final class HostBridge {
                 result.range.location == 0 && result.range.length == range.length
             } ?? false
             return .int(fullMatch ? 1 : 0)
+        }
+        bridge.register(
+            class: regex,
+            "replace",
+            prototype: "(Ljava/lang/CharSequence;Ljava/lang/String;)Ljava/lang/String;"
+        ) { vm, args in
+            guard case let .obj(object) = try argument(args, 0, "Regex.replace"),
+                  let regex = object.payload as? KotlinRegexBox else { throw VMError.verify("Regex.replace receiver") }
+            do {
+                return string(try KotlinRegexReplacement.replace(
+                    expression: regex.expression,
+                    input: requiredString(args, 1, "Regex.replace"),
+                    replacement: requiredString(args, 2, "Regex.replace"),
+                    maximumBytes: bridge.htmlPolicy.maximumExtractedStringBytes,
+                    cancelled: { Task.isCancelled || vm.cancelled() }
+                ))
+            } catch KotlinRegexReplacement.Failure.missingGroup {
+                throw hostThrowable("Ljava/lang/IndexOutOfBoundsException;", "regex replacement group does not exist")
+            } catch is KotlinRegexReplacement.Failure {
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "invalid or oversized regex replacement")
+            }
         }
         bridge.register(
             class: regex,
@@ -3036,6 +3130,7 @@ public final class HostBridge {
     /// the captured DEX lambda on the same VM, preserving verifier, call-depth,
     /// instruction-budget, cancellation, and host-capability boundaries.
     private static func registerCoroutineSurface(_ bridge: HostBridge) {
+        registerCoroutineMutexSurface(bridge)
         let scope = "Lkotlinx/coroutines/CoroutineScope;"
         let deferred = "Lkotlinx/coroutines/Deferred;"
         let globalScope = "Lkotlinx/coroutines/GlobalScope;"
@@ -3155,6 +3250,105 @@ public final class HostBridge {
         }
     }
 
+    private static func registerCoroutineMutexSurface(_ bridge: HostBridge) {
+        let descriptor = "Lkotlinx/coroutines/sync/Mutex;"
+        func mutex(_ args: [RVal], _ operation: String) throws -> HostCoroutineMutex {
+            guard case let .obj(object) = try argument(args, 0, operation),
+                  object.dexType == descriptor,
+                  let value = object.payload as? HostCoroutineMutex else {
+                throw VMError.verify("\(operation) receiver")
+            }
+            return value
+        }
+        func owner(_ args: [RVal], _ operation: String) throws -> HostCoroutineMutex.Owner? {
+            switch try argument(args, 1, operation) {
+            case .null: return nil
+            case let .obj(value): return .init(value)
+            case let .arr(value): return .init(value)
+            default: throw VMError.verify("\(operation) owner")
+            }
+        }
+        func failure(_ error: HostCoroutineMutex.Failure) -> DEXThrowable {
+            // Keep errors finite; owner values may contain source secrets.
+            hostThrowable("Ljava/lang/IllegalStateException;", "Mutex \(error)")
+        }
+        for name in ["Mutex", "Mutex$default"] {
+            let isDefault = name.hasSuffix("$default")
+            bridge.register(
+                class: "Lkotlinx/coroutines/sync/MutexKt;", name,
+                prototype: isDefault
+                    ? "(ZILjava/lang/Object;)Lkotlinx/coroutines/sync/Mutex;"
+                    : "(Z)Lkotlinx/coroutines/sync/Mutex;",
+                isStatic: true
+            ) { _, args in
+                guard case let .int(value) = try argument(args, 0, name), value == 0 || value == 1 else {
+                    throw VMError.verify("Mutex factory locked argument")
+                }
+                var locked = value == 1
+                if isDefault {
+                    guard case let .int(mask) = try argument(args, 1, name),
+                          mask == 0 || mask == 1,
+                          try argument(args, 2, name).isNull else {
+                        throw VMError.verify("Mutex factory default arguments")
+                    }
+                    if mask == 1 { locked = false }
+                }
+                return .obj(ObjInstance(dexType: descriptor, payload: HostCoroutineMutex(locked: locked), isHost: true))
+            }
+        }
+        bridge.registerAsync(
+            class: descriptor, "lock",
+            prototype: "(Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+        ) { vm, args in
+            let value = try mutex(args, "Mutex.lock")
+            let token = try owner(args, "Mutex.lock")
+            switch try argument(args, 2, "Mutex.lock") {
+            case .null, .obj: break
+            default: throw VMError.verify("Mutex.lock continuation")
+            }
+            guard let unit = bridge.staticFields["Lkotlin/Unit;->INSTANCE"] else {
+                throw VMError.verify("Mutex.lock missing Unit")
+            }
+            if Task.isCancelled || vm.cancelled() { throw VMError.cancelled }
+            do {
+                let ticket = try await value.lock(
+                    owner: token,
+                    maximumWaitNanoseconds: UInt64(min(bridge.transportPolicy.requestTimeoutSeconds, 30) * 1_000_000_000),
+                    cancelled: vm.cancelled
+                )
+                try vm.retainMutexPermit(value, ticket: ticket)
+            } catch let error as HostCoroutineMutex.Failure { throw failure(error) }
+            return unit
+        }
+        bridge.register(class: descriptor, "unlock", prototype: "(Ljava/lang/Object;)V") { vm, args in
+            do {
+                let value = try mutex(args, "Mutex.unlock")
+                try value.unlock(owner: owner(args, "Mutex.unlock"))
+                vm.forgetMutexPermit(value)
+            }
+            catch let error as HostCoroutineMutex.Failure { throw failure(error) }
+            return .null
+        }
+        bridge.register(class: descriptor, "tryLock", prototype: "(Ljava/lang/Object;)Z") { vm, args in
+            do {
+                let value = try mutex(args, "Mutex.tryLock")
+                guard let ticket = try value.tryAcquire(owner: owner(args, "Mutex.tryLock")) else { return .int(0) }
+                try vm.retainMutexPermit(value, ticket: ticket)
+                return .int(1)
+            }
+            catch let error as HostCoroutineMutex.Failure { throw failure(error) }
+        }
+        bridge.register(class: descriptor, "isLocked", prototype: "()Z") { _, args in
+            .int(try mutex(args, "Mutex.isLocked").isLocked ? 1 : 0)
+        }
+        bridge.register(class: descriptor, "holdsLock", prototype: "(Ljava/lang/Object;)Z") { _, args in
+            guard let token = try owner(args, "Mutex.holdsLock") else {
+                throw hostThrowable("Ljava/lang/NullPointerException;", "Mutex.holdsLock owner")
+            }
+            return .int(try mutex(args, "Mutex.holdsLock").holdsLock(owner: token) ? 1 : 0)
+        }
+    }
+
     /// Bounded kotlinx JSON value surface. Parsed values retain concrete
     /// JsonObject/JsonArray/JsonPrimitive identity for DEX type checks, while
     /// tachiyomix chapter memo builders remain restricted to string entries.
@@ -3219,6 +3413,22 @@ public final class HostBridge {
             object.payload = JSONObjectBuilderBox()
             return .null
         }
+        func putJSON(_ box: JSONObjectBuilderBox, key: String, value: Any) throws -> RVal {
+            guard key.utf8.count <= 4_096,
+                  box.object.contains(key) || box.object.count < 512 else {
+                throw VMError.verify("JsonObjectBuilder.put entry bounds")
+            }
+            let previous = box.object.value(forKey: key)
+            var candidate = box.object
+            candidate.set(value, forKey: key)
+            // Validate the complete candidate before mutation, including nested
+            // values and escaped output bytes. Replacing a key must release its
+            // old cost, regardless of whether its old value was text or numeric.
+            _ = try renderJSONFoundation(candidate, policy: bridge.htmlPolicy,
+                maximumBytes: min(1_048_576, bridge.htmlPolicy.maximumExtractedStringBytes))
+            box.object = candidate
+            return previous.map(jsonElementValue) ?? .null
+        }
         bridge.register(
             class: "Lkotlinx/serialization/json/JsonElementBuildersKt;",
             "put",
@@ -3230,22 +3440,12 @@ public final class HostBridge {
                 throw VMError.verify("JsonObjectBuilder.put receiver")
             }
             let key = try requiredString(args, 1, "JsonObjectBuilder.put")
+            if try argument(args, 2, "JsonObjectBuilder.put").isNull {
+                return try putJSON(box, key: key, value: NSNull())
+            }
             let value = try requiredString(args, 2, "JsonObjectBuilder.put")
-            guard key.utf8.count <= 4_096,
-                  value.utf8.count <= 4_096,
-                  box.object.contains(key) || box.object.count < 512 else {
-                throw VMError.verify("JsonObjectBuilder.put entry bounds")
-            }
-            let previousBytes = (box.object.value(forKey: key) as? String).map {
-                key.utf8.count + $0.utf8.count
-            } ?? 0
-            let nextBytes = box.utf8Bytes - previousBytes + key.utf8.count + value.utf8.count
-            guard nextBytes <= 1_048_576 else {
-                throw VMError.verify("JsonObjectBuilder.put exceeds 1048576 UTF-8 bytes")
-            }
-            box.object.set(value, forKey: key)
-            box.utf8Bytes = nextBytes
-            return .obj(ObjInstance(dexType: primitive, payload: value, isHost: true))
+            guard value.utf8.count <= 4_096 else { throw VMError.verify("JsonObjectBuilder.put string bounds") }
+            return try putJSON(box, key: key, value: value)
         }
         bridge.register(
             class: "Lkotlinx/serialization/json/JsonElementBuildersKt;",
@@ -3258,49 +3458,42 @@ public final class HostBridge {
                 throw VMError.verify("JsonObjectBuilder.put receiver")
             }
             let key = try requiredString(args, 1, "JsonObjectBuilder.put")
-            guard key.utf8.count <= 4_096,
-                  box.object.contains(key) || box.object.count < 512 else {
-                throw VMError.verify("JsonObjectBuilder.put entry bounds")
-            }
             let number: NSNumber
-            switch args[2] {
-            case .int(let value):
-                number = NSNumber(value: Int(value))
-            case .long(let value):
-                number = NSNumber(value: value)
-            case .float(let value):
-                number = NSNumber(value: value)
-            case .double(let value):
-                number = NSNumber(value: value)
+            switch try argument(args, 2, "JsonObjectBuilder.put") {
+            case .null: return try putJSON(box, key: key, value: NSNull())
+            case .int(let value): number = NSNumber(value: value)
+            case .long(let value): number = NSNumber(value: value)
+            case .float(let value): number = NSNumber(value: value)
+            case .double(let value): number = NSNumber(value: value)
             case .obj(let boxed):
-                if let value = boxed.payload as? Int32 {
-                    number = NSNumber(value: Int(value))
-                } else if let value = boxed.payload as? Int64 {
-                    number = NSNumber(value: value)
-                } else if let value = boxed.payload as? Float {
-                    number = NSNumber(value: value)
-                } else if let value = boxed.payload as? Double {
-                    number = NSNumber(value: value)
-                } else {
-                    throw VMError.verify("JsonObjectBuilder.put number")
-                }
-            default:
-                throw VMError.verify("JsonObjectBuilder.put number")
+                if let value = boxed.payload as? Int32 { number = NSNumber(value: value) }
+                else if let value = boxed.payload as? Int64 { number = NSNumber(value: value) }
+                else if let value = boxed.payload as? Float { number = NSNumber(value: value) }
+                else if let value = boxed.payload as? Double { number = NSNumber(value: value) }
+                else { throw VMError.verify("JsonObjectBuilder.put number") }
+            default: throw VMError.verify("JsonObjectBuilder.put number")
             }
-            let text = try Self.jsonPrimitiveContent(number, operation: "JsonObjectBuilder.put")
-            guard text.utf8.count <= 4_096 else {
-                throw VMError.verify("JsonObjectBuilder.put exceeds 4096 number bytes")
+            return try putJSON(box, key: key, value: number)
+        }
+        bridge.register(
+            class: "Lkotlinx/serialization/json/JsonElementBuildersKt;",
+            "putJsonObject",
+            prototype: "(Lkotlinx/serialization/json/JsonObjectBuilder;Ljava/lang/String;Lkotlin/jvm/functions/Function1;)Lkotlinx/serialization/json/JsonElement;",
+            isStatic: true
+        ) { vm, args in
+            guard case let .obj(object) = try argument(args, 0, "JsonObjectBuilder.putJsonObject"),
+                  let box = object.payload as? JSONObjectBuilderBox,
+                  case .obj = try argument(args, 2, "JsonObjectBuilder.putJsonObject") else {
+                throw VMError.verify("JsonObjectBuilder.putJsonObject arguments")
             }
-            let previousBytes = (box.object.value(forKey: key) as? String).map {
-                key.utf8.count + $0.utf8.count
-            } ?? 0
-            let nextBytes = box.utf8Bytes - previousBytes + key.utf8.count + text.utf8.count
-            guard nextBytes <= 1_048_576 else {
-                throw VMError.verify("JsonObjectBuilder.put exceeds 1048576 UTF-8 bytes")
-            }
-            box.object.set(number, forKey: key)
-            box.utf8Bytes = nextBytes
-            return .obj(ObjInstance(dexType: primitive, payload: number, isHost: true))
+            let key = try requiredString(args, 1, "JsonObjectBuilder.putJsonObject")
+            guard key.utf8.count <= 4_096 else { throw VMError.verify("JsonObjectBuilder.putJsonObject key bounds") }
+            let child = JSONObjectBuilderBox()
+            let childValue = RVal.obj(ObjInstance(dexType: builder, payload: child, isHost: true))
+            let action = args[2]
+            _ = try vm.callVirtualEntry(receiver: action, method: "invoke",
+                prototype: "(Ljava/lang/Object;)Ljava/lang/Object;", args: [action, childValue])
+            return try putJSON(box, key: key, value: child.object)
         }
         bridge.register(class: builder, "build", prototype: "()Lkotlinx/serialization/json/JsonObject;") { _, args in
             guard case let .obj(object) = try argument(args, 0, "JsonObjectBuilder.build"),
@@ -4290,10 +4483,13 @@ public final class HostBridge {
                 args, 0, "PluginGeneratedSerialDescriptor.<init>"
             ), case let .int(elementCount) = try argument(
                 args, 3, "PluginGeneratedSerialDescriptor.<init>"
-            ), case .obj = try argument(
-                args, 2, "PluginGeneratedSerialDescriptor.<init>"
             ) else {
                 throw VMError.verify("PluginGeneratedSerialDescriptor constructor arguments")
+            }
+            let serializer = try argument(args, 2, "PluginGeneratedSerialDescriptor.<init>")
+            switch serializer {
+            case .obj, .null: break
+            default: throw VMError.verify("PluginGeneratedSerialDescriptor serializer")
             }
             let serialName = try requiredString(
                 args, 1, "PluginGeneratedSerialDescriptor.<init>"
@@ -4308,9 +4504,7 @@ public final class HostBridge {
             object.payload = SerialDescriptorBox(
                 serialName: serialName,
                 expectedElementCount: Int(elementCount),
-                generatedSerializer: try argument(
-                    args, 2, "PluginGeneratedSerialDescriptor.<init>"
-                )
+                generatedSerializer: serializer.isNull ? nil : serializer
             )
             return .null
         }
@@ -5712,23 +5906,30 @@ public final class HostBridge {
         bridge.register(
             class: d,
             "valueOf",
+            prototype: "(J)Ljava/lang/String;",
+            isStatic: true
+        ) { _, args in
+            guard case let .long(value) = try argument(args, 0, "String.valueOf") else {
+                throw VMError.verify("String.valueOf long argument")
+            }
+            return string(String(value))
+        }
+        bridge.register(
+            class: d,
+            "valueOf",
             prototype: "(D)Ljava/lang/String;",
             isStatic: true
         ) { _, args in
             guard case let .double(value) = try argument(args, 0, "String.valueOf") else {
                 throw VMError.verify("String.valueOf double argument")
             }
-            let rendered: String
-            if value.isNaN {
-                rendered = "NaN"
-            } else if value == .infinity {
-                rendered = "Infinity"
-            } else if value == -.infinity {
-                rendered = "-Infinity"
-            } else {
-                rendered = String(value)
+            return string(JVMFloatingPointText.string(value))
+        }
+        bridge.register(class: d, "valueOf", prototype: "(F)Ljava/lang/String;", isStatic: true) { _, args in
+            guard case let .float(value) = try argument(args, 0, "String.valueOf") else {
+                throw VMError.verify("String.valueOf float argument")
             }
-            return string(rendered)
+            return string(JVMFloatingPointText.string(value))
         }
         bridge.register(
             class: "Ljava/lang/Float;",
@@ -5745,6 +5946,60 @@ public final class HostBridge {
                 )
             }
             return .float(value)
+        }
+        bridge.register(
+            class: strings, "removeSurrounding",
+            prototype: "(Ljava/lang/String;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            isStatic: true
+        ) { _, args in
+            let source = try requiredString(args, 0, "StringsKt.removeSurrounding")
+            let delimiter = try requiredString(args, 1, "StringsKt.removeSurrounding")
+            guard source.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes,
+                  delimiter.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "removeSurrounding input is too long")
+            }
+            // Kotlin compares UTF-16 code units, including combining marks;
+            // Swift's grapheme and canonical-equivalence comparisons differ.
+            let units = Array(source.utf16), affix = Array(delimiter.utf16)
+            guard units.count >= affix.count * 2,
+                  units.starts(with: affix), units.suffix(affix.count).elementsEqual(affix) else {
+                return string(source)
+            }
+            return string(String(decoding: units[affix.count..<(units.count - affix.count)], as: UTF16.self))
+        }
+        bridge.register(class: strings, "trimIndent", prototype: "(Ljava/lang/String;)Ljava/lang/String;", isStatic: true) { _, args in
+            let source = try requiredString(args, 0, "StringsKt.trimIndent")
+            guard source.utf8.count <= bridge.htmlPolicy.maximumExtractedStringBytes else {
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "trimIndent input is too long")
+            }
+            func whitespace(_ unit: UInt16) -> Bool {
+                (9...13).contains(unit) || (28...32).contains(unit) || (0x2000...0x200a).contains(unit)
+                    || [0xa0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000].contains(unit)
+            }
+            let units = Array(source.utf16)
+            var lines: [ArraySlice<UInt16>] = [], start = 0, index = 0
+            while index < units.count {
+                if units[index] == 10 || units[index] == 13 {
+                    lines.append(units[start..<index])
+                    if units[index] == 13, index + 1 < units.count, units[index + 1] == 10 { index += 1 }
+                    start = index + 1
+                }
+                index += 1
+            }
+            lines.append(units[start..<units.count])
+            let indent = lines.compactMap { line -> Int? in
+                let prefix = line.prefix(while: whitespace).count
+                return prefix == line.count ? nil : prefix
+            }.min() ?? 0
+            var result: [UInt16] = []
+            var emitted = false
+            for (index, line) in lines.enumerated() {
+                if (index == 0 || index == lines.count - 1), line.allSatisfy(whitespace) { continue }
+                if emitted { result.append(10) }
+                result.append(contentsOf: line.dropFirst(indent))
+                emitted = true
+            }
+            return string(String(decoding: result, as: UTF16.self))
         }
         for (name, isSuffix) in [("removePrefix", false), ("removeSuffix", true)] {
             bridge.register(
@@ -6685,6 +6940,23 @@ public final class HostBridge {
                 throw VMError.verify("Boxing.boxBoolean argument")
             }
             return boxedBoolean(value != 0)
+        }
+        bridge.register(class: "Ljava/lang/Float;", "valueOf", prototype: "(F)Ljava/lang/Float;", isStatic: true) { _, args in
+            guard case let .float(value) = try argument(args, 0, "Float.valueOf") else {
+                throw VMError.verify("Float.valueOf argument")
+            }
+            return boxedFloat(value)
+        }
+        bridge.register(
+            class: "Lkotlin/coroutines/jvm/internal/Boxing;",
+            "boxFloat",
+            prototype: "(F)Ljava/lang/Float;",
+            isStatic: true
+        ) { _, args in
+            guard case let .float(value) = try argument(args, 0, "Boxing.boxFloat") else {
+                throw VMError.verify("Boxing.boxFloat argument")
+            }
+            return boxedFloat(value)
         }
         bridge.register(
             class: "Lkotlin/coroutines/jvm/internal/Boxing;",
@@ -7751,6 +8023,16 @@ public final class HostBridge {
         }
         bridge.register(
             class: collections,
+            "asReversed",
+            prototype: "(Ljava/util/List;)Ljava/util/List;",
+            isStatic: true
+        ) { _, args in
+            let source = try listBox(args, "CollectionsKt.asReversed")
+            try requireCollectionCapacity(source.elements.count, "CollectionsKt.asReversed")
+            return .obj(ObjInstance(dexType: "Ljava/util/List;", payload: HostListBox(reversing: source), isHost: true))
+        }
+        bridge.register(
+            class: collections,
             "toMutableList",
             prototype: "(Ljava/util/Collection;)Ljava/util/List;",
             isStatic: true
@@ -8731,6 +9013,13 @@ public final class HostBridge {
         let textFilter = "Leu/kanade/tachiyomi/source/model/Filter$Text;"
         let triState = "Leu/kanade/tachiyomi/source/model/Filter$TriState;"
         let filterList = "Leu/kanade/tachiyomi/source/model/FilterList;"
+        for descriptor in ["Leu/kanade/tachiyomi/source/model/Filter;", checkBox, group, header, select, separator, sort, textFilter, triState] {
+            bridge.register(class: descriptor, "getName", prototype: "()Ljava/lang/String;") { _, args in
+                guard case let .obj(object) = try argument(args, 0, "Filter.getName"),
+                      let filter = object.payload as? FilterStateBox else { throw VMError.verify("Filter.getName receiver") }
+                return string(filter.name)
+            }
+        }
         for descriptor in [
             checkBox, group, header, select, separator, sort, sortSelection,
             textFilter, triState, filterList,
@@ -8837,7 +9126,7 @@ public final class HostBridge {
         }
 
         func registerSelectConstructor(_ prototype: String, hasDefaultMask: Bool) {
-            bridge.register(class: select, "<init>", prototype: prototype) { _, args in
+            bridge.register(class: select, "<init>", prototype: prototype) { vm, args in
                 guard case let .obj(object) = try argument(args, 0, "Filter.Select.<init>"),
                       case let .arr(rawValues) = try argument(args, 2, "Filter.Select.<init>"),
                       case let .int(rawState) = try argument(args, 3, "Filter.Select.<init>") else {
@@ -8852,13 +9141,12 @@ public final class HostBridge {
                 } else {
                     state = rawState
                 }
-                guard let values = filterStringValues(rawValues) else {
-                    throw VMError.verify("Filter.Select values")
-                }
+                let values = try filterSelectValues(rawValues, vm: vm)
                 object.payload = FilterStateBox(
                     kind: .select,
                     name: vmStringValue(try argument(args, 1, "Filter.Select.<init>")),
                     values: values,
+                    selectValues: rawValues,
                     state: boxedInteger(state)
                 )
                 return .null
@@ -8881,10 +9169,8 @@ public final class HostBridge {
                   case .select = filter.kind else {
                 throw VMError.verify("Filter.Select.getValues receiver")
             }
-            return .arr(ArrInstance(
-                elemDescriptor: "Ljava/lang/Object;",
-                elements: filter.values.map(Self.string)
-            ))
+            guard let values = filter.selectValues else { throw VMError.verify("Filter.Select missing values") }
+            return .arr(values)
         }
 
         func registerSortConstructor(_ prototype: String, hasDefaultMask: Bool) {
@@ -9048,6 +9334,30 @@ public final class HostBridge {
         return filter.state
     }
 
+    /// UI labels are a bounded snapshot; the DEX getter keeps the original
+    /// typed array so object options retain their identity and query fields.
+    private static func filterSelectValues(_ array: ArrInstance, vm: DexInterpreter) throws -> [String] {
+        guard array.elements.count <= 512 else { throw VMError.verify("Filter.Select too many values") }
+        var labels: [String] = [], bytes = 0
+        for value in array.elements {
+            guard case let .obj(object) = value else { throw VMError.verify("Filter.Select non-object option") }
+            let label: String
+            if object.dexType == "Ljava/lang/String;", let string = object.payload as? String { label = string }
+            else {
+                let rendered = try vm.callVirtualEntry(receiver: value, method: "toString", prototype: "()Ljava/lang/String;", args: [value])
+                guard case let .obj(string) = rendered, string.dexType == "Ljava/lang/String;",
+                      let content = string.payload as? String else { throw VMError.verify("Filter.Select option label") }
+                label = content
+            }
+            guard label.utf8.count <= 4_096, bytes <= 256 * 1_024 - label.utf8.count else {
+                throw VMError.verify("Filter.Select option labels exceed limit")
+            }
+            bytes += label.utf8.count
+            labels.append(label)
+        }
+        return labels
+    }
+
     private static func filterStringValues(_ array: ArrInstance) -> [String]? {
         guard array.elements.count <= 512 else { return nil }
         var strings: [String] = []
@@ -9062,6 +9372,141 @@ public final class HostBridge {
             strings.append(string)
         }
         return strings
+    }
+
+    private static func registerCookieSurface(_ bridge: HostBridge) {
+        let cookieType = "Lokhttp3/Cookie;", builderType = "Lokhttp3/Cookie$Builder;"
+        let jarType = "Lokhttp3/CookieJar;", companionType = "Lokhttp3/Cookie$Companion;"
+        func cookie(_ args: [RVal], _ operation: String) throws -> CompatHTTPCookie {
+            guard case let .obj(object) = try argument(args, 0, operation),
+                  object.dexType == cookieType, let value = object.payload as? CompatHTTPCookie else {
+                throw VMError.verify("\(operation) receiver")
+            }
+            return value
+        }
+        func builder(_ args: [RVal], _ operation: String) throws -> CookieBuilderBox {
+            guard case let .obj(object) = try argument(args, 0, operation),
+                  object.dexType == builderType, let value = object.payload as? CookieBuilderBox else {
+                throw VMError.verify("\(operation) receiver")
+            }
+            return value
+        }
+        func url(_ args: [RVal], _ index: Int, _ operation: String) throws -> URL {
+            guard case let .obj(object) = try argument(args, index, operation),
+                  object.dexType == "Lokhttp3/HttpUrl;", let box = object.payload as? HttpUrlBox,
+                  let url = URL(string: box.value) else { throw VMError.verify("\(operation) URL") }
+            return url
+        }
+        func jar(_ args: [RVal], _ operation: String) throws -> CompatHTTPCookieJar {
+            guard case let .obj(object) = try argument(args, 0, operation),
+                  object.dexType == jarType, let value = object.payload as? CompatHTTPCookieJar else {
+                throw VMError.verify("\(operation) receiver")
+            }
+            return value
+        }
+        func value(_ cookie: CompatHTTPCookie) -> RVal {
+            .obj(ObjInstance(dexType: cookieType, payload: cookie, isHost: true))
+        }
+        bridge.register(class: "Lokhttp3/OkHttpClient;", "cookieJar", prototype: "()Lokhttp3/CookieJar;") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "OkHttpClient.cookieJar"),
+                  object.payload is OkHttpClientBox else { throw VMError.verify("OkHttpClient.cookieJar receiver") }
+            return bridge.cookieJarValue
+        }
+        bridge.register(class: jarType, "loadForRequest", prototype: "(Lokhttp3/HttpUrl;)Ljava/util/List;") { _, args in
+            let cookies = try jar(args, "CookieJar.loadForRequest").load(for: url(args, 1, "CookieJar.loadForRequest"))
+            return hostList(cookies.map(value), isMutable: false)
+        }
+        bridge.register(class: jarType, "saveFromResponse", prototype: "(Lokhttp3/HttpUrl;Ljava/util/List;)V") { _, args in
+            let store = try jar(args, "CookieJar.saveFromResponse")
+            let target = try url(args, 1, "CookieJar.saveFromResponse")
+            let values = try listBox(args, "CookieJar.saveFromResponse", index: 2).elements
+            guard values.count <= CompatHTTPCookieJar.maximumCookies else {
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "CookieJar batch exceeds limit")
+            }
+            // Validate the entire batch before any mutation.
+            let cookies = try values.map { try cookie([$0], "CookieJar.saveFromResponse") }
+            store.save(cookies, for: target)
+            return .null
+        }
+        for (name, keyPath) in [("name", \CompatHTTPCookie.name), ("value", \.value), ("domain", \.domain), ("path", \.path)] {
+            bridge.register(class: cookieType, name, prototype: "()Ljava/lang/String;") { _, args in
+                string(try cookie(args, "Cookie.\(name)")[keyPath: keyPath])
+            }
+        }
+        for (name, keyPath) in [("secure", \CompatHTTPCookie.secure), ("httpOnly", \.httpOnly), ("persistent", \.persistent), ("hostOnly", \.hostOnly)] {
+            bridge.register(class: cookieType, name, prototype: "()Z") { _, args in
+                .int(try cookie(args, "Cookie.\(name)")[keyPath: keyPath] ? 1 : 0)
+            }
+        }
+        bridge.register(class: cookieType, "expiresAt", prototype: "()J") { _, args in .long(try cookie(args, "Cookie.expiresAt").expiresAt) }
+        bridge.register(class: cookieType, "matches", prototype: "(Lokhttp3/HttpUrl;)Z") { _, args in
+            .int(try cookie(args, "Cookie.matches").matches(url(args, 1, "Cookie.matches")) ? 1 : 0)
+        }
+        bridge.staticFields["\(cookieType)->Companion"] = .obj(ObjInstance(dexType: companionType, isHost: true))
+        bridge.register(class: companionType, "parse", prototype: "(Lokhttp3/HttpUrl;Ljava/lang/String;)Lokhttp3/Cookie;") { _, args in
+            let input = try requiredString(args, 2, "Cookie.parse")
+            return try CompatHTTPCookie.parse(input, url: url(args, 1, "Cookie.parse")).map(value) ?? .null
+        }
+        bridge.objectFactories[builderType] = { _ in .obj(ObjInstance(dexType: builderType, payload: CookieBuilderBox(), isHost: true)) }
+        bridge.register(class: builderType, "<init>", prototype: "()V") { _, args in
+            guard case let .obj(object) = try argument(args, 0, "Cookie.Builder.<init>"), object.dexType == builderType else {
+                throw VMError.verify("Cookie.Builder constructor")
+            }
+            object.payload = CookieBuilderBox()
+            return .null
+        }
+        for name in ["name", "value", "domain", "hostOnlyDomain", "path"] {
+            bridge.register(class: builderType, name, prototype: "(Ljava/lang/String;)Lokhttp3/Cookie$Builder;") { _, args in
+                let box = try builder(args, "Cookie.Builder.\(name)")
+                let input = try requiredString(args, 1, "Cookie.Builder.\(name)")
+                guard input.utf8.count <= CompatHTTPCookie.maximumBytes else {
+                    throw hostThrowable("Ljava/lang/IllegalArgumentException;", "Cookie field exceeds limit")
+                }
+                switch name {
+                case "name", "value":
+                    guard input.trimmingCharacters(in: .whitespacesAndNewlines) == input else {
+                        throw hostThrowable("Ljava/lang/IllegalArgumentException;", "Cookie field is not trimmed")
+                    }
+                    if name == "name" { box.name = input } else { box.value = input }
+                case "domain", "hostOnlyDomain":
+                    guard let domain = CompatHTTPCookie.canonicalHost(input) else {
+                        throw hostThrowable("Ljava/lang/IllegalArgumentException;", "Cookie domain is invalid")
+                    }
+                    box.cookie.domain = domain
+                    box.cookie.hostOnly = name == "hostOnlyDomain"
+                default:
+                    guard input.hasPrefix("/") else { throw hostThrowable("Ljava/lang/IllegalArgumentException;", "Cookie path is invalid") }
+                    box.cookie.path = input
+                }
+                return args[0]
+            }
+        }
+        bridge.register(class: builderType, "expiresAt", prototype: "(J)Lokhttp3/Cookie$Builder;") { _, args in
+            let box = try builder(args, "Cookie.Builder.expiresAt")
+            guard case let .long(expiry) = try argument(args, 1, "Cookie.Builder.expiresAt") else { throw VMError.verify("Cookie expiry") }
+            box.cookie.expiresAt = expiry <= 0 ? Int64.min : min(expiry, CompatHTTPCookie.maximumExpiry)
+            box.cookie.persistent = true
+            return args[0]
+        }
+        for name in ["secure", "httpOnly"] {
+            bridge.register(class: builderType, name, prototype: "()Lokhttp3/Cookie$Builder;") { _, args in
+                let box = try builder(args, "Cookie.Builder.\(name)")
+                if name == "secure" { box.cookie.secure = true } else { box.cookie.httpOnly = true }
+                return args[0]
+            }
+        }
+        bridge.register(class: builderType, "build", prototype: "()Lokhttp3/Cookie;") { _, args in
+            let box = try builder(args, "Cookie.Builder.build")
+            guard let name = box.name, let content = box.value, !box.cookie.domain.isEmpty else {
+                throw hostThrowable("Ljava/lang/NullPointerException;", "Cookie builder is incomplete")
+            }
+            var cookie = box.cookie
+            cookie.name = name; cookie.value = content
+            guard cookie.byteCount <= CompatHTTPCookie.maximumBytes else {
+                throw hostThrowable("Ljava/lang/IllegalArgumentException;", "Cookie exceeds limit")
+            }
+            return value(cookie)
+        }
     }
 
     private static func registerOkHttpRequestSurface(_ bridge: HostBridge) {
@@ -9294,15 +9739,9 @@ public final class HostBridge {
                 }
                 let callValue = RVal.obj(callObject)
                 let callbackValue = RVal.obj(callbackObject)
-                func failureValue(_ message: String) -> RVal {
-                    .obj(ObjInstance(
-                        dexType: "Ljava/io/IOException;",
-                        payload: message,
-                        isHost: true
-                    ))
-                }
+                let responseValue: RVal
                 do {
-                    let responseValue = try await execute(
+                    responseValue = try await execute(
                         callValue: callValue,
                         call,
                         vm: vm,
@@ -9310,30 +9749,33 @@ public final class HostBridge {
                         policy: bridge.transportPolicy,
                         requiresSuccess: false
                     )
-                    try await vm.callNestedAsync(
-                        classDescriptor: callbackObject.dexType,
-                        method: "onResponse",
-                        prototype: "(Lokhttp3/Call;Lokhttp3/Response;)V",
-                        args: [callbackValue, callValue, responseValue]
-                    )
                 } catch is CancellationError {
                     throw VMError.cancelled
                 } catch let error as VMError {
-                    if case .cancelled = error { throw error }
+                    // Instruction, verifier and cancellation guards must not
+                    // become a recoverable network callback or a false success.
+                    throw error
+                } catch let thrown as DEXThrowable {
+                    guard case let .obj(failure) = thrown.value,
+                          DexTypeHierarchy(dex: vm.dex).assignability(from: failure.dexType, to: "Ljava/io/IOException;", strict: true) == .yes else {
+                        throw thrown
+                    }
                     try await vm.callNestedAsync(
                         classDescriptor: callbackObject.dexType,
                         method: "onFailure",
                         prototype: "(Lokhttp3/Call;Ljava/io/IOException;)V",
-                        args: [callbackValue, callValue, failureValue("network request failed")]
+                        args: [callbackValue, callValue, thrown.value]
                     )
-                } catch {
-                    try await vm.callNestedAsync(
-                        classDescriptor: callbackObject.dexType,
-                        method: "onFailure",
-                        prototype: "(Lokhttp3/Call;Ljava/io/IOException;)V",
-                        args: [callbackValue, callValue, failureValue("network request failed")]
-                    )
+                    return .null
                 }
+                // Exceptions thrown by onResponse belong to that callback;
+                // they must not cause a second callback to onFailure.
+                try await vm.callNestedAsync(
+                    classDescriptor: callbackObject.dexType,
+                    method: "onResponse",
+                    prototype: "(Lokhttp3/Call;Lokhttp3/Response;)V",
+                    args: [callbackValue, callValue, responseValue]
+                )
                 return .null
             }
 
@@ -12643,16 +13085,21 @@ public final class HostBridge {
                     policy: policy
                 )
             case .ordinary, .readerNetworkSingleExchange, .readerNetworkOrdinary:
-                try policy.validate(request: request)
+                // URLSession already uses this same jar, including redirect
+                // exchanges. Injected transports receive equivalent cookie
+                // headers and publish validated response cookies here.
+                let outgoing = transport is any CompatHTTPCookieStoreProviding
+                    ? request : vm.bridge.cookieJar.applying(to: request)
+                try policy.validate(request: outgoing)
                 let response: CompatHTTPResponse
                 if execution.mode == .readerNetworkSingleExchange {
                     guard let singleExchange = transport
                         as? any CompatHTTPSingleExchangeTransport else {
                         throw VMError.verify("reader image single-exchange transport is unavailable")
                     }
-                    response = try await singleExchange.executeSingleExchange(request)
+                    response = try await singleExchange.executeSingleExchange(outgoing)
                 } else {
-                    response = try await transport.execute(request)
+                    response = try await transport.execute(outgoing)
                 }
                 try checkInterceptorCancellation(call: execution.call, vm: vm)
                 try validateTransportResponse(
@@ -12660,6 +13107,7 @@ public final class HostBridge {
                     request: request,
                     policy: policy
                 )
+                vm.bridge.cookieJar.store(from: response)
                 return responseValue(
                     response,
                     request: request,
@@ -13074,8 +13522,8 @@ func vmStringValue(_ v: RVal) -> String {
     case .null: return "null"
     case let .int(i): return String(i)
     case let .long(l): return String(l)
-    case let .float(f): return String(f)
-    case let .double(d): return String(d)
+    case let .float(f): return JVMFloatingPointText.string(f)
+    case let .double(d): return JVMFloatingPointText.string(d)
     case let .arr(a): return "[array \(a.elemDescriptor) x\(a.elements.count)]"
     }
 }

@@ -36,6 +36,7 @@ public final class ObjInstance {
         self.fields = fields
         self.payload = payload
         self.isHost = isHost
+        RuntimeObjectOwnership.current?.register(self)
     }
 }
 
@@ -47,6 +48,7 @@ public final class ArrInstance {
     public init(elemDescriptor: String, elements: [RVal]) {
         self.elemDescriptor = elemDescriptor
         self.elements = elements
+        RuntimeObjectOwnership.current?.register(self)
     }
 }
 

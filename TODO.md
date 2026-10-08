@@ -6,7 +6,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` complete · `[!]` blocke
 ## Active continuation — 2026-10-07
 
 The full native-reader and compatibility objective remains active. The current
-continuation adds separately opt-in chapter notifications for saved discoveries,
+continuation integrates exact MangaPanda.onl 1.6.36 operations, typed/dynamic
+filters, cookies, callbacks and configured reader images, with cancellation
+recovery, bounded session retirement and persisted admission regressions. See
+[measured verification](docs/VERIFICATION-2026-10-07-MANGAPANDA.md). Live-site
+availability, wider extension support and device interaction remain open.
+It follows separately opt-in chapter notifications for saved discoveries,
 with explicit foreground permission, durable batch claims, interruption
 reconciliation and one-scene navigation into current Updates. Initial baselines
 are silent; uncertain delivery is visible and never blindly replayed. Physical

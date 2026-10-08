@@ -28,7 +28,8 @@ let package = Package(
                 .product(name: "SwiftSoup", package: "SwiftSoup"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
-            ]
+            ],
+            resources: [.copy("Resources/public_suffix_list.dat")]
         ),
         .executableTarget(
             name: "CompatAudit",

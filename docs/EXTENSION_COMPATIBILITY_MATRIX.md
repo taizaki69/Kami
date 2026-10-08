@@ -1,7 +1,7 @@
 # Extension Compatibility Matrix
 
-**Current continuation: 2026-10-03.** Current test and CI results belong in
-[VERIFICATION-2026-10-03.md](VERIFICATION-2026-10-03.md). The historical matrix
+**Current continuation: 2026-10-07.** MangaPanda, session recovery and current
+verification are recorded in [the measured increment](VERIFICATION-2026-10-07-MANGAPANDA.md). The historical matrix
 below records the earlier checkpoint and must not be used for current totals.
 
 ## Current exact catalog and limits
@@ -19,6 +19,7 @@ below records the earlier checkpoint and must not be used for current totals.
 | EternalMangas | 1.6.28 | Metadata/filters and real-APK popular/latest/search/details/chapters/pages fixtures |
 | DocTruyen3Q | 1.6.38 | Core operations, bounded genre refresh, filtered search and page deduplication |
 | FoolSlide Customizable | 1.6.6 | Configured HTTPS source, strict real-APK operations and page-URL image projection |
+| MangaPanda.onl | 1.6.36 | Core operations, typed/dynamic filters, source cookie key, callbacks, configured image client and cancellation recovery |
 
 These are exact-byte profiles, not family-wide compatibility claims. Full
 hashes, package/version identities and fixture provenance remain in
@@ -44,8 +45,8 @@ do not claim distinct paginated search results.
 ## Current corpus measurement
 
 The corpus remains 27 hash-locked artifacts and 19 current lib 1.6 APKs. Its
-roles are thirteen execution fixtures (eleven current profiles plus two legacy
-constructor fixtures), eight measurement-only fixtures and six AOSP signature
+roles are fourteen execution fixtures (twelve current profiles plus two legacy
+constructor fixtures), seven measurement-only fixtures and six AOSP signature
 conformance fixtures. EternalMangas and DocTruyen3Q already had execution tests
 before this continuation; correcting their roles repairs bookkeeping.
 
@@ -55,11 +56,10 @@ Historical paths under `measurement/` are retained. Use manifest roles:
 ./scripts/linux-dev audit gaps Tests/corpus --role measurement
 ```
 
-The remaining structural candidates are Hayalistic, MangaPandaOnl, PixivComic
-and ReadManga. Komga, MangaPlus, NHentai.xxx and XCOMIC retain structural
+The remaining structural candidates are Hayalistic, PixivComic and ReadManga. Komga, MangaPlus, NHentai.xxx and XCOMIC retain structural
 wrapper blockers. The dated verification record reports the final deterministic
-audit and explains the inherited host-registration delta separately from role
-changes. Static gaps do not measure runtime coverage or authorize execution.
+audit (330 unique unregistered surfaces) and separates the host-registration
+delta from role changes. Static gaps do not measure runtime coverage or authorize execution.
 
 ## Historical matrix — 2026-09-18
 

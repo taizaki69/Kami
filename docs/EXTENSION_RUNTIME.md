@@ -1,6 +1,19 @@
 # Extension Runtime — Measured Status and Staged Plan
 
-## Current continuation — 2026-10-03
+## Current continuation — 2026-10-07
+
+MangaPanda.onl 1.6.36 is now the twelfth exact current lib 1.6 profile. Its
+real-APK fixtures cover core operations, dynamic/typed filters, cookie-key
+acquisition, callback execution and the configured reader-image client. Private
+pinned sessions recover from uncatchable VM/cancellation guards only after work
+drains, revoke old image capabilities, and require refresh of discarded dynamic
+filter schemas. Session retirement releases DEX object cycles and host closures.
+The bounded cookie model shares one source jar with URLSession and uses a
+vendored public-suffix resource. See [verification and limits](VERIFICATION-2026-10-07-MANGAPANDA.md)
+for identities, bounds, regression scope and resource provenance. General
+extension/OkHttp/Android compatibility and live-site availability remain unproven.
+
+## Earlier continuation — 2026-10-03
 
 The current exact catalog additionally includes EternalMangas 1.6.28,
 DocTruyen3Q 1.6.38 and FoolSlide Customizable 1.6.6. Follow the

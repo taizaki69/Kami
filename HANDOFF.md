@@ -2,7 +2,26 @@
 
 Last updated: 2026-10-07 (America/Lima)
 
-## Canonical continuation — 2026-10-07
+## Canonical continuation — MangaPanda, 2026-10-07
+
+Branch `assistant/mangapanda-compatibility-20261007` starts at
+`d0cf165c9f0d22fb7f3d17781e6b29792eb3a1db` from
+[PR #33](https://github.com/taizaki69/Kami/pull/33), ready/open/unmerged, with
+all five checks verified against that base's tree. This increment promotes
+exact MangaPanda.onl 1.6.36 after offline real-APK operations, callback/image
+execution, cancellation/drainage and persisted factory admission tests.
+Private VM sessions now rebuild after guard failures and retire their cycles;
+old images and stale dynamic schemas fail before transport. See
+[verification and limits](docs/VERIFICATION-2026-10-07-MANGAPANDA.md).
+Checkpoint: `.git/checkpoints/20261007-mangapanda/`.
+The corpus is 14 execution / 7 measurement / 6 conformance; hashes and paths
+are unchanged. Static gaps fell 359 → 331 from host registrations, then 330
+from the role change. Linux verification passes 430 Compat and 510 Core/SQLite.
+Use the implementation PR for exact-head Apple status; keep it unmerged.
+Continue the broad reader/compatibility goal, including device verification,
+region decoding, broader import and further evidence-backed source support.
+
+## Earlier chapter-notifications continuation — 2026-10-07
 
 The active branch is `assistant/chapter-notifications-20261007`, based on
 `e0bf2d7b4fefc0208dd3fb092536c4ba84602841` from

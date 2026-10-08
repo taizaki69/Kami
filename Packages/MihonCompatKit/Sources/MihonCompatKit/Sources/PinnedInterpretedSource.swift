@@ -438,6 +438,26 @@ public struct PinnedInterpretedSource: InterpretedCompatibilityReportingSource {
         )
     }
 
+    /// Loads the exact MangaPanda 1.6.36 artifact through production transport.
+    public static func mangaPandaOnl1636(
+        apkBytes: [UInt8],
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        let profile = PinnedInterpretedProfile.mangaPandaOnl1636
+        let transport = URLSessionCompatHTTPTransport(sourceID: profile.networkIdentity, policy: transportPolicy)
+        return try Self(profile: profile, apkBytes: apkBytes,
+            transport: transport, transportPolicy: transportPolicy)
+    }
+
+    /// Injection seam for deterministic MangaPanda tests.
+    public static func mangaPandaOnl1636(
+        apkBytes: [UInt8], transport: any CompatHTTPTransport,
+        transportPolicy: CompatHTTPTransportPolicy = .init(allowsInsecureHTTP: false)
+    ) throws -> Self {
+        try Self(profile: .mangaPandaOnl1636, apkBytes: apkBytes,
+            transport: transport, transportPolicy: transportPolicy)
+    }
+
     /// Injection seam for deterministic Mangas-Origines.fr tests.
     public static func mangasOriginesFR1658(
         apkBytes: [UInt8],
@@ -689,6 +709,7 @@ public enum InterpretedExtensionProfileCatalog {
             .eternalmangas1628,
             .docTruyen3Q1638,
             .foolSlideCustomizable166,
+            .mangaPandaOnl1636,
         ]
         return profiles.first {
             $0.packageName == packageName &&
@@ -698,7 +719,7 @@ public enum InterpretedExtensionProfileCatalog {
     }
 }
 
-private struct PinnedInterpretedMetadata: Sendable {
+private struct PinnedInterpretedMetadata: Sendable, Equatable {
     let id: Int64
     let name: String
     let language: String
@@ -760,7 +781,15 @@ private struct PinnedInterpretedProfile: Sendable {
 
     enum ImageRequestSupport: Sendable {
         case pageURL
+        case pageURLWithClient
         case interpreted
+
+        var usesPageURL: Bool {
+            switch self {
+            case .pageURL, .pageURLWithClient: return true
+            case .interpreted: return false
+            }
+        }
     }
 
     let identifier: String
@@ -942,6 +971,19 @@ private struct PinnedInterpretedProfile: Sendable {
         preferenceSupport: .foolSlideCustomizable,
         imageRequestSupport: .pageURL
     )
+
+    static let mangaPandaOnl1636 = PinnedInterpretedProfile(
+        identifier: "mangapandaonl-1.6.36",
+        sha256: "00ba5d0cfd65132b6feffee60b7c8d5eca23c4ce4bd5687c7908e6c9f15a3166",
+        signerFingerprint: "9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
+        maximumAPKBytes: 64 * 1024 * 1024,
+        packageName: "eu.kanade.tachiyomi.extension.en.mangapandaonl",
+        versionName: "1.6.36", versionCode: 36,
+        expectedSourceID: 0x6a52d2d1fc303a8e,
+        filterSupport: .dynamicList(expectedBlockDescriptor: "Lc1;", maximumJobs: 3),
+        preferenceSupport: .none,
+        imageRequestSupport: .pageURLWithClient
+    )
 }
 
 private actor PinnedInterpretedRuntime {
@@ -962,15 +1004,52 @@ private actor PinnedInterpretedRuntime {
 
     private let profile: PinnedInterpretedProfile
     private let transportPolicy: CompatHTTPTransportPolicy
-    private let bridge: HostBridge
-    private let vm: DexInterpreter
-    private let receiver: RVal
-    private let entryClassDescriptor: String
-    private let sourceAPIWrapperDescriptor: String
-    private var filterListValue: RVal?
-    private let pageURLImageHeaders: [String: String]
-    private let pageURLImageSourceBaseURL: String?
-    private let imageClientValue: RVal?
+    /// Retains only authenticated, parsed input and immutable configuration.
+    /// No mutable DEX objects from an aborted session enter its replacement.
+    private struct SessionSeed {
+        let dex: DexFile
+        let resources: InterpretedAPKResources
+        let entryClassDescriptor: String
+        let transport: any CompatHTTPTransport
+        let preferences: InterpretedExtensionPreferences
+    }
+    private final class SessionLifetime {
+        let objects: RuntimeObjectOwnership
+        let bridge: HostBridge
+        init(objects: RuntimeObjectOwnership, bridge: HostBridge) {
+            self.objects = objects
+            self.bridge = bridge
+        }
+        deinit {
+            objects.retire()
+            bridge.retire()
+        }
+    }
+    private struct Session {
+        let lifetime: SessionLifetime
+        let metadata: PinnedInterpretedMetadata
+        let initialFilters: [SourceFilter]
+        let bridge: HostBridge
+        let vm: DexInterpreter
+        let receiver: RVal
+        var filterListValue: RVal?
+        let pageURLImageHeaders: [String: String]
+        let pageURLImageSourceBaseURL: String?
+        let imageClientValue: RVal?
+    }
+    private let sessionSeed: SessionSeed
+    private var session: Session
+    private var sessionNeedsReplacement = false
+    private var bridge: HostBridge { session.bridge }
+    private var vm: DexInterpreter { session.vm }
+    private var receiver: RVal { session.receiver }
+    private var filterListValue: RVal? {
+        get { session.filterListValue }
+        set { session.filterListValue = newValue }
+    }
+    private var pageURLImageHeaders: [String: String] { session.pageURLImageHeaders }
+    private var pageURLImageSourceBaseURL: String? { session.pageURLImageSourceBaseURL }
+    private var imageClientValue: RVal? { session.imageClientValue }
     private let compatibilityRecorder: InterpretedCompatibilityRecorder
     private var retainedImageRequests: [UUID: RetainedImageRequest] = [:]
     private var executing = false
@@ -1034,9 +1113,34 @@ private actor PinnedInterpretedRuntime {
 
         let archive = try ZipArchive(apkBytes)
         let dex = try DexFile(try archive.data(named: plan.dexEntryName))
-        let entryClassDescriptor = plan.entryClassDescriptor
-        let sourceAPIWrapperDescriptor = plan.sourceAPIWrapperDescriptor
+        let seed = SessionSeed(dex: dex, resources: try .localization(from: archive),
+            entryClassDescriptor: plan.entryClassDescriptor, transport: transport, preferences: preferences)
+        let session = try Self.makeSession(seed: seed, profile: profile, transportPolicy: transportPolicy)
+        self.profile = profile
+        self.transportPolicy = transportPolicy
+        self.sessionSeed = seed
+        self.session = session
+        self.compatibilityRecorder = compatibilityRecorder
+        self.filterSnapshot = PinnedFilterSnapshot(session.initialFilters)
+        self.metadata = session.metadata
+    }
 
+    private static func makeSession(
+        seed: SessionSeed, profile: PinnedInterpretedProfile,
+        transportPolicy: CompatHTTPTransportPolicy
+    ) throws -> Session {
+        let objects = RuntimeObjectOwnership()
+        return try objects.perform {
+            try makeOwnedSession(seed: seed, profile: profile, transportPolicy: transportPolicy, objects: objects)
+        }
+    }
+
+    private static func makeOwnedSession(
+        seed: SessionSeed, profile: PinnedInterpretedProfile,
+        transportPolicy: CompatHTTPTransportPolicy, objects: RuntimeObjectOwnership
+    ) throws -> Session {
+        let entryClassDescriptor = seed.entryClassDescriptor
+        let preferences = seed.preferences
         let extensionPackageName: String?
         switch profile.preferenceSupport {
         case .none:
@@ -1051,14 +1155,21 @@ private actor PinnedInterpretedRuntime {
             extensionPackageName = profile.packageName
         }
         let bridge = HostBridge.minimal(
-            transport: transport,
+            transport: seed.transport,
             transportPolicy: transportPolicy,
             extensionPackageName: extensionPackageName,
             preferences: preferences,
-            resources: try .localization(from: archive)
+            resources: seed.resources
         )
+        var retained = false
+        defer {
+            if !retained {
+                objects.retire()
+                bridge.retire()
+            }
+        }
         let vm = DexInterpreter(
-            dex: dex,
+            dex: seed.dex,
             bridge: bridge,
             cancelled: { Task.isCancelled }
         )
@@ -1125,7 +1236,7 @@ private actor PinnedInterpretedRuntime {
 
         let pageURLImageHeaders: [String: String]
         let pageURLImageSourceBaseURL: String?
-        if case .pageURL = profile.imageRequestSupport {
+        if profile.imageRequestSupport.usesPageURL {
             guard let getHeaders = bridge.resolve(
                 class: "Leu/kanade/tachiyomi/source/online/HttpSource;",
                 "getHeaders",
@@ -1151,8 +1262,13 @@ private actor PinnedInterpretedRuntime {
         // disabled; otherwise the reader keeps the existing URL/header path
         // instead of turning an optional transform into a page-load failure.
         let imageClientValue: RVal?
-        if case .interpreted = profile.imageRequestSupport,
-           preferences.strings["BAOZI_BANNER"] == "0" {
+        let retainImageClient: Bool
+        switch profile.imageRequestSupport {
+        case .pageURL: retainImageClient = false
+        case .pageURLWithClient: retainImageClient = true
+        case .interpreted: retainImageClient = preferences.strings["BAOZI_BANNER"] == "0"
+        }
+        if retainImageClient {
             let client = try vm.callVirtualEntry(
                 receiver: receiver,
                 method: "getClient",
@@ -1167,26 +1283,34 @@ private actor PinnedInterpretedRuntime {
             imageClientValue = nil
         }
 
-        self.profile = profile
-        self.transportPolicy = transportPolicy
-        self.bridge = bridge
-        self.vm = vm
-        self.receiver = receiver
-        self.entryClassDescriptor = entryClassDescriptor
-        self.sourceAPIWrapperDescriptor = sourceAPIWrapperDescriptor
-        self.filterListValue = filterListValue
-        self.pageURLImageHeaders = pageURLImageHeaders
-        self.pageURLImageSourceBaseURL = pageURLImageSourceBaseURL
-        self.imageClientValue = imageClientValue
-        self.compatibilityRecorder = compatibilityRecorder
-        self.filterSnapshot = PinnedFilterSnapshot(filters)
-        self.metadata = PinnedInterpretedMetadata(
-            id: id,
-            name: name,
-            language: language,
-            supportsLatest: rawSupportsLatest != 0,
-            baseURL: baseURL
+        retained = true
+        return Session(
+            lifetime: SessionLifetime(objects: objects, bridge: bridge),
+            metadata: PinnedInterpretedMetadata(id: id, name: name, language: language,
+                supportsLatest: rawSupportsLatest != 0, baseURL: baseURL),
+            initialFilters: filters, bridge: bridge, vm: vm, receiver: receiver,
+            filterListValue: filterListValue, pageURLImageHeaders: pageURLImageHeaders,
+            pageURLImageSourceBaseURL: pageURLImageSourceBaseURL, imageClientValue: imageClientValue
         )
+    }
+
+    private func invalidateSessionIfNeeded(_ error: Error) {
+        guard error is VMError || error is CancellationError else { return }
+        sessionNeedsReplacement = true
+        // Old capabilities cannot execute old clients against a new VM.
+        retainedImageRequests.removeAll()
+        filterSnapshot.replace(with: [])
+    }
+
+    private func prepareSession() throws {
+        guard sessionNeedsReplacement else { return }
+        let replacement = try Self.makeSession(seed: sessionSeed, profile: profile, transportPolicy: transportPolicy)
+        guard replacement.metadata == metadata else {
+            throw PinnedInterpretedSourceError.invalidMetadata(profile: profile.identifier)
+        }
+        session = replacement
+        filterSnapshot.replace(with: replacement.initialFilters)
+        sessionNeedsReplacement = false
     }
 
     func popular(page: Int) async throws -> MangasPageCompat {
@@ -1419,18 +1543,27 @@ private actor PinnedInterpretedRuntime {
                 sourceBaseURL: pageURLImageSourceBaseURL,
                 policy: transportPolicy
             )
-        case .interpreted:
+        case .interpreted, .pageURLWithClient:
             do {
                 try await acquire()
                 defer { release() }
                 try Task.checkCancellation()
-                let result = try withFirstCompatibilityGap(stage: .imageRequest) {
-                    try vm.callVirtualEntry(
-                        receiver: receiver,
-                        method: "imageRequest",
-                        prototype: "(Leu/kanade/tachiyomi/source/model/Page;)Lokhttp3/Request;",
-                        args: [receiver, HostBridge.pageValue(from: page)]
-                    )
+                let result: RVal
+                if profile.imageRequestSupport.usesPageURL {
+                    guard let snapshot = Self.pageURLImageRequest(page, headers: pageURLImageHeaders,
+                        sourceBaseURL: pageURLImageSourceBaseURL, policy: transportPolicy) else { return nil }
+                    result = .obj(ObjInstance(dexType: "Lokhttp3/Request;", payload: CompatHTTPRequest(
+                        url: snapshot.url, headers: snapshot.headers.map { CompatHTTPHeader(name: $0.key, value: $0.value) }
+                    ), isHost: true))
+                } else {
+                    result = try withFirstCompatibilityGap(stage: .imageRequest) {
+                        try vm.callVirtualEntry(
+                            receiver: receiver,
+                            method: "imageRequest",
+                            prototype: "(Leu/kanade/tachiyomi/source/model/Page;)Lokhttp3/Request;",
+                            args: [receiver, HostBridge.pageValue(from: page)]
+                        )
+                    }
                 }
                 try Task.checkCancellation()
                 guard let request = HostBridge.imageRequest(from: result) else {
@@ -1527,24 +1660,40 @@ private actor PinnedInterpretedRuntime {
         stage: InterpretedCompatibilityStage,
         operation: () throws -> T
     ) throws -> T {
-        try vm.withFirstCompatibilityGapObservation({ [compatibilityRecorder] error in
-            compatibilityRecorder.record(stage: stage, error: error)
-        }, operation: operation)
+        do {
+            return try session.lifetime.objects.perform {
+                try vm.withFirstCompatibilityGapObservation({ [compatibilityRecorder] error in
+                    compatibilityRecorder.record(stage: stage, error: error)
+                }, operation: operation)
+            }
+        } catch {
+            invalidateSessionIfNeeded(error)
+            throw error
+        }
     }
 
     private func withFirstCompatibilityGap<T>(
         stage: InterpretedCompatibilityStage,
         operation: () async throws -> T
     ) async throws -> T {
-        try await vm.withFirstCompatibilityGapObservation({ [compatibilityRecorder] error in
-            compatibilityRecorder.record(stage: stage, error: error)
-        }, operation: operation)
+        do {
+            return try await session.lifetime.objects.perform {
+                try await vm.withFirstCompatibilityGapObservation({ [compatibilityRecorder] error in
+                    compatibilityRecorder.record(stage: stage, error: error)
+                }, operation: operation)
+            }
+        } catch {
+            invalidateSessionIfNeeded(error)
+            throw error
+        }
     }
 
     private func acquire() async throws {
         try Task.checkCancellation()
         if !executing {
             executing = true
+            do { try prepareSession() }
+            catch { release(); throw error }
             return
         }
         guard waiters.count < 64 else {
@@ -1568,6 +1717,8 @@ private actor PinnedInterpretedRuntime {
             release()
             throw CancellationError()
         }
+        do { try prepareSession() }
+        catch { release(); throw error }
     }
 
     private func cancelWaiter(_ id: UInt64) {
