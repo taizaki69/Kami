@@ -841,6 +841,7 @@ public final class HostBridge {
                 } else if entry.value is NSNull {
                     // Null entries carry no string content for the bounded subset.
                 } else if let number = entry.value as? NSNumber,
+                          number.doubleValue.isFinite,
                           let data = try? JSONSerialization.data(
                               withJSONObject: number,
                               options: [.fragmentsAllowed]
@@ -6439,8 +6440,16 @@ public final class HostBridge {
     ) throws -> String {
         if let value = value as? String { return value }
         if value is NSNull { return "null" }
-        guard value is NSNumber,
-              let data = try? JSONSerialization.data(
+        guard let number = value as? NSNumber else {
+            throw VMError.verify("\(operation) primitive")
+        }
+        // Darwin JSONSerialization raises an Objective-C exception for NaN /
+        // infinity; Swift try/catch cannot safely contain it. Validate before
+        // that boundary while retaining the original integer NSNumber value.
+        guard number.doubleValue.isFinite else {
+            throw hostThrowable("Lkotlinx/serialization/SerializationException;", "non-finite JSON number")
+        }
+        guard let data = try? JSONSerialization.data(
                   withJSONObject: value,
                   options: [.fragmentsAllowed]
               ),

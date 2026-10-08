@@ -55,8 +55,21 @@ final class JSONBuilderContractTests: XCTestCase {
         XCTAssertEqual(try rendered(), #"{"key":99}"#, "Rejected writes leave the old value intact")
         _ = try put(.null, type: "Ljava/lang/String;")
         XCTAssertEqual(try rendered(), #"{"key":null}"#)
-        XCTAssertThrowsError(try put(.double(.infinity), type: "Ljava/lang/Number;"))
-        XCTAssertEqual(try rendered(), #"{"key":null}"#)
+        let nonfinite: [RVal] = [
+            .float(.nan), .float(.infinity), .float(-.infinity),
+            .double(.nan), .double(.infinity), .double(-.infinity),
+            .obj(ObjInstance(dexType: "Ljava/lang/Float;", payload: Float.infinity, isHost: true)),
+            .obj(ObjInstance(dexType: "Ljava/lang/Double;", payload: Double.nan, isHost: true)),
+        ]
+        for value in nonfinite {
+            XCTAssertThrowsError(try put(value, type: "Ljava/lang/Number;")) {
+                guard let thrown = $0 as? DEXThrowable, case let .obj(object) = thrown.value else { return XCTFail("\($0)") }
+                XCTAssertEqual(object.dexType, "Lkotlinx/serialization/SerializationException;")
+            }
+            XCTAssertEqual(try rendered(), #"{"key":null}"#)
+        }
+        _ = try put(.long(.max), type: "Ljava/lang/Number;")
+        XCTAssertEqual(try rendered(), #"{"key":9223372036854775807}"#, "Finite validation must preserve exact integers")
     }
 
     func testNestedBuilderRunsRealDEXAndCommitsAtomicallyWithinSharedBudget() throws {

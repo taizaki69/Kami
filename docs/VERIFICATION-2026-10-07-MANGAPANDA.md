@@ -77,8 +77,12 @@ schemas before HTTP, and verifies explicit genre refresh and a new search.
   captures under byte, capture, match, progress, time and cancellation limits.
   Reversed lists are read-only backed views. JSON object replacement returns the
   prior value and validates the complete candidate before mutation; nested
-  builder lambdas share the VM budget. HTTP callbacks deliver network IO failure
-  once and propagate VM guards or callback failures without redelivery.
+  builder lambdas share the VM budget. NaN and infinity are rejected before
+  Foundation JSON serialization, which raises an Objective-C exception on
+  Darwin for those inputs. Rejection preserves the old value and finite Int64
+  values retain their exact decimal representation. HTTP callbacks deliver
+  network IO failure once and propagate VM guards or callback failures without
+  redelivery.
 - Literal UTF-16 substring direction fixes `substringAfterLast`, including
   DocTruyen3Q's genre URL. Float/Double text retains signed zero, Java notation
   thresholds and exponent syntax; finite sampled bit patterns round-trip. The
